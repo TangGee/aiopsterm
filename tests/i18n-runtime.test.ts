@@ -72,6 +72,14 @@ describe('renderer i18n runtime', () => {
     expect(localeDirection('en-US')).toBe('ltr')
   })
 
+  it('translates project file menus, dialogs, and editor states', () => {
+    expect(translateWithLocale('zh-CN', 'projectFiles.copyRelativePath')).toBe('复制相对路径')
+    expect(translateWithLocale('en-US', 'projectFiles.dialog.createTitle')).toBe('Create file')
+    expect(translateWithLocale('ja-JP', 'projectFiles.editor.status.saved')).toBe('保存済み')
+    expect(translateWithLocale('de-DE', 'projectFiles.editor.status.saved')).toBe('Gespeichert')
+    expect(translateWithLocale('ar-AR', 'projectFiles.copyAbsolutePath')).toBe('نسخ المسار المطلق')
+  })
+
   it('keeps the Database table object label as an English technical term', () => {
     expect(translateWithLocale('zh-CN', 'database.object.tables')).toBe('table')
   })

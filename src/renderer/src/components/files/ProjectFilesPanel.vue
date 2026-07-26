@@ -19,16 +19,16 @@
         <button
           type="button"
           :disabled="loadingContext"
-          title="Refresh"
-          aria-label="Refresh project files"
+          :title="t('common.refresh')"
+          :aria-label="t('projectFiles.refresh')"
           @click="refreshAll"
         >
           <RefreshCw :class="{ rotating: loadingContext }" />
         </button>
         <button
           type="button"
-          title="Close"
-          aria-label="Close project files"
+          :title="t('common.close')"
+          :aria-label="t('projectFiles.close')"
           data-testid="project-files-close"
           @click="$emit('close')"
         >
@@ -49,7 +49,7 @@
         :style="{ height: `${splitPercent}%` }"
       >
         <div class="project-files-section-title">
-          <span>Recent changes</span>
+          <span>{{ t('projectFiles.recentChanges') }}</span>
         </div>
         <button
           v-for="entry in context.recent"
@@ -64,13 +64,13 @@
           <span :title="entry.path">{{ entry.path }}</span>
           <small>{{ formatTime(entry.changedAt) }}</small>
         </button>
-        <div v-if="!context.recent.length" class="project-files-empty">No recorded file changes.</div>
+        <div v-if="!context.recent.length" class="project-files-empty">{{ t('projectFiles.noRecentChanges') }}</div>
       </section>
 
       <button
         type="button"
         class="project-files-splitter"
-        aria-label="Resize recent changes and project tree"
+        :aria-label="t('projectFiles.resizeSections')"
         @mousedown="startResize"
       ></button>
 
@@ -80,12 +80,12 @@
           data-testid="project-files-tree-header"
           @contextmenu.prevent="openContextMenu($event, null, '')"
         >
-          <span>Project tree</span>
+          <span>{{ t('projectFiles.projectTree') }}</span>
           <button
             type="button"
             data-testid="project-files-create-root"
-            title="New file"
-            aria-label="New file"
+            :title="t('projectFiles.newFile')"
+            :aria-label="t('projectFiles.newFile')"
             @click.stop="openMutationDialog('create-file', null, '')"
           >
             <FilePlus2 />
@@ -129,17 +129,17 @@
               :style="{ paddingLeft: `${26 + row.depth * 16}px` }"
               @click="loadDirectory(row.directory, true)"
             >
-              Load more
+              {{ t('projectFiles.loadMore') }}
             </button>
           </template>
-          <div v-if="treeLoading" class="project-files-empty">Loading project tree.</div>
+          <div v-if="treeLoading" class="project-files-empty">{{ t('projectFiles.loadingTree') }}</div>
           <div v-else-if="treeError" class="project-files-empty">{{ treeError }}</div>
         </div>
       </section>
     </template>
     <div v-else class="project-files-unavailable">
       <FolderOpen />
-      <strong>Project files unavailable</strong>
+      <strong>{{ t('projectFiles.unavailableTitle') }}</strong>
       <span>{{ emptyMessage }}</span>
     </div>
 
@@ -186,6 +186,7 @@ import {
 } from 'lucide-vue-next'
 import ProjectFilesContextMenu from '@/components/files/ProjectFilesContextMenu.vue'
 import ProjectFilesMutationDialog from '@/components/files/ProjectFilesMutationDialog.vue'
+import { useI18n } from '@/i18n'
 import { copyTextToClipboard } from '@/services/app/clipboardRuntime'
 import { flushProjectFileEditor } from '@/services/files/projectFileEditorSaveRegistry'
 import { projectFilesClient } from '@/services/files/projectFilesClient'
@@ -226,8 +227,14 @@ const props = defineProps<{
 }>()
 
 const workspace = useWorkspaceStore()
+const { locale, t } = useI18n()
 const context = ref<ProjectFileContext | null>(null)
-const emptyMessage = ref('Select a managed AI session that is bound to a local terminal.')
+const emptyReason = ref<'select-session' | 'service-unavailable' | 'context-unavailable'>('select-session')
+const emptyMessage = computed(() => ({
+  'select-session': t('projectFiles.selectSession'),
+  'service-unavailable': t('projectFiles.serviceUnavailable'),
+  'context-unavailable': t('projectFiles.contextUnavailable')
+}[emptyReason.value]))
 const loadingContext = ref(false)
 const treeError = ref('')
 const directories = reactive(new Map<string, DirectoryState>())
@@ -283,13 +290,13 @@ const selectedKey = computed(() => props.session
   : '')
 const treeLoading = computed(() => directories.get('')?.loading === true)
 const projectName = computed(() => {
-  if (!context.value?.projectRoot) return 'Project files'
+  if (!context.value?.projectRoot) return t('projectFiles.title')
   return context.value.projectRoot.split(/[\\/]/).filter(Boolean).at(-1) || context.value.projectRoot
 })
 const capabilityLabel = computed(() => {
-  if (context.value?.capability === 'native') return 'Native'
-  if (context.value?.capability === 'adapter') return 'Adapter'
-  return 'Limited'
+  if (context.value?.capability === 'native') return t('projectFiles.capability.native')
+  if (context.value?.capability === 'adapter') return t('projectFiles.capability.adapter')
+  return t('projectFiles.capability.limited')
 })
 
 const flatRows = computed(() => {
@@ -370,8 +377,10 @@ const openMutationDialog = (
   mutationDialog.targetDirectory = targetDirectory
   mutationDialog.value = kind === 'rename' && entry ? entry.name : ''
   mutationDialog.message = kind === 'delete-file' && entry
-    ? `Delete ${entry.relativePath}? This cannot be undone.`
-    : targetDirectory ? `Location: ${targetDirectory}` : 'Location: project root'
+    ? t('projectFiles.dialog.deleteConfirm', { path: entry.relativePath })
+    : t('projectFiles.dialog.location', {
+        location: targetDirectory || t('projectFiles.dialog.projectRoot')
+      })
   mutationDialog.error = ''
   mutationDialog.busy = false
   closeContextMenu()
@@ -398,7 +407,9 @@ const copyEntryPath = async (absolute: boolean) => {
   if (!entry || !projectRoot) return
   const text = absolute ? projectAbsolutePath(projectRoot, entry.relativePath) : entry.relativePath
   const copied = await copyTextToClipboard(text)
-  showNotice(copied ? `${absolute ? 'Absolute' : 'Relative'} path copied` : 'Unable to copy path')
+  showNotice(copied
+    ? t(absolute ? 'projectFiles.notice.absolutePathCopied' : 'projectFiles.notice.relativePathCopied')
+    : t('projectFiles.notice.copyFailed'))
   closeContextMenu()
 }
 
@@ -437,7 +448,7 @@ const remapOpenEditors = (entry: ProjectDirectoryEntry, nextPath: string) => {
 
 const mutateEntry = async (input: ProjectEntryMutationInput) => {
   const mutate = projectFilesClient.mutateEntry()
-  if (!mutate) return { ok: false as const, errorMessage: 'Project file mutation service is unavailable.' }
+  if (!mutate) return { ok: false as const, errorMessage: t('projectFiles.serviceUnavailable') }
   return mutate(input)
 }
 
@@ -446,13 +457,13 @@ const refreshContext = async () => {
   const requestGeneration = ++generation
   if (!input) {
     context.value = null
-    emptyMessage.value = 'Select a managed AI session that is bound to a local terminal.'
+    emptyReason.value = 'select-session'
     return
   }
   const getContext = projectFilesClient.getContext()
   if (!getContext) {
     context.value = null
-    emptyMessage.value = 'Project file service is unavailable.'
+    emptyReason.value = 'service-unavailable'
     return
   }
   loadingContext.value = true
@@ -461,7 +472,7 @@ const refreshContext = async () => {
     if (requestGeneration !== generation) return
     if (!result.ok || !result.data) {
       context.value = null
-      emptyMessage.value = result.errorMessage || 'This AI session has no eligible local project.'
+      emptyReason.value = 'context-unavailable'
       directories.clear()
       expandedDirectories.clear()
       return
@@ -498,7 +509,7 @@ const loadDirectory = async (relativeDirectory: string, append = false) => {
     })
     if (requestGeneration !== generation) return
     if (!result.ok || !result.data) {
-      treeError.value = result.errorMessage || 'Unable to read the project directory.'
+      treeError.value = t('projectFiles.readDirectoryFailed')
       return
     }
     state.entries = append ? [...state.entries, ...result.data.entries] : result.data.entries
@@ -548,14 +559,14 @@ const confirmMutationDialog = async () => {
   if (mutationDialog.kind !== 'delete-file') {
     const name = validEntryName(mutationDialog.value)
     if (!name) {
-      mutationDialog.error = 'Enter a name without path separators.'
+      mutationDialog.error = t('projectFiles.dialog.invalidName')
       return
     }
     if (mutationDialog.kind === 'create-file') relativePath = joinProjectRelativePath(mutationDialog.targetDirectory, name)
     else targetRelativePath = joinProjectRelativePath(mutationDialog.targetDirectory, name)
   }
   if (entry && !await flushAffectedEditors(entry)) {
-    mutationDialog.error = 'Resolve the open editor conflict before changing this entry.'
+    mutationDialog.error = t('projectFiles.notice.resolveConflict')
     return
   }
   mutationDialog.busy = true
@@ -568,7 +579,7 @@ const confirmMutationDialog = async () => {
       ...(targetRelativePath ? { targetRelativePath } : {})
     })
     if (!result.ok || !result.data) {
-      mutationDialog.error = result.errorMessage || 'Unable to change the project entry.'
+      mutationDialog.error = t('projectFiles.notice.changeFailed')
       return
     }
     if (entry && targetRelativePath) remapOpenEditors(entry, result.data.relativePath)
@@ -577,9 +588,9 @@ const confirmMutationDialog = async () => {
     reloadTree()
     if (mutationDialog.kind === 'create-file') openFile(result.data.relativePath)
     showNotice({
-      'create-file': 'File created',
-      rename: 'Entry renamed',
-      'delete-file': 'File deleted'
+      'create-file': t('projectFiles.notice.created'),
+      rename: t('projectFiles.notice.renamed'),
+      'delete-file': t('projectFiles.notice.deleted')
     }[mutationDialog.kind])
   } finally {
     mutationDialog.busy = false
@@ -638,7 +649,7 @@ const handleTreeDrop = async (event: DragEvent, targetDirectory: string) => {
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
   const input = sessionInput()
   if (!input || !await flushAffectedEditors(entry)) {
-    showNotice('Resolve the open editor conflict before moving this entry')
+    showNotice(t('projectFiles.notice.resolveConflict'))
     clearTreeDrag()
     return
   }
@@ -650,13 +661,13 @@ const handleTreeDrop = async (event: DragEvent, targetDirectory: string) => {
     targetRelativePath
   })
   if (!result.ok || !result.data) {
-    showNotice(result.errorMessage || 'Unable to move the project entry')
+    showNotice(t('projectFiles.notice.moveFailed'))
     clearTreeDrag()
     return
   }
   remapOpenEditors(entry, result.data.relativePath)
   reloadTree()
-  showNotice('Entry moved')
+  showNotice(t('projectFiles.notice.moved'))
   clearTreeDrag()
 }
 
@@ -673,7 +684,7 @@ const changeKindLabel = (kind: ProjectFileChangeKind) => ({
   renamed: 'R'
 }[kind])
 
-const formatTime = (value: number) => new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+const formatTime = (value: number) => new Date(value).toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
 
 const startResize = (event: MouseEvent) => {
   const host = (event.currentTarget as HTMLElement).closest('.project-files-panel')

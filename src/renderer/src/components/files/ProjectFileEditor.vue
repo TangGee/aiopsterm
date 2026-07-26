@@ -11,8 +11,8 @@
       class="project-file-conflict"
     >
       <span>{{ conflict }}</span>
-      <button type="button" :disabled="loading || saving" @click="reload(true)">Reload from disk</button>
-      <button type="button" :disabled="loading || saving" @click="save(true, true)">Overwrite</button>
+      <button type="button" :disabled="loading || saving" @click="reload(true)">{{ t('projectFiles.editor.reloadDisk') }}</button>
+      <button type="button" :disabled="loading || saving" @click="save(true, true)">{{ t('projectFiles.editor.overwrite') }}</button>
     </div>
     <div
       v-if="error"
@@ -40,6 +40,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FilesMonacoEditor from '@/components/files/FilesMonacoEditor.vue'
+import { useI18n } from '@/i18n'
 import { registerProjectFileEditorFlush } from '@/services/files/projectFileEditorSaveRegistry'
 import { projectFilesClient } from '@/services/files/projectFilesClient'
 import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
@@ -48,6 +49,7 @@ import type { ProjectFileWatchEvent } from '@shared/contracts/projectFiles'
 
 const props = defineProps<{ panel: TerminalPanel }>()
 const workspace = useWorkspaceStore()
+const { t } = useI18n()
 
 const content = ref('')
 const originContent = ref('')
@@ -72,11 +74,11 @@ let watchedRelativePath = ''
 const projectFile = computed(() => props.panel.projectFile)
 const dirty = computed(() => content.value !== originContent.value)
 const statusText = computed(() => {
-  if (loading.value) return 'Loading'
-  if (conflict.value) return 'Conflict'
-  if (error.value) return readReady.value ? 'Save failed' : 'Unable to load'
-  if (saving.value) return 'Saving'
-  return dirty.value ? 'Unsaved' : 'Saved'
+  if (loading.value) return t('projectFiles.editor.status.loading')
+  if (conflict.value) return t('projectFiles.editor.status.conflict')
+  if (error.value) return readReady.value ? t('projectFiles.editor.status.saveFailed') : t('projectFiles.editor.status.loadFailed')
+  if (saving.value) return t('projectFiles.editor.status.saving')
+  return dirty.value ? t('projectFiles.editor.status.unsaved') : t('projectFiles.editor.status.saved')
 })
 const statusClass = computed(() => ({
   saving: saving.value,
@@ -119,14 +121,14 @@ const handleEditorChange = (value: string) => {
 
 const reload = async (discardDirty = false) => {
   if (!projectFile.value || (dirty.value && !discardDirty)) {
-    if (dirty.value) conflict.value = 'The file changed on disk while this editor has unsaved changes.'
+    if (dirty.value) conflict.value = t('projectFiles.editor.fileChangedUnsaved')
     return
   }
   clearAutosave()
   conflictEpoch += 1
   const read = projectFilesClient.readFile()
   if (!read) {
-    error.value = 'Project file service is unavailable.'
+    error.value = t('projectFiles.serviceUnavailable')
     return
   }
   loading.value = true
@@ -134,7 +136,7 @@ const reload = async (discardDirty = false) => {
   try {
     const result = await read(contextInput())
     if (!result.ok || !result.data) {
-      error.value = result.errorMessage || 'Unable to read the project file.'
+      error.value = t('projectFiles.editor.readFailed')
       return
     }
     content.value = result.data.content
@@ -153,7 +155,7 @@ const saveSnapshot = async (overwrite: boolean) => {
   if (!projectFile.value || loading.value || !readReady.value || (!dirty.value && !overwrite)) return true
   const write = projectFilesClient.writeFile()
   if (!write) {
-    error.value = 'Project file service is unavailable.'
+    error.value = t('projectFiles.serviceUnavailable')
     return false
   }
   const snapshot = content.value
@@ -172,9 +174,9 @@ const saveSnapshot = async (overwrite: boolean) => {
     if (!result.ok || !result.data) {
       if (result.errorCode === 'PROJECT_FILE_CONFLICT') {
         conflictEpoch += 1
-        conflict.value = result.errorMessage || 'The file changed on disk.'
+        conflict.value = t('projectFiles.editor.fileChanged')
       }
-      else error.value = result.errorMessage || 'Unable to save the project file.'
+      else error.value = t('projectFiles.editor.saveFailed')
       return false
     }
     if (snapshotConflictEpoch !== conflictEpoch) return false
@@ -218,13 +220,13 @@ const handleWatchEvent = (event: ProjectFileWatchEvent) => {
     clearAutosave()
     conflictEpoch += 1
     conflict.value = event.kind === 'deleted'
-      ? 'The file was deleted on disk while this editor has unsaved changes.'
-      : 'The file changed on disk while this editor has unsaved changes.'
+      ? t('projectFiles.editor.fileDeletedUnsaved')
+      : t('projectFiles.editor.fileChangedUnsaved')
     return
   }
   if (event.kind === 'deleted') {
     readReady.value = false
-    error.value = 'The file was deleted on disk.'
+    error.value = t('projectFiles.editor.fileDeleted')
     return
   }
   void reload(false)

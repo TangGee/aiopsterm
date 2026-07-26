@@ -16,7 +16,7 @@
       <div class="project-files-dialog-body">
         <p v-if="message">{{ message }}</p>
         <label v-if="kind !== 'delete-file'">
-          <span>Name</span>
+          <span>{{ t('projectFiles.dialog.name') }}</span>
           <input
             ref="inputRef"
             :value="value"
@@ -28,14 +28,14 @@
         <small v-if="error">{{ error }}</small>
       </div>
       <footer>
-        <button type="button" :disabled="busy" @click="$emit('cancel')">Cancel</button>
+        <button type="button" :disabled="busy" @click="$emit('cancel')">{{ t('common.cancel') }}</button>
         <button
           type="submit"
           class="primary"
           :class="{ danger: kind === 'delete-file' }"
           :disabled="busy"
         >
-          {{ busy ? 'Working' : confirmLabel }}
+          {{ busy ? t('projectFiles.dialog.working') : confirmLabel }}
         </button>
       </footer>
     </form>
@@ -44,6 +44,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
+import { useI18n } from '@/i18n'
 
 const props = defineProps<{
   kind: 'create-file' | 'rename' | 'delete-file'
@@ -59,16 +60,17 @@ defineEmits<{
   cancel: []
 }>()
 
+const { t } = useI18n()
 const inputRef = ref<HTMLInputElement | null>(null)
 const title = computed(() => ({
-  'create-file': 'Create file',
-  rename: 'Rename',
-  'delete-file': 'Delete file'
+  'create-file': t('projectFiles.dialog.createTitle'),
+  rename: t('projectFiles.dialog.renameTitle'),
+  'delete-file': t('projectFiles.dialog.deleteTitle')
 }[props.kind]))
 const confirmLabel = computed(() => ({
-  'create-file': 'Create',
-  rename: 'Rename',
-  'delete-file': 'Delete'
+  'create-file': t('projectFiles.dialog.createAction'),
+  rename: t('projectFiles.dialog.renameAction'),
+  'delete-file': t('common.delete')
 }[props.kind]))
 
 onMounted(async () => {

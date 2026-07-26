@@ -139,7 +139,7 @@ describe('ProjectFileEditor', () => {
 
     await wrapper.get('[data-testid="editor-input"]').setValue('changed\n')
     expect(targetPanel.projectFile?.dirty).toBe(true)
-    expect(wrapper.find('footer').text()).toContain('Unsaved')
+    expect(wrapper.find('footer').text()).toContain('未保存')
     await vi.advanceTimersByTimeAsync(999)
     expect(projectFiles.write).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
@@ -153,7 +153,7 @@ describe('ProjectFileEditor', () => {
       overwrite: false
     }))
     expect(targetPanel.projectFile?.dirty).toBe(false)
-    expect(wrapper.find('footer').text()).toContain('Saved')
+    expect(wrapper.find('footer').text()).toContain('已保存')
   })
 
   it('keeps edits made during a save dirty and writes them as a later snapshot', async () => {
@@ -174,7 +174,7 @@ describe('ProjectFileEditor', () => {
     await wrapper.get('[data-testid="editor-input"]').setValue('second edit\n')
     finishFirstSave(writeResult('first edit\n', 'hash-first', 200))
     await flushPromises()
-    expect(wrapper.find('footer').text()).toContain('Unsaved')
+    expect(wrapper.find('footer').text()).toContain('未保存')
 
     await vi.advanceTimersByTimeAsync(1000)
     await flushPromises()
@@ -200,8 +200,8 @@ describe('ProjectFileEditor', () => {
     await flushPromises()
 
     expect(projectFiles.write).not.toHaveBeenCalled()
-    expect(wrapper.find('.project-file-conflict').text()).toContain('changed on disk')
-    expect(wrapper.find('footer').text()).toContain('Conflict')
+    expect(wrapper.find('.project-file-conflict').text()).toContain('文件已在磁盘上更改')
+    expect(wrapper.find('footer').text()).toContain('存在冲突')
   })
 
   it('flushes pending content through the panel close registry', async () => {
