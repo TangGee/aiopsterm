@@ -39,6 +39,8 @@ export type ProductSessionContextRef = {
   detail?: string
   assetId?: string
   connectionId?: string
+  panelId?: string
+  terminalSessionId?: string
   host?: string
   port?: number
   username?: string
@@ -51,6 +53,7 @@ export type ProductSessionContextRef = {
 
 export type ProductSessionClassicContext = {
   contexts: ProductSessionContextRef[]
+  terminalBindings?: ProductSessionContextRef[]
   autoFollowActiveHost?: boolean
 }
 

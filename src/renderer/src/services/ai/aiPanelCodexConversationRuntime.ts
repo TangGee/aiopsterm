@@ -59,7 +59,7 @@ type AiPanelCodexConversationRuntimeInput = {
   showNotice: (message: string) => void
   setTopNotice: (message: string) => void
   refreshAiContextCatalog: () => Promise<unknown>
-  openTerminalForAiHostContext: (host: AiContextOption, options?: { cwd?: string }) => Promise<TerminalPanel | null | undefined>
+  openTerminalForAiHostContext: (host: AiContextOption, options?: { cwd?: string; silent?: boolean }) => Promise<TerminalPanel | null | undefined>
   activateTerminalPanel: (panelId: string) => TerminalPanel | null | undefined
   upsertAiAttentionItem: (input: AiAttentionInput) => void
   removeAiAttentionItem: (id: string) => void | boolean
@@ -214,20 +214,18 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
   const productTargetMatchesLiveTarget = (stored: ProductSessionTarget, target: CodexSessionTargetContext) => {
     if (stored.kind !== target.kind) return false
     if (stored.kind === 'local') {
-      if (stored.panelId && target.panelId === stored.panelId) return true
-      return Boolean(stored.terminalSessionId && target.sessionId === stored.terminalSessionId)
+      return true
     }
     const stableFields = [
       ['assetId', stored.assetId, target.assetId],
-      ['connectionId', stored.connectionId, target.connectionId],
       ['host', stored.host, target.host],
       ['port', stored.port, target.port],
       ['username', stored.username, target.username]
     ] as const
     const definedStableFields = stableFields.filter(([, expected]) => expected !== undefined && expected !== '')
     if (definedStableFields.length) return definedStableFields.every(([, expected, actual]) => expected === actual)
-    if (stored.panelId && target.panelId === stored.panelId) return true
-    return Boolean(stored.terminalSessionId && target.sessionId === stored.terminalSessionId)
+    if (stored.connectionId) return stored.connectionId === target.connectionId
+    return false
   }
 
   const liveCodexTargetForProductSession = (session: ProductSessionRecord): CodexSessionTargetContext | null => {
@@ -244,12 +242,12 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
       return Boolean(target.cwd && isProjectCwdWithinRoot(session.projectRoot!, target.cwd))
     })
     const exactPanel = eligiblePanels.find((candidate) =>
-      productTargetMatchesLiveTarget(stored, codexTargetContextFromPanel(candidate))
+      (stored.panelId && candidate.id === stored.panelId) ||
+      (stored.terminalSessionId && candidate.sessionId === stored.terminalSessionId)
     )
-    if (exactPanel) return codexTargetContextFromPanel(exactPanel)
-    if (stored.kind === 'local') {
-      const localPanels = eligiblePanels.filter((candidate) => codexTargetContextFromPanel(candidate).kind === 'local')
-      if (localPanels.length === 1) return codexTargetContextFromPanel(localPanels[0])
+    if (exactPanel) {
+      const target = codexTargetContextFromPanel(exactPanel)
+      if (productTargetMatchesLiveTarget(stored, target)) return target
     }
     return null
   }
@@ -365,10 +363,12 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
         codexSessionHistory.value = [...result.data.sessions]
         // Main clears every open flag before creating the renderer on a cold start.
         const openSessions = result.data.sessions.filter((session) => session.isOpen)
-        codexConversations.value = openSessions.map((session) => {
-          const target = liveCodexTargetForProductSession(session) || storedCodexTargetForProductSession(session)
-          return createCodexConversationRecord(target, session)
-        })
+        const openConversations: AiPanelCodexConversation[] = []
+        for (const session of openSessions) {
+          const target = await reconnectCodexTargetForProductSession(session)
+          openConversations.push(createCodexConversationRecord(target || storedCodexTargetForProductSession(session), session))
+        }
+        codexConversations.value = openConversations
         activeCodexConversationId.value = codexConversations.value[0]?.id || ''
         codexProductSessionsHydrated = true
         return true
@@ -571,7 +571,11 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     if (stored) rememberCodexProductSession({ ...stored, isOpen, updatedAt: Date.now() })
   }
 
-  const closeAndStopCodexConversation = async (conversation: AiPanelCodexConversation, reason: string) => {
+  const closeAndStopCodexConversation = async (
+    conversation: AiPanelCodexConversation,
+    reason: string,
+    closeOptions: { keepClosedOnStopFailure?: boolean } = {}
+  ) => {
     if (codexConversationTransitions.has(conversation.id)) return false
     codexConversationTransitions.add(conversation.id)
     try {
@@ -614,6 +618,16 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
 
       const stopResult = await aiPanelCodexTerminalRuntime.stopSession(conversation)
       if (!stopResult.ok) {
+        if (closeOptions.keepClosedOnStopFailure) {
+          await rememberCodexProductSessionOpenState(conversation, false)
+          log('warn', 'renderer.codex-session.closed-with-stop-failure', {
+            productSessionId: conversation.id,
+            reason,
+            errorCode: stopResult.errorCode,
+            message: stopResult.errorMessage || codexRuntimeStopFailed()
+          })
+          return true
+        }
         const updateProductSession = productSessionClient.update()
         let rollbackOk = false
         let rollbackError = ''
@@ -764,17 +778,21 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
   const unbindCodexTarget = async () => {
     const conversation = activeCodexConversation.value
     if (!conversation) return false
-    if (codexConversationHasNativeRuntime(conversation)) {
-      const replacement = await replaceCodexConversation(conversation, null, 'target-unbound')
-      if (!replacement) return false
-      closeCodexTargetPicker()
-      options.showNotice(codexUnboundSessionCreated())
-      return true
-    }
-    applyCodexTargetUnbinding(conversation, t('ai.codexCliMode'))
+    if (!(await closeAndStopCodexConversation(conversation, 'target-unbound'))) return false
+    const replacement = createCodexConversationRecord(null)
+    const index = codexConversations.value.findIndex((candidate) => candidate.id === conversation.id)
+    const nextConversations = [...codexConversations.value]
+    if (index >= 0) nextConversations.splice(index, 1, replacement)
+    else nextConversations.push(replacement)
+    options.removeAiAttentionItem(codexAttentionId(conversation))
+    aiPanelCodexTerminalRuntime.disposeConversation(conversation)
+    codexConversations.value = nextConversations
+    activeCodexConversationId.value = replacement.id
     closeCodexTargetPicker()
-    await aiPanelCodexTerminalRuntime.clearSessionTarget(conversation, 'unbound')
-    await persistCodexProductSession(conversation)
+    await options.afterDomUpdate()
+    aiPanelCodexTerminalRuntime.ensureTerminal(replacement)
+    aiPanelCodexTerminalRuntime.syncConversationSurfaces({ forceActiveGeometry: true })
+    options.showNotice(codexUnboundSessionCreated())
     return true
   }
 
@@ -829,19 +847,27 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     return true
   }
 
-  const createNewCodexConversation = async () => {
+  const createNewCodexConversation = async (target: CodexSessionTargetContext | null = null) => {
     if (codexProductSessionsHydrating) await codexProductSessionsHydrating
     else if (!codexProductSessionsHydrated && !codexConversations.value.length) await hydrateCodexProductSessions()
     const previousSyncSource = workspaceLinkSyncSource
     workspaceLinkSyncSource = 'ai'
     try {
-      const conversation = createCodexConversationRecord(null)
+      const conversation = createCodexConversationRecord(target)
+      conversation.projectRoot = target?.cwd
       codexConversations.value = [...codexConversations.value, conversation]
       activeCodexConversationId.value = conversation.id
       closeCodexTargetPicker()
+      if (target && !(await persistCodexProductSession(conversation))) {
+        codexConversations.value = codexConversations.value.filter((candidate) => candidate.id !== conversation.id)
+        activeCodexConversationId.value = codexConversations.value[0]?.id || ''
+        return false
+      }
       await options.afterDomUpdate()
       aiPanelCodexTerminalRuntime.ensureTerminal(conversation)
       aiPanelCodexTerminalRuntime.syncConversationSurfaces({ forceActiveGeometry: true })
+      if (target) await startCodexSession(conversation)
+      return true
     } finally {
       workspaceLinkSyncSource = previousSyncSource
     }
@@ -870,12 +896,8 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     }
     const storedTarget = storedCodexTargetForProductSession(productSession)
     const target = await reconnectCodexTargetForProductSession(productSession)
+    if (storedTarget && !target) return false
     const conversation = createCodexConversationRecord(target, productSession)
-    if (!target && storedTarget) {
-      conversation.boundTarget = storedTarget
-      conversation.status = 'error'
-      conversation.error = t('ai.codexTargetOpenFailed')
-    }
     codexConversations.value = [...codexConversations.value, conversation]
     activeCodexConversationId.value = conversation.id
     const persisted = await persistCodexProductSession(conversation)
@@ -977,6 +999,29 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     }
     options.showNotice(t('ai.tabClosed'))
     return true
+  }
+
+  const handleCodexTerminalClosed = async (panelId: string, terminalSessionId: string) => {
+    const impacted = codexConversations.value.filter((conversation) => {
+      const target = conversation.boundTarget
+      return Boolean(
+        target &&
+        (
+          (panelId && target.panelId === panelId) ||
+          (terminalSessionId && target.sessionId === terminalSessionId)
+        )
+      )
+    })
+    for (const conversation of impacted) {
+      if (!(await closeAndStopCodexConversation(conversation, 'bound-terminal-closed', { keepClosedOnStopFailure: true }))) continue
+      options.removeAiAttentionItem(codexAttentionId(conversation))
+      aiPanelCodexTerminalRuntime.disposeConversation(conversation)
+      codexConversations.value = codexConversations.value.filter((candidate) => candidate.id !== conversation.id)
+      if (activeCodexConversationId.value === conversation.id) {
+        activeCodexConversationId.value = codexConversations.value[0]?.id || ''
+      }
+    }
+    return impacted.map((conversation) => conversation.id)
   }
 
   async function selectAiPanelMode(mode: AiPanelMode) {
@@ -1125,6 +1170,7 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     dispose,
     filteredCodexHostTargets,
     focusAiAttentionItem,
+    handleCodexTerminalClosed,
     focusCodexTerminal: aiPanelCodexTerminalRuntime.focusActiveTerminal,
     locateCodexBoundTarget,
     panelModeMenuOpen,

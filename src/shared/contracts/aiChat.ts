@@ -12,6 +12,8 @@ export type AiContextOption = {
   detail?: string
   assetId?: string
   connectionId?: string
+  panelId?: string
+  terminalSessionId?: string
   host?: string
   port?: number
   username?: string

@@ -1,7 +1,7 @@
 import { closeAiConversationTab, nextAiHistoryPageAfterDelete, type AiPanelConversationLike } from '@/services/ai/aiPanelConversationRuntime'
 import { isAiChatExportData, malformedAiBackendResultMessage } from '@/services/ai/aiBackendGuards'
 import { productSessionClient } from '@/services/ai/productSessionClient'
-import type { AiChatExportInput, AiChatExportResult } from '@shared/contracts/aiChat'
+import type { AiChatExportInput, AiChatExportResult, AiContextOption } from '@shared/contracts/aiChat'
 
 export type AiPanelHistoryRuntimeState = {
   chatSearchOpen: boolean
@@ -51,7 +51,7 @@ export type AiPanelHistoryRuntimeOptions<TConversation extends AiPanelConversati
   cancelActiveTurn?: () => Promise<boolean>
   currentConversationTitle: () => string
   exportMessages: () => AiChatExportInput['messages']
-  createConversation: () => Promise<{ id: string } | null | undefined>
+  createConversation: (initialContexts?: AiContextOption[]) => Promise<{ id: string } | null | undefined>
   deselectConversation: (expectedConversationId: string) => Promise<boolean>
   restoreConversation: (id: string) => Promise<boolean>
   renameConversation: (id: string, title: string) => Promise<boolean>
@@ -200,8 +200,8 @@ export const createAiPanelHistoryRuntime = <TConversation extends AiPanelConvers
     if (nextIds.length !== options.state.openConversationTabIds.length) options.state.openConversationTabIds = nextIds
   }
 
-  const createNewConversation = async () => {
-    const created = await options.createConversation()
+  const createNewConversation = async (initialContexts?: AiContextOption[]) => {
+    const created = await options.createConversation(initialContexts)
     options.state.historySearchTerm = ''
     options.state.historyCurrentPage = 1
     if (created) {

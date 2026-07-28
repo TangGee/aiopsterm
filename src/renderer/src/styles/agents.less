@@ -396,6 +396,131 @@
   background: color-mix(in srgb, #000 58%, transparent);
 }
 
+.agents-resource-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--app-z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, #000 58%, transparent);
+}
+
+.agents-resource-dialog {
+  width: min(520px, calc(100vw - 36px));
+  max-height: min(680px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 9px;
+  background: var(--theme-module-active-modal-surface-bg);
+  box-shadow: var(--theme-module-active-shadow-strong);
+  color: var(--theme-module-active-text);
+}
+
+.agents-resource-dialog header {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 16px;
+  border-bottom: 1px solid var(--theme-module-active-border);
+}
+
+.agents-resource-dialog header strong {
+  font-size: 14px;
+}
+
+.agents-resource-dialog header span,
+.agents-resource-option em,
+.agents-resource-option small {
+  color: var(--theme-module-active-text-muted);
+  font-size: 12px;
+}
+
+.agents-resource-list {
+  min-height: 120px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+}
+
+.agents-resource-option {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 7px;
+  background: var(--theme-module-active-modal-card-bg);
+  cursor: pointer;
+}
+
+.agents-resource-option.selected {
+  border-color: var(--theme-module-active-accent);
+  background: color-mix(in srgb, var(--theme-module-active-accent) 10%, var(--theme-module-active-modal-card-bg));
+}
+
+.agents-resource-option > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.agents-resource-option strong,
+.agents-resource-option em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agents-resource-option em {
+  font-style: normal;
+}
+
+.agents-resource-empty {
+  display: flex;
+  min-height: 96px;
+  align-items: center;
+  justify-content: center;
+  color: var(--theme-module-active-text-muted);
+  font-size: 12px;
+}
+
+.agents-resource-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 11px 14px;
+  border-top: 1px solid var(--theme-module-active-border);
+}
+
+.agents-resource-dialog footer button {
+  min-width: 72px;
+  height: 30px;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 6px;
+  background: var(--theme-module-active-modal-strong-bg);
+  color: var(--theme-module-active-text);
+  cursor: pointer;
+}
+
+.agents-resource-dialog footer button.primary {
+  border-color: var(--theme-module-active-accent);
+  background: var(--theme-module-active-accent);
+  color: #fff;
+}
+
+.agents-resource-dialog footer button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .agents-delete-dialog {
   width: min(420px, calc(100vw - 36px));
   overflow: hidden;

@@ -469,8 +469,8 @@ const buildExchangePrompt = (
   const contextLabel = contexts.length ? `\n\n上下文：${contexts.map((item) => `${item.kind}:${item.label}`).join('、')}` : ''
   const hostContextTargets = contexts
     .filter((context) => context.kind === 'hosts')
-    .map((context) => {
-      const target = hostTargets.find((candidate) => candidate.label === context.label)
+    .map((context, index) => {
+      const target = hostTargets[index]
       return target ? `- hosts:${context.label} uses targetId ${target.targetId}` : ''
     })
     .filter(Boolean)

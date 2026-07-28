@@ -9,7 +9,6 @@ import {
   type TodoItem
 } from '@/services/ai/workspaceAiChatController'
 import {
-  classicActiveHostContext,
   classicOpenedHostContexts,
   resolveClassicHostTerminalPanel
 } from '@/services/ai/classicSessionContextRuntime'
@@ -1003,6 +1002,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     renameConversation,
     toggleConversationFavorite,
     restoreConversation,
+    handleClassicTerminalClosed,
     loadOlderConversationMessages,
     disposeClassicContextProjection,
     toggleContext,
@@ -1045,7 +1045,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       resolveAiKnowledgeSearchContexts: (...args) => resolveAiKnowledgeSearchContexts(...args),
       applyMcpServersSnapshot: (...args) => applyMcpServersSnapshot(...args),
       openedHostContexts: () => classicOpenedHostContexts(panels.value, activePanelId.value),
-      activeHostContext: () => classicActiveHostContext(panels.value, activePanelId.value),
+      terminalPanels: () => panels.value,
       resolveActiveWritableTerminalPanel,
       resolveClassicHostTerminalPanel: (context) => resolveClassicHostTerminalPanel(panels.value, context, activePanelId.value),
       openTerminalForAiHostContext,
@@ -1886,6 +1886,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     renameConversation,
     toggleConversationFavorite,
     restoreConversation,
+    handleClassicTerminalClosed,
     loadOlderConversationMessages,
     toggleContext,
     removeContext,

@@ -270,6 +270,13 @@ describe('Classic session context runtime', () => {
         detail: 'admin@10.0.0.8:2222'
       }),
       expect.objectContaining({
+        id: 'asset-prod',
+        assetId: 'asset-prod',
+        connectionId: 'connection-first',
+        panelId: 'remote-first',
+        terminalSessionId: 'session-first'
+      }),
+      expect.objectContaining({
         id: 'opened-local',
         label: '127.0.0.1',
         isLocalShell: true

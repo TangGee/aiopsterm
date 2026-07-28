@@ -273,7 +273,11 @@ const sessionTarget = (session: ProductSessionRecord) =>
 
 const classicHostRefs = (session: ProductSessionRecord) =>
   session.surface === 'classic'
-    ? (session.classicContext?.contexts || []).filter((context) => context.kind === 'hosts')
+    ? (
+        session.classicContext?.terminalBindings ||
+        session.classicContext?.contexts ||
+        []
+      ).filter((context) => context.kind === 'hosts')
     : []
 
 const hostRefEndpoint = (host: ReturnType<typeof classicHostRefs>[number]) => {

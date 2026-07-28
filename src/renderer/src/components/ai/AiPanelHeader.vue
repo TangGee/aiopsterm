@@ -128,7 +128,7 @@
         class="ai-header-icon-button"
         :title="t('ai.newChat')"
         data-testid="ai-new-chat"
-        @click.stop="createNewAiConversation"
+        @click.stop="createNewAiConversation()"
       >
         <Plus />
       </button>
@@ -138,7 +138,7 @@
         class="ai-header-icon-button"
         :title="t('ai.newChat')"
         data-testid="ai-codex-new"
-        @click.stop="createNewCodexConversation"
+        @click.stop="createNewCodexConversation()"
       >
         <Plus />
       </button>

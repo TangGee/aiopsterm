@@ -20,7 +20,7 @@ export type ClassicTerminalPanelLike = {
 
 const text = (value: unknown) => String(value || '').trim()
 type ClassicHostIdentity = Pick<AiContextOption, 'id'> &
-  Partial<Pick<AiContextOption, 'label' | 'host' | 'assetId' | 'connectionId' | 'isLocalShell'>>
+  Partial<Pick<AiContextOption, 'label' | 'host' | 'assetId' | 'connectionId' | 'terminalSessionId' | 'isLocalShell'>>
 
 const isLiveTerminalPanel = (panel: ClassicTerminalPanelLike) =>
   (panel.kind === undefined || panel.kind === 'terminal') &&
@@ -46,11 +46,23 @@ export const isClassicLocalHostContext = (
     host === '127.0.0.1'
 }
 
-export const classicHostTargetId = (
+export const classicStableHostTargetId = (
   context: ClassicHostIdentity
 ) => isClassicLocalHostContext(context)
   ? 'opened-local'
   : text(context.assetId) || text(context.connectionId) || text(context.id)
+
+export const classicHostTargetId = (
+  context: ClassicHostIdentity
+) => {
+  const stableId = classicStableHostTargetId(context)
+  const terminalSessionId = text(context.terminalSessionId)
+  return terminalSessionId ? `${stableId}::${terminalSessionId}` : stableId
+}
+
+export const classicTerminalBindingId = (
+  context: Pick<AiContextOption, 'id' | 'panelId' | 'terminalSessionId' | 'assetId' | 'connectionId' | 'isLocalShell'>
+) => text(context.terminalSessionId) || text(context.panelId) || classicHostTargetId(context)
 
 export const classicHostContextFromTerminalPanel = (
   panel: ClassicTerminalPanelLike
@@ -64,6 +76,8 @@ export const classicHostContextFromTerminalPanel = (
       detail: 'local shell',
       host: '127.0.0.1',
       assetName: text(panel.title) || 'Local terminal',
+      panelId: panel.id,
+      terminalSessionId: text(panel.sessionId),
       isLocalShell: true
     }
   }
@@ -81,6 +95,8 @@ export const classicHostContextFromTerminalPanel = (
     detail: terminalHostDetail(host, port, username),
     ...(assetId ? { assetId } : {}),
     ...(connectionId ? { connectionId } : {}),
+    panelId: panel.id,
+    terminalSessionId: text(panel.sessionId),
     host,
     port,
     ...(username ? { username } : {}),
@@ -91,7 +107,7 @@ export const classicHostContextFromTerminalPanel = (
 export const classicOpenedHostContexts = (
   panels: ClassicTerminalPanelLike[],
   activePanelId = '',
-  limit = 4
+  limit = 5
 ) => {
   const opened = new Map<string, AiContextOption>()
   const maximum = Math.max(0, Math.floor(limit))
@@ -131,6 +147,8 @@ export const classicSessionContextRef = (context: AiContextOption): ProductSessi
     ...(text(context.detail) ? { detail: context.detail } : {}),
     ...(!localHost && text(context.assetId) ? { assetId: context.assetId } : {}),
     ...(!localHost && text(context.connectionId) ? { connectionId: context.connectionId } : {}),
+    ...(text(context.panelId) ? { panelId: context.panelId } : {}),
+    ...(text(context.terminalSessionId) ? { terminalSessionId: context.terminalSessionId } : {}),
     ...(text(context.host) ? { host: context.host } : {}),
     ...(Number.isInteger(context.port) ? { port: context.port } : {}),
     ...(text(context.username) ? { username: context.username } : {}),
@@ -158,9 +176,23 @@ const catalogOptions = (catalog: Pick<AiContextCatalog, 'categories' | 'openedHo
 
 const sameHostRef = (ref: ProductSessionContextRef, candidate: AiContextOption) => {
   const candidateAssetId = text(candidate.assetId) || (!candidate.isLocalShell ? text(candidate.id) : '')
-  if (text(ref.assetId)) return candidateAssetId === text(ref.assetId)
+  if (text(ref.assetId) && candidateAssetId !== text(ref.assetId)) return false
+  const refHost = text(ref.host).toLowerCase()
+  if (refHost && text(candidate.host).toLowerCase() !== refHost) return false
+  if (ref.port !== undefined && Number(candidate.port || 22) !== Number(ref.port || 22)) return false
+  if (text(ref.username) && text(candidate.username) !== text(ref.username)) return false
+  if (text(ref.assetId) || refHost) return true
   if (text(ref.connectionId)) return text(candidate.connectionId) === text(ref.connectionId)
   return false
+}
+
+export const classicHostBindingMatchesContext = (
+  ref: ProductSessionContextRef,
+  candidate: AiContextOption
+) => {
+  if (ref.kind !== 'hosts' || candidate.kind !== 'hosts') return false
+  if (isClassicLocalHostContext(ref)) return isClassicLocalHostContext(candidate)
+  return sameHostRef(ref, candidate)
 }
 
 const matchingCatalogOption = (ref: ProductSessionContextRef, options: AiContextOption[]) => {
@@ -242,6 +274,14 @@ export const resolveClassicHostTerminalPanel = <Panel extends ClassicTerminalPan
   const livePanels = panels
     .filter(isLiveTerminalPanel)
     .sort((first, second) => Number(second.id === activePanelId) - Number(first.id === activePanelId))
+  const exactPanelId = text(context.panelId)
+  const exactTerminalSessionId = text(context.terminalSessionId)
+  if (exactPanelId || exactTerminalSessionId) {
+    return livePanels.find((panel) =>
+      (exactPanelId && panel.id === exactPanelId) ||
+      (exactTerminalSessionId && text(panel.sessionId) === exactTerminalSessionId)
+    ) || null
+  }
   if (isClassicLocalHostContext(context)) {
     return livePanels.find((panel) => !panel.sshSession) || null
   }

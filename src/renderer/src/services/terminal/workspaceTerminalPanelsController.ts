@@ -293,18 +293,21 @@ export const createWorkspaceTerminalPanelsController = (
     return panel
   }
 
-  const openTerminalForAiHostContext = async (host: AiContextOption, options: { cwd?: string } = {}) => {
+  const openTerminalForAiHostContext = async (host: AiContextOption, options: { cwd?: string; silent?: boolean } = {}) => {
     const previousActivePanelId = activePanelId.value
     const panel = createPanel()
     const panelId = panel.id
     const label = host.assetName || host.detail || host.label || 'Terminal'
+    const notifyFailure = (message: string) => {
+      if (!options.silent) setTopNotice(message)
+    }
     renamePanel(panelId, label, 'auto')
     replaceTerminalOutput(panelId, '')
     const discardPendingPanel = () => discardPendingTerminalPanel(panelId, previousActivePanelId)
     const createTerminal = terminalClient.createTerminal()
     if (!createTerminal) {
       discardPendingPanel()
-      setTopNotice('终端启动服务不可用')
+      notifyFailure('终端启动服务不可用')
       return null
     }
     if (isClassicLocalHostContext(host)) {
@@ -322,7 +325,7 @@ export const createWorkspaceTerminalPanelsController = (
         const connected = applyLocalTerminalSession(panelId, session)
         if (!connected) {
           discardPendingPanel()
-          setTopNotice('本地终端启动失败')
+          notifyFailure('本地终端启动失败')
           return null
         }
         renamePanel(panelId, label, 'auto')
@@ -331,7 +334,7 @@ export const createWorkspaceTerminalPanelsController = (
         return connected
       } catch (error) {
         discardPendingPanel()
-        setTopNotice(error instanceof Error ? error.message : '本地终端启动失败')
+        notifyFailure(error instanceof Error ? error.message : '本地终端启动失败')
         return null
       }
     }
@@ -356,7 +359,7 @@ export const createWorkspaceTerminalPanelsController = (
       const connected = applySshTerminalSession(panelId, session, asset)
       if (!connected) {
         discardPendingPanel()
-        setTopNotice('SSH 终端启动失败')
+        notifyFailure('SSH 终端启动失败')
         return null
       }
       activeModule.value = 'workspace'
@@ -371,7 +374,7 @@ export const createWorkspaceTerminalPanelsController = (
       return connectedPanel
     } catch (error) {
       discardPendingPanel()
-      setTopNotice(error instanceof Error ? error.message : 'SSH 终端启动失败')
+      notifyFailure(error instanceof Error ? error.message : 'SSH 终端启动失败')
       return null
     }
   }

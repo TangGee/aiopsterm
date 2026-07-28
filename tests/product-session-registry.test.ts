@@ -449,6 +449,18 @@ describe('product session registry', () => {
       surface: 'classic',
       classicContext: {
         autoFollowActiveHost: true,
+        terminalBindings: [{
+          id: 'asset-prod',
+          kind: 'hosts',
+          label: 'Production',
+          assetId: 'asset-1',
+          connectionId: 'connection-1',
+          panelId: 'panel-1',
+          terminalSessionId: 'terminal-1',
+          host: '10.0.0.8',
+          port: 2222,
+          username: 'ops'
+        }],
         contexts: [
           {
             id: 'asset-prod',
@@ -487,6 +499,9 @@ describe('product session registry', () => {
 
     expect(registry.get(created.id)?.classicContext).toEqual(created.classicContext)
     expect(registry.get(created.id)?.classicContext?.autoFollowActiveHost).toBe(true)
+    expect(registry.get(created.id)?.classicContext?.terminalBindings).toEqual([
+      expect.objectContaining({ panelId: 'panel-1', terminalSessionId: 'terminal-1' })
+    ])
     expect(registry.list({ surface: 'classic' })[0].classicContext?.contexts.map((context) => context.id)).toEqual([
       'asset-prod',
       'kb-doc:runbooks/deploy.md',

@@ -372,6 +372,8 @@ const normalizeContextRef = (value: ProductSessionContextRef, index: number): Pr
   const detail = optionalText(value.detail, `${prefix}.detail`, 2048)
   const assetId = optionalExactText(value.assetId, `${prefix}.assetId`, 512)
   const connectionId = optionalExactText(value.connectionId, `${prefix}.connectionId`, 512)
+  const panelId = optionalExactText(value.panelId, `${prefix}.panelId`, 512)
+  const terminalSessionId = optionalExactText(value.terminalSessionId, `${prefix}.terminalSessionId`, 512)
   const host = optionalExactText(value.host, `${prefix}.host`, 512)
   const port = optionalPort(value.port, `${prefix}.port`)
   const username = optionalExactText(value.username, `${prefix}.username`, 512)
@@ -386,6 +388,8 @@ const normalizeContextRef = (value: ProductSessionContextRef, index: number): Pr
     ...(detail ? { detail } : {}),
     ...(assetId ? { assetId } : {}),
     ...(connectionId ? { connectionId } : {}),
+    ...(panelId ? { panelId } : {}),
+    ...(terminalSessionId ? { terminalSessionId } : {}),
     ...(host ? { host } : {}),
     ...(port ? { port } : {}),
     ...(username ? { username } : {}),
@@ -411,11 +415,23 @@ const normalizeClassicContext = (
     )
   }
   const contexts = value.contexts.map(normalizeContextRef)
+  const rawTerminalBindings = value.terminalBindings || []
+  if (!Array.isArray(rawTerminalBindings) || rawTerminalBindings.length > MAX_CLASSIC_CONTEXT_REFS) {
+    return invalid(
+      'PRODUCT_SESSION_CLASSIC_CONTEXT_TOO_LARGE',
+      `classicContext supports at most ${MAX_CLASSIC_CONTEXT_REFS} terminal bindings.`
+    )
+  }
+  const terminalBindings = rawTerminalBindings.map(normalizeContextRef)
+  if (terminalBindings.some((binding) => binding.kind !== 'hosts')) {
+    return invalid('PRODUCT_SESSION_CLASSIC_CONTEXT_INVALID', 'classicContext.terminalBindings must contain host references.')
+  }
   if (value.autoFollowActiveHost !== undefined && typeof value.autoFollowActiveHost !== 'boolean') {
     return invalid('PRODUCT_SESSION_CLASSIC_CONTEXT_INVALID', 'classicContext.autoFollowActiveHost must be a boolean.')
   }
   const normalized: ProductSessionClassicContext = {
     contexts,
+    ...(value.terminalBindings !== undefined ? { terminalBindings } : {}),
     ...(value.autoFollowActiveHost !== undefined ? { autoFollowActiveHost: value.autoFollowActiveHost } : {})
   }
   if (Buffer.byteLength(JSON.stringify(normalized), 'utf8') > MAX_CLASSIC_CONTEXT_JSON_BYTES) {
@@ -436,6 +452,9 @@ const cloneRecord = (record: ProductSessionRecord): ProductSessionRecord => ({
     ? {
         classicContext: {
           contexts: record.classicContext.contexts.map((context) => ({ ...context })),
+          ...(record.classicContext.terminalBindings
+            ? { terminalBindings: record.classicContext.terminalBindings.map((binding) => ({ ...binding })) }
+            : {}),
           ...(record.classicContext.autoFollowActiveHost !== undefined
             ? { autoFollowActiveHost: record.classicContext.autoFollowActiveHost }
             : {})
@@ -496,13 +515,18 @@ const sameNativeSession = (
   right: ProductSessionNativeBinding | undefined
 ) => left?.engine === right?.engine && left?.nativeSessionId === right?.nativeSessionId
 
-const sameTargetScope = (left: ProductSessionTarget | undefined, right: ProductSessionTarget | undefined) =>
-  left?.kind === right?.kind &&
-  left?.assetId === right?.assetId &&
-  left?.connectionId === right?.connectionId &&
-  left?.host === right?.host &&
-  left?.port === right?.port &&
-  left?.username === right?.username
+const sameTargetScope = (left: ProductSessionTarget | undefined, right: ProductSessionTarget | undefined) => {
+  if (left?.kind !== right?.kind) return false
+  if (left?.kind === 'local') return true
+  return left?.assetId === right?.assetId &&
+    left?.host === right?.host &&
+    left?.port === right?.port &&
+    left?.username === right?.username &&
+    (
+      Boolean(left?.assetId || left?.host || right?.assetId || right?.host) ||
+      left?.connectionId === right?.connectionId
+    )
+}
 
 const sameDatabaseScope = (
   left: ProductSessionDatabaseContext | undefined,

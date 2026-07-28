@@ -168,7 +168,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     messages: () => workspace.chatMessages,
     locale: () => locale.value,
     t,
-    createConversation: () => workspace.createConversation(),
+    createConversation: (initialContexts) => workspace.createConversation(initialContexts),
     cancelActiveTurn: () => workspace.cancelStreamingAiChatResponse(),
     deselectConversation: (expectedConversationId) => workspace.deselectConversation(expectedConversationId),
     restoreConversation: (id) => workspace.restoreConversation(id),
@@ -313,6 +313,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     currentPanelTarget,
     filteredCodexHostTargets,
     focusAiAttentionItem,
+    handleCodexTerminalClosed,
     focusCodexTerminal,
     locateCodexBoundTarget,
     panelModeMenuOpen,
@@ -330,6 +331,36 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     toggleCodexHistoryMenu,
     unbindCodexTarget
   } = aiPanelCodexRuntime
+
+  let knownLiveTerminalPanels = new Map(
+    workspace.panels
+      .filter((panel) => panel.sessionId && panel.status !== 'closed' && panel.status !== 'error')
+      .map((panel) => [panel.id, { panelId: panel.id, terminalSessionId: panel.sessionId || '' }])
+  )
+  let terminalClosureQueue = Promise.resolve()
+  const stopProductSessionTerminalLifecycle = watch(
+    () => workspace.panels
+      .map((panel) => `${panel.id}:${panel.sessionId || ''}:${panel.status || ''}:${panel.kind || ''}`)
+      .join('|'),
+    () => {
+      const nextLive = new Map(
+        workspace.panels
+          .filter((panel) => panel.sessionId && panel.status !== 'closed' && panel.status !== 'error')
+          .map((panel) => [panel.id, { panelId: panel.id, terminalSessionId: panel.sessionId || '' }])
+      )
+      const closed = [...knownLiveTerminalPanels.values()].filter((panel) => !nextLive.has(panel.panelId))
+      knownLiveTerminalPanels = nextLive
+      if (!closed.length) return
+      terminalClosureQueue = terminalClosureQueue.then(async () => {
+        for (const panel of closed) {
+          await handleCodexTerminalClosed(panel.panelId, panel.terminalSessionId)
+          const classicIds = await workspace.handleClassicTerminalClosed(panel.panelId, panel.terminalSessionId)
+          for (const id of classicIds) await closeConversationTab(id)
+        }
+      })
+    },
+    { flush: 'sync' }
+  )
 
   const aiPanelActionOrchestrationRuntime = createAiPanelActionOrchestrationRuntime({
     messages: () => workspace.chatMessages,
@@ -411,7 +442,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     contextUsageSnapshot: () => workspace.aiContextUsage,
     selectedConversationId: () => workspace.selectedConversationId,
     panels: () => workspace.panels,
-    createConversation: () => workspace.createConversation(),
+    createConversation: () => workspace.createConversation(workspace.selectedContexts),
     addKnowledgeFilesToChat: (relPaths) => workspace.addKnowledgeFilesToChat(relPaths),
     imageLimitMessage: () => t('ai.imageAttachmentCountLimit', { count: MAX_CHAT_IMAGE_ATTACHMENTS_PER_MESSAGE }),
     bindTerminalPanelToCodex,
@@ -571,7 +602,10 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     renderEditableFromState,
     startInitialMode,
     cancelChatScrollFrame,
-    disposeCodexRuntime: () => aiPanelCodexRuntime.dispose(),
+    disposeCodexRuntime: () => {
+      stopProductSessionTerminalLifecycle()
+      aiPanelCodexRuntime.dispose()
+    },
     disposeChatSearchRuntime,
     clearHistoryNoticeTimer,
     disposeSurfaceRuntime: () => aiPanelClassicInputShellRuntime.disposeSurfaceRuntime(),

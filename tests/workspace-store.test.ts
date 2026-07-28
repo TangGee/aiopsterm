@@ -8272,26 +8272,18 @@ describe('workspace store', () => {
     expect(store.aiContextCatalog.categories.find((category) => category.id === 'chats')?.options).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: 'chat:conv-2', label: 'K8s 发布失败' })])
     )
-    expect(store.selectedContexts).toEqual([
-      expect.objectContaining({ id: 'asset-1', kind: 'hosts', label: 'prod-bastion' })
-    ])
+    expect(store.selectedContexts).toEqual([])
 
     await store.refreshAiContextCatalog({ hydrateSelection: true })
-    expect(store.selectedContexts).toEqual([
-      expect.objectContaining({ id: 'asset-1', kind: 'hosts', label: 'prod-bastion' })
-    ])
+    expect(store.selectedContexts).toEqual([])
 
     store.activePanelId = store.panels[0].id
     await flushMicrotasks()
-    expect(store.selectedContexts).toEqual([
-      expect.objectContaining({ id: 'opened-local', kind: 'hosts', label: '127.0.0.1' })
-    ])
+    expect(store.selectedContexts).toEqual([])
 
     store.activePanelId = 'panel-open-prod'
     await flushMicrotasks()
-    expect(store.selectedContexts).toEqual([
-      expect.objectContaining({ id: 'asset-1', kind: 'hosts', label: 'prod-bastion' })
-    ])
+    expect(store.selectedContexts).toEqual([])
 
     store.selectedContexts = [{ id: 'manual-host', kind: 'hosts', label: '10.0.0.9', detail: 'manual selection' }]
     store.activePanelId = store.panels[0].id
@@ -8300,7 +8292,7 @@ describe('workspace store', () => {
     expect(store.selectedContexts.map((context) => context.id)).toEqual(['manual-host'])
   })
 
-  it('restores a saved host context without opening a terminal', async () => {
+  it('opens and binds a saved host terminal before restoring its context', async () => {
     const store = useWorkspaceStore()
     await store.refreshAiContextCatalog()
     vi.mocked(window.aiops.getProductSession).mockResolvedValueOnce({
@@ -8337,10 +8329,16 @@ describe('workspace store', () => {
       ])
     })
 
-    expect(window.aiops.createTerminal).not.toHaveBeenCalled()
+    expect(window.aiops.createTerminal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: 'asset-1',
+        kind: 'ssh',
+        title: 'prod-bastion'
+      })
+    )
   })
 
-  it('stops following the active host after the first successful send', async () => {
+  it('does not follow the active host without an explicit resource binding', async () => {
     const store = useWorkspaceStore()
     store.activePanel.sessionId = 'terminal-auto-follow-local'
     store.activePanel.status = 'running'
@@ -8351,18 +8349,7 @@ describe('workspace store', () => {
       kind: 'local'
     }
     await flushMicrotasks()
-    expect(store.selectedContexts).toEqual([
-      expect.objectContaining({ id: 'opened-local', kind: 'hosts' })
-    ])
-
-    await expect(store.sendChat('检查当前主机', undefined, undefined, { mode: 'command' })).resolves.toBe(true)
-    await flushMicrotasks()
-    expect(window.aiops.updateProductSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: expect.any(String),
-        classicContext: expect.objectContaining({ autoFollowActiveHost: false })
-      })
-    )
+    expect(store.selectedContexts).toEqual([])
 
     store.panels.push({
       ...store.activePanel,
@@ -8387,9 +8374,7 @@ describe('workspace store', () => {
     store.activePanelId = 'panel-auto-follow-remote'
     await flushMicrotasks()
 
-    expect(store.selectedContexts).toEqual([
-      expect.objectContaining({ id: 'opened-local', kind: 'hosts' })
-    ])
+    expect(store.selectedContexts).toEqual([])
   })
 
   it('loads AI slash command candidates from the backend bridge instead of the renderer knowledge tree', async () => {

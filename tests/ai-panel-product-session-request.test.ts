@@ -32,7 +32,15 @@ describe('AiPanel product session requests', () => {
       restoreHistoryConversation: vi.fn(async () => undefined),
       restoreCodexProductSession: vi.fn(async () => true),
       t: (key: string) => key,
-      workspace: { setTopNotice: vi.fn() }
+      workspace: {
+        activePanelId: '',
+        panels: [],
+        aiContextCatalog: { categories: [], openedHosts: [], selectedDefaults: [] },
+        setTopNotice: vi.fn(),
+        refreshAiContextCatalog: vi.fn(async () => true),
+        openTerminalForAiHostContext: vi.fn(async () => null),
+        activateTerminalPanel: vi.fn()
+      }
     }
   })
 
@@ -49,12 +57,17 @@ describe('AiPanel product session requests', () => {
       props: {
         agentMode: true,
         productSessionRequest: request({ action: 'create', surface: 'classic' }, 1)
-      }
+      },
+      global: { stubs: { Teleport: true } }
     })
     await flushPromises()
 
     expect(context.runtime.selectAiPanelMode).toHaveBeenCalledWith('classic')
-    expect(context.runtime.createNewAiConversation).toHaveBeenCalledTimes(1)
+    expect(context.runtime.createNewAiConversation).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="agents-resource-dialog"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="agents-resource-create"]').trigger('click')
+    await flushPromises()
+    expect(context.runtime.createNewAiConversation).toHaveBeenCalledWith([])
     expect(context.runtime.createNewCodexConversation).not.toHaveBeenCalled()
     expect(wrapper.emitted('productSessionRequestConsumed')).toEqual([[1]])
   })

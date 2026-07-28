@@ -7613,7 +7613,7 @@ describe('AppShell', () => {
           agentTask: {
             taskId: 'aichat-request-test-1',
             turnId: 'aichat-request-test-1-assistant',
-            targetId: 'asset-1',
+            targetId: 'asset-1::test-session-asset-1',
             targetLabel: '10.24.8.12',
             terminalSessionId: 'test-session-asset-1',
             toolCallId: 'tool-call-uptime',
@@ -7624,7 +7624,7 @@ describe('AppShell', () => {
         agentTask: {
           taskId: 'aichat-request-test-1',
           turnId: 'aichat-request-test-1-assistant',
-          targetId: 'asset-1',
+          targetId: 'asset-1::test-session-asset-1',
           targetLabel: '10.24.8.12',
           terminalSessionId: 'test-session-asset-1',
           toolCallId: 'tool-call-uptime',
@@ -7649,7 +7649,7 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
 
     expect(vi.mocked(window.aiops.generateAiChatResponse).mock.calls.at(-1)?.[0]?.hostTargets).toEqual([{
-      targetId: 'asset-1',
+      targetId: 'asset-1::test-session-asset-1',
       terminalSessionId: 'test-session-asset-1',
       label: '10.24.8.12',
       kind: 'ssh',
@@ -7686,7 +7686,7 @@ describe('AppShell', () => {
       turnId: 'aichat-request-test-1-assistant',
       toolCallId: 'tool-call-uptime',
       toolName: 'run_host_command',
-      targetId: 'asset-1',
+      targetId: 'asset-1::test-session-asset-1',
       targetLabel: '10.24.8.12',
       terminalSessionId: 'test-session-asset-1',
       approved: true,
@@ -8300,6 +8300,14 @@ describe('AppShell', () => {
     expect((wrapper.find('[data-testid="ai-message-input"]').element as HTMLElement).textContent).toContain('Provider transcript from test voice backend')
 
     const markdownContext = store.selectedContexts.find((context) => context.label === 'Markdown语法指南.md')!
+    expect(markdownContext).toBeTruthy()
+    await vi.waitFor(() => {
+      expect(
+        wrapper.findAll('.input-context-row .context-tag').some(
+          (tag) => tag.attributes('data-context-id') === markdownContext.id
+        )
+      ).toBe(true)
+    })
     const markdownContextTag = wrapper.findAll('.input-context-row .context-tag').find(
       (tag) => tag.attributes('data-context-id') === markdownContext.id
     )
@@ -11129,6 +11137,8 @@ describe('AppShell', () => {
     expect(globalCommandTerminal.focus).toHaveBeenCalledTimes(terminalFocusCallsBeforeGlobalInputClick)
     expect(document.activeElement).toBe(globalCommandInput.element)
     const runGlobalTerminalCommand = vi.spyOn(store, 'runGlobalTerminalCommand')
+    store.activePanel.sessionId = 'global-command-session'
+    store.activePanel.status = 'running'
     const globalTerminalSessionIds = store.panels.flatMap((panel) => panel.sessionId ? [panel.sessionId] : [])
     expect(globalTerminalSessionIds.length).toBeGreaterThan(0)
     vi.mocked(window.aiops.writeTerminal).mockClear()
@@ -11147,6 +11157,8 @@ describe('AppShell', () => {
     expect((wrapper.find('.terminal-global-command input').element as HTMLInputElement).value).toBe('')
 
     vi.mocked(window.aiops.createTerminal).mockClear()
+    store.activePanel.sessionId = undefined
+    store.activePanel.status = 'closed'
     await openLocalShellFromActiveTab(wrapper)
     expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local' }))
     expect(store.activePanel.sessionId).toBe('test-session-local')

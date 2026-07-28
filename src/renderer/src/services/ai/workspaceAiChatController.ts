@@ -18,7 +18,10 @@ import {
   isActiveClassicClineTaskMessage
 } from '@/services/ai/classicClineTaskRuntime'
 import {
+  classicHostBindingMatchesContext,
+  classicHostContextFromTerminalPanel,
   classicHostTargetId,
+  classicSessionContextRef,
   classicSessionContextRefs,
   restoreClassicSessionContexts,
   sendableClassicSessionContexts
@@ -72,6 +75,7 @@ import {
 } from '@shared/clineAgentTaskIdentity'
 import type {
   ProductSessionClassicContext,
+  ProductSessionContextRef,
   ProductSessionRecord
 } from '@shared/contracts/productSessions'
 
@@ -104,7 +108,7 @@ export const createWorkspaceAiChatController = (
     resolveAiKnowledgeSearchContexts,
     applyMcpServersSnapshot,
     openedHostContexts = () => [],
-    activeHostContext = () => null,
+    terminalPanels = () => [],
     resolveActiveWritableTerminalPanel,
     resolveClassicHostTerminalPanel,
     openTerminalForAiHostContext,
@@ -343,10 +347,9 @@ export const createWorkspaceAiChatController = (
   const classicHostOpenQueues = new Map<string, Promise<ReturnType<typeof resolveClassicHostTerminalPanel>>>()
   let classicContextRestoreGeneration = 0
   let applyingClassicContextProjection = false
-  let classicAutoFollowActiveHost = true
+  let classicAutoFollowActiveHost = false
   let stopSelectedContextsWatch: () => void = () => undefined
   let stopOpenedHostsWatch: () => void = () => undefined
-  let stopActiveHostWatch: () => void = () => undefined
 
   const onProductSessionChanged = productSessionClient.onChanged()
   const stopProductSessionChanged = onProductSessionChanged?.((event) => {
@@ -359,9 +362,8 @@ export const createWorkspaceAiChatController = (
       if (selectedConversationId.value === event.id) {
         selectedConversationId.value = ''
         chatMessages.value = []
-        classicAutoFollowActiveHost = true
+        classicAutoFollowActiveHost = false
         applyClassicContexts([])
-        syncAutoFollowHostContext()
         clearAiContextUsage()
       }
       return
@@ -376,13 +378,15 @@ export const createWorkspaceAiChatController = (
   const disposeClassicContextProjection = () => {
     stopSelectedContextsWatch()
     stopOpenedHostsWatch()
-    stopActiveHostWatch()
     stopProductSessionChanged?.()
     clineTaskEventLifecycle.dispose()
   }
 
   const cloneClassicContext = (context: ProductSessionClassicContext): ProductSessionClassicContext => ({
     contexts: context.contexts.map((item) => ({ ...item })),
+    ...(context.terminalBindings
+      ? { terminalBindings: context.terminalBindings.map((binding) => ({ ...binding })) }
+      : {}),
     ...(context.autoFollowActiveHost !== undefined ? { autoFollowActiveHost: context.autoFollowActiveHost } : {})
   })
 
@@ -430,26 +434,19 @@ export const createWorkspaceAiChatController = (
       .map((context) => classicHostTargetId(context))
       .join('\u0000')
 
-  const hasClassicUserMessage = () => chatMessages.value.some((message) => message.role === 'user')
-
-  const applyAutoFollowHostContext = () => {
-    if (!classicAutoFollowActiveHost || hasClassicUserMessage()) return false
-    const host = activeHostContext()
-    const nonHosts = selectedContexts.value.filter((context) => context.kind !== 'hosts')
-    const nextContexts = host ? [{ ...host }, ...nonHosts] : nonHosts
-    if (hostContextSignature(nextContexts) === hostContextSignature(selectedContexts.value)) return false
-    applyClassicContexts(nextContexts)
-    return true
-  }
-
   const persistClassicContextProjection = (
     id: string,
-    input: { contexts?: AiContextOption[]; autoFollowActiveHost?: boolean; notifyFailure?: boolean } = {}
+    input: {
+      contexts?: AiContextOption[]
+      terminalBindings?: ProductSessionContextRef[]
+      autoFollowActiveHost?: boolean
+      notifyFailure?: boolean
+    } = {}
   ) => {
     const conversationId = id.trim()
     if (!conversationId) return Promise.resolve(false)
     const contextRefs = classicSessionContextRefs(input.contexts || selectedContexts.value)
-    const autoFollowActiveHost = input.autoFollowActiveHost ?? classicAutoFollowActiveHost
+    const autoFollowActiveHost = false
     const previous = classicContextPersistQueues.get(conversationId) || Promise.resolve(true)
     const pending = previous
       .catch(() => false)
@@ -464,6 +461,8 @@ export const createWorkspaceAiChatController = (
         }
         const classicContext: ProductSessionClassicContext = {
           contexts: contextRefs.map((context) => ({ ...context })),
+          terminalBindings: (input.terminalBindings || contextRefs.filter((context) => context.kind === 'hosts'))
+            .map((binding) => ({ ...binding })),
           autoFollowActiveHost
         }
         const updateProductSession = productSessionClient.update()
@@ -492,12 +491,6 @@ export const createWorkspaceAiChatController = (
     return pending
   }
 
-  const syncAutoFollowHostContext = () => {
-    if (!applyAutoFollowHostContext()) return
-    const id = selectedConversationId.value.trim()
-    if (id) void persistClassicContextProjection(id)
-  }
-
   const resolveClassicHostTargets = async (
     hostContexts: AiContextOption[],
     options: { isCurrent?: () => boolean } = {}
@@ -522,12 +515,11 @@ export const createWorkspaceAiChatController = (
             candidate.status === 'closed' ||
             candidate.status === 'error' ||
             !canonicalTarget ||
-            canonicalTarget.targetId.trim() !== expectedTargetId ||
             canonicalTarget.terminalSessionId.trim() !== terminalSessionId ||
             canonicalTarget.kind !== expectedKind ||
             !canonicalTarget.label.trim()
           ) return null
-          return canonicalTarget
+          return { ...canonicalTarget, targetId: `${canonicalTarget.targetId}::${terminalSessionId}` }
         }
         let panel = resolveClassicHostTerminalPanel(context)
         let canonicalTarget = exactCanonicalTarget(panel)
@@ -571,9 +563,8 @@ export const createWorkspaceAiChatController = (
     if (generation !== classicContextRestoreGeneration || selectedConversationId.value !== id || session === undefined) return
     if (!session) {
       classicContextByConversationId.set(id, null)
-      classicAutoFollowActiveHost = !hasClassicUserMessage()
+      classicAutoFollowActiveHost = false
       applyClassicContexts([])
-      syncAutoFollowHostContext()
       return
     }
     const projection = session.classicContext ? cloneClassicContext(session.classicContext) : null
@@ -582,17 +573,92 @@ export const createWorkspaceAiChatController = (
       const catalog = catalogRefreshed
         ? aiContextCatalog.value
         : { categories: [], openedHosts: [] }
-      const restoredContexts = restoreClassicSessionContexts(projection.contexts, catalog)
-      const legacyEmptyProjection = projection.autoFollowActiveHost === undefined && projection.contexts.length === 0
-      classicAutoFollowActiveHost = (projection.autoFollowActiveHost === true || legacyEmptyProjection) && !hasClassicUserMessage()
+      const originalPanel = resolveActiveWritableTerminalPanel()
+      const storedBindings = projection.terminalBindings ||
+        projection.contexts.filter((context) => context.kind === 'hosts')
+      const restoredHosts: AiContextOption[] = []
+      const restoredTerminalSessionIds = new Set<string>()
+      for (const binding of storedBindings) {
+        if (generation !== classicContextRestoreGeneration || selectedConversationId.value !== id) return
+        let panel = resolveClassicHostTerminalPanel(binding)
+        let context = panel ? classicHostContextFromTerminalPanel(panel) : null
+        if (context && !classicHostBindingMatchesContext(binding, context)) {
+          panel = null
+          context = null
+        }
+        if (!panel) {
+          panel = await openTerminalForAiHostContext(binding, { silent: true })
+          context = panel ? classicHostContextFromTerminalPanel(panel) : null
+        }
+        if (!context || !classicHostBindingMatchesContext(binding, context)) continue
+        if (context.terminalSessionId && restoredTerminalSessionIds.has(context.terminalSessionId)) continue
+        restoredHosts.push(context)
+        if (context.terminalSessionId) restoredTerminalSessionIds.add(context.terminalSessionId)
+      }
+      if (originalPanel?.id) activateTerminalPanel(originalPanel.id)
+      const restoredNonHosts = restoreClassicSessionContexts(
+        projection.contexts.filter((context) => context.kind !== 'hosts'),
+        catalog
+      )
+      const restoredContexts = [...restoredHosts, ...restoredNonHosts]
+      const restoredBindings = classicSessionContextRefs(restoredHosts)
+      classicAutoFollowActiveHost = false
       applyClassicContexts(restoredContexts)
-      syncAutoFollowHostContext()
+      void persistClassicContextProjection(id, {
+        contexts: restoredContexts,
+        terminalBindings: restoredBindings,
+        autoFollowActiveHost: false
+      })
       return
     }
-    classicAutoFollowActiveHost = !hasClassicUserMessage()
+    classicAutoFollowActiveHost = false
     applyClassicContexts([])
-    syncAutoFollowHostContext()
-    void persistClassicContextProjection(id, { autoFollowActiveHost: classicAutoFollowActiveHost })
+    void persistClassicContextProjection(id, { autoFollowActiveHost: false })
+  }
+
+  const handleClassicTerminalClosed = async (panelId: string, terminalSessionId: string) => {
+    const listSessions = productSessionClient.list()
+    const updateSession = productSessionClient.update()
+    if (!listSessions || !updateSession) return []
+    const result = await listSessions({ surface: 'classic', isOpen: true, limit: 200 }).catch(() => null)
+    if (!result?.ok || !Array.isArray(result.data?.sessions)) return []
+    const closedSessionIds: string[] = []
+    const bindingMatchesClosedTerminal = (binding: ProductSessionContextRef) =>
+      Boolean(
+        (panelId && binding.panelId === panelId) ||
+        (terminalSessionId && binding.terminalSessionId === terminalSessionId)
+      )
+    const bindingIsLive = (binding: ProductSessionContextRef) => terminalPanels().some((panel) =>
+      panel.status !== 'closed' &&
+      panel.status !== 'error' &&
+      Boolean(panel.sessionId) &&
+      (
+        (binding.panelId && panel.id === binding.panelId) ||
+        (binding.terminalSessionId && panel.sessionId === binding.terminalSessionId)
+      )
+    )
+    for (const session of result.data.sessions) {
+      const projection = session.classicContext
+      if (!projection) continue
+      const bindings = projection.terminalBindings ||
+        projection.contexts.filter((context) => context.kind === 'hosts')
+      if (!bindings.some(bindingMatchesClosedTerminal)) continue
+      const contexts = projection.contexts.filter((context) => !bindingMatchesClosedTerminal(context))
+      const classicContext: ProductSessionClassicContext = {
+        contexts,
+        terminalBindings: bindings.map((binding) => ({ ...binding })),
+        autoFollowActiveHost: false
+      }
+      const updated = await updateSession({ id: session.id, classicContext }).catch(() => null)
+      if (!updated?.ok || !updated.data?.session) continue
+      classicContextByConversationId.set(session.id, cloneClassicContext(classicContext))
+      classicProductSessionById.set(session.id, cloneStructuredValue(updated.data.session))
+      if (selectedConversationId.value === session.id) {
+        applyClassicContexts(selectedContexts.value.filter((context) => !bindingMatchesClosedTerminal(classicSessionContextRef(context))))
+      }
+      if (!bindings.some(bindingIsLive)) closedSessionIds.push(session.id)
+    }
+    return closedSessionIds
   }
 
   const refreshAiContextCatalog = async (options: { hydrateSelection?: boolean } = { hydrateSelection: false }) => {
@@ -604,7 +670,6 @@ export const createWorkspaceAiChatController = (
     })
     if (refreshed && hasProjection && selectedConversationId.value === id) {
       applyClassicContexts(restoreClassicSessionContexts(refs, aiContextCatalog.value))
-      syncAutoFollowHostContext()
     }
     return refreshed
   }
@@ -629,27 +694,18 @@ export const createWorkspaceAiChatController = (
     () => syncOpenedHostContexts(),
     { deep: true, immediate: true }
   )
-  stopActiveHostWatch = watch(
-    activeHostContext,
-    () => syncAutoFollowHostContext(),
-    { deep: true, immediate: true }
-  )
-
-  const createConversation = async () => {
-    const startsFromExistingConversation = Boolean(selectedConversationId.value.trim())
-    const activeHost = startsFromExistingConversation ? activeHostContext() : null
-    const initialContexts = startsFromExistingConversation
-      ? (activeHost ? [{ ...activeHost }] : [])
-      : selectedContexts.value.map((context) => ({ ...context }))
-    const previousAutoFollowActiveHost = classicAutoFollowActiveHost
+  const createConversation = async (requestedContexts?: AiContextOption[]) => {
+    const initialContexts = requestedContexts
+      ? requestedContexts.map((context) => ({ ...context }))
+      : []
     const created = await createConversationHistory()
     if (!created) return null
-    if (startsFromExistingConversation) classicAutoFollowActiveHost = true
+    classicAutoFollowActiveHost = false
     classicContextByConversationId.set(created.id, null)
     applyClassicContexts(initialContexts)
     void persistClassicContextProjection(created.id, {
       contexts: initialContexts,
-      autoFollowActiveHost: startsFromExistingConversation ? true : previousAutoFollowActiveHost
+      autoFollowActiveHost: false
     })
     return created
   }
@@ -666,9 +722,8 @@ export const createWorkspaceAiChatController = (
   const deselectConversation = async (expectedConversationId: string) => {
     const deselected = await deselectConversationHistory(expectedConversationId)
     if (deselected && !selectedConversationId.value) {
-      classicAutoFollowActiveHost = true
+      classicAutoFollowActiveHost = false
       applyClassicContexts([])
-      syncAutoFollowHostContext()
     }
     return deselected
   }
@@ -1025,7 +1080,7 @@ export const createWorkspaceAiChatController = (
   } | null> => {
     let existing: ProductSessionRecord | null = null
     const recoverMissingProductSession = async (): Promise<{ id: string; session: ProductSessionRecord } | null> => {
-      const created = await createConversation()
+      const created = await createConversation(configuredContexts)
       const id = created?.id?.trim() || ''
       if (!id) {
         setTopNotice(i18nText('ai.productSessionStateUnavailable'))
@@ -1085,7 +1140,7 @@ export const createWorkspaceAiChatController = (
     if (!prompt && !hasStructuredParts) return false
     let conversationId = selectedConversationId.value.trim()
     if (!conversationId || !conversations.value.some((conversation) => conversation.id === conversationId)) {
-      const created = await createConversation()
+      const created = await createConversation(selectedContexts.value)
       conversationId = created?.id.trim() || ''
       if (!conversationId) {
         setTopNotice('会话创建失败')
@@ -1425,6 +1480,7 @@ export const createWorkspaceAiChatController = (
     renameConversation,
     toggleConversationFavorite,
     restoreConversation,
+    handleClassicTerminalClosed,
     toggleContext,
     removeContext,
     applyCommandPreset,

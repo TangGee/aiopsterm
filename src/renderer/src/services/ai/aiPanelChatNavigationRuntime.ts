@@ -12,7 +12,7 @@ import {
 } from '@/services/ai/aiPanelHistoryRuntime'
 import { aiPanelChatExportMessage } from '@/services/ai/aiPanelMessageRuntime'
 import { malformedAiBackendResultMessage } from '@/services/ai/aiBackendGuards'
-import type { AiChatAgentTaskRef, AiChatExportInput, AiChatExportResult, AiContentPart } from '@shared/contracts/aiChat'
+import type { AiChatAgentTaskRef, AiChatExportInput, AiChatExportResult, AiContentPart, AiContextOption } from '@shared/contracts/aiChat'
 
 export type AiPanelChatNavigationMessage = {
   id: string
@@ -84,7 +84,7 @@ export type AiPanelChatNavigationRuntimeOptions<TConversation extends AiPanelCon
   messages: () => TMessage[]
   locale: () => string
   t: (key: AiPanelChatNavigationI18nKey) => string
-  createConversation: () => Promise<{ id: string } | null | undefined>
+  createConversation: (initialContexts?: AiContextOption[]) => Promise<{ id: string } | null | undefined>
   cancelActiveTurn?: () => Promise<boolean>
   deselectConversation: (expectedConversationId: string) => Promise<boolean>
   restoreConversation: (id: string) => Promise<boolean>
@@ -274,7 +274,7 @@ export const createAiPanelChatNavigationRuntime = <
     closeConversationTab: (id: string) => aiPanelHistoryRuntime.closeConversationTab(id),
     closeHistoryMenu: () => aiPanelHistoryRuntime.closeHistoryMenu(),
     conversationTabTooltip,
-    createNewAiConversation: () => aiPanelHistoryRuntime.createNewConversation(),
+    createNewAiConversation: (initialContexts?: AiContextOption[]) => aiPanelHistoryRuntime.createNewConversation(initialContexts),
     deleteHistoryConversation: (id: string) => aiPanelHistoryRuntime.deleteHistoryConversation(id),
     displayConversationTitle,
     disposeChatSearchRuntime: () => aiPanelChatViewportRuntime.dispose(),

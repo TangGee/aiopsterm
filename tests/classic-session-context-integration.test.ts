@@ -132,6 +132,7 @@ describe('Classic session context integration', () => {
       id: 'conv-2',
       classicContext: {
         contexts: [],
+        terminalBindings: [],
         autoFollowActiveHost: false
       }
     })
@@ -209,11 +210,11 @@ describe('Classic session context integration', () => {
     ).resolves.toBe(true)
     expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ssh', assetId: 'asset-1' }))
     expect(vi.mocked(window.aiops.createAiChatExchangeRequest).mock.calls.at(-1)?.[0].hostTargets).toEqual([
-      expect.objectContaining({ targetId: 'asset-1', terminalSessionId: 'test-session-asset-1' })
+      expect.objectContaining({ targetId: 'asset-1::test-session-asset-1', terminalSessionId: 'test-session-asset-1' })
     ])
   })
 
-  it('restores multiple selected hosts and reconnects them in order only when sending', async () => {
+  it('restores multiple selected hosts by opening their terminals before continuing', async () => {
     vi.mocked(window.aiops.getProductSession).mockResolvedValue({
       ok: true,
       data: {
@@ -234,23 +235,28 @@ describe('Classic session context integration', () => {
 
     await expect(store.restoreConversation('conv-2')).resolves.toBe(true)
 
-    expect(window.aiops.createTerminal).not.toHaveBeenCalled()
+    expect(vi.mocked(window.aiops.createTerminal).mock.calls.map(([input]) => input?.assetId)).toEqual(['asset-1', 'asset-2'])
     expect(store.activePanel.id).toBe(originalPanelId)
+    expect(store.selectedContexts).toEqual([
+      expect.objectContaining({ assetId: 'asset-1', terminalSessionId: 'test-session-asset-1' }),
+      expect.objectContaining({ assetId: 'asset-2', terminalSessionId: 'test-session-asset-2' })
+    ])
+    vi.mocked(window.aiops.createTerminal).mockClear()
     vi.mocked(window.aiops.createAiChatExchangeRequest).mockClear()
     await expect(
       store.sendChat('分别检查两台主机', undefined, undefined, { mode: 'agent', skipKnowledgeSearch: true })
     ).resolves.toBe(true)
 
-    expect(vi.mocked(window.aiops.createTerminal).mock.calls.map(([input]) => input?.assetId)).toEqual(['asset-1', 'asset-2'])
+    expect(window.aiops.createTerminal).not.toHaveBeenCalled()
     const request = vi.mocked(window.aiops.createAiChatExchangeRequest).mock.calls.at(-1)?.[0]
     expect(request?.hostTargets).toEqual([
-      expect.objectContaining({ targetId: 'asset-1', terminalSessionId: 'test-session-asset-1', label: 'prod-bastion', kind: 'ssh' }),
-      expect.objectContaining({ targetId: 'asset-2', terminalSessionId: 'test-session-asset-2', label: 'staging-api', kind: 'ssh' })
+      expect.objectContaining({ targetId: 'asset-1::test-session-asset-1', terminalSessionId: 'test-session-asset-1', label: '10.24.8.12', kind: 'ssh' }),
+      expect.objectContaining({ targetId: 'asset-2::test-session-asset-2', terminalSessionId: 'test-session-asset-2', label: '10.24.12.44', kind: 'ssh' })
     ])
     expect(request).not.toHaveProperty('terminalSessionId')
   })
 
-  it('fails the whole Agent turn when one of several selected hosts cannot reconnect', async () => {
+  it('restores available hosts and silently drops a host that cannot reconnect', async () => {
     vi.mocked(window.aiops.getProductSession).mockResolvedValue({
       ok: true,
       data: {
@@ -277,13 +283,16 @@ describe('Classic session context integration', () => {
 
     await expect(
       store.sendChat('检查两台主机', undefined, undefined, { mode: 'agent', skipKnowledgeSearch: true })
-    ).resolves.toBe(false)
+    ).resolves.toBe(true)
 
-    expect(window.aiops.createAiChatExchangeRequest).not.toHaveBeenCalled()
-    expect(store.topNotice).toContain('已选主机中有不可用项')
+    expect(window.aiops.createAiChatExchangeRequest).toHaveBeenCalled()
+    expect(store.selectedContexts).toEqual([
+      expect.objectContaining({ assetId: 'asset-1', terminalSessionId: 'test-session-asset-1' })
+    ])
+    expect(store.topNotice).not.toContain('staging host unavailable')
   })
 
-  it('fails closed when two selected hosts resolve to the same terminal session', async () => {
+  it('keeps the usable binding when two restored hosts resolve to the same terminal session', async () => {
     vi.mocked(window.aiops.getProductSession).mockResolvedValue({
       ok: true,
       data: {
@@ -319,13 +328,12 @@ describe('Classic session context integration', () => {
 
     await expect(
       store.sendChat('检查两台主机', undefined, undefined, { mode: 'agent', skipKnowledgeSearch: true })
-    ).resolves.toBe(false)
+    ).resolves.toBe(true)
 
-    expect(window.aiops.createAiChatExchangeRequest).not.toHaveBeenCalled()
-    expect(store.topNotice).toContain('已选主机中有不可用项')
+    expect(window.aiops.createAiChatExchangeRequest).toHaveBeenCalled()
   })
 
-  it('keeps missing restored hosts unavailable and does not silently switch Agent to the active terminal', async () => {
+  it('drops a missing restored host and does not switch Agent to the active terminal', async () => {
     vi.mocked(window.aiops.getProductSession).mockResolvedValue({
       ok: true,
       data: {
@@ -351,12 +359,95 @@ describe('Classic session context integration', () => {
     store.activePanel.sshSession = undefined
     vi.mocked(window.aiops.createAiChatExchangeRequest).mockClear()
 
-    await expect(store.sendChat('继续检查生产环境', undefined, undefined, { mode: 'agent' })).resolves.toBe(false)
+    await expect(store.sendChat('继续检查生产环境', undefined, undefined, { mode: 'agent' })).resolves.toBe(true)
 
-    expect(window.aiops.createAiChatExchangeRequest).not.toHaveBeenCalled()
-    expect(store.selectedContexts).toEqual([
-      expect.objectContaining({ id: 'asset-missing', kind: 'hosts', unavailable: true })
+    expect(window.aiops.createAiChatExchangeRequest).toHaveBeenCalled()
+    expect(store.selectedContexts).toEqual([])
+    expect(store.topNotice).not.toContain('prod.internal')
+  })
+
+  it('keeps Classic terminal bindings for restore and closes only after the last live terminal closes', async () => {
+    const store = useWorkspaceStore()
+    const firstPanel = store.activePanel
+    firstPanel.sessionId = 'terminal-asset-1'
+    firstPanel.status = 'running'
+    firstPanel.sshSession = {
+      assetId: 'asset-1',
+      connectionId: 'connection-asset-1',
+      assetName: 'Production',
+      host: '10.24.8.12',
+      port: 22,
+      username: 'ops'
+    }
+    const secondPanel = store.createPanel()
+    secondPanel.sessionId = 'terminal-asset-2'
+    secondPanel.status = 'running'
+    secondPanel.sshSession = {
+      assetId: 'asset-2',
+      connectionId: 'connection-asset-2',
+      assetName: 'Staging',
+      host: '10.24.12.44',
+      port: 22,
+      username: 'deploy'
+    }
+    if (!firstPanel.sessionId || !secondPanel.sessionId) throw new Error('expected terminal panels')
+    const bindings = [
+      {
+        id: 'asset-1',
+        kind: 'hosts' as const,
+        label: 'Production',
+        assetId: 'asset-1',
+        panelId: firstPanel.id,
+        terminalSessionId: firstPanel.sessionId,
+        host: '10.24.8.12',
+        port: 22,
+        username: 'ops'
+      },
+      {
+        id: 'asset-2',
+        kind: 'hosts' as const,
+        label: 'Staging',
+        assetId: 'asset-2',
+        panelId: secondPanel.id,
+        terminalSessionId: secondPanel.sessionId,
+        host: '10.24.12.44',
+        port: 22,
+        username: 'deploy'
+      }
+    ]
+    let currentSession = session({
+      classicContext: {
+        contexts: bindings.map((binding) => ({ ...binding })),
+        terminalBindings: bindings.map((binding) => ({ ...binding })),
+        autoFollowActiveHost: false
+      }
+    })
+    vi.mocked(window.aiops.listProductSessions).mockImplementation(async () => ({
+      ok: true,
+      data: { sessions: [currentSession] }
+    }))
+    vi.mocked(window.aiops.updateProductSession).mockImplementation(async (input) => {
+      currentSession = {
+        ...currentSession,
+        ...(input.classicContext === null
+          ? { classicContext: undefined }
+          : input.classicContext
+            ? { classicContext: input.classicContext }
+            : {}),
+        updatedAt: currentSession.updatedAt + 1
+      }
+      return { ok: true, data: { session: currentSession } }
+    })
+
+    firstPanel.status = 'closed'
+    await expect(store.handleClassicTerminalClosed(firstPanel.id, firstPanel.sessionId)).resolves.toEqual([])
+    expect(currentSession.classicContext?.contexts).toEqual([
+      expect.objectContaining({ assetId: 'asset-2' })
     ])
-    expect(store.topNotice).toContain('已选主机中有不可用项')
+    expect(currentSession.classicContext?.terminalBindings).toHaveLength(2)
+
+    secondPanel.status = 'closed'
+    await expect(store.handleClassicTerminalClosed(secondPanel.id, secondPanel.sessionId)).resolves.toEqual(['conv-2'])
+    expect(currentSession.classicContext?.terminalBindings).toHaveLength(2)
   })
 })

@@ -58,18 +58,25 @@ const currentProductContext = (
   const target = storedSession?.target || launchTargetFromOptions(options)
   const projectRoot = storedSession?.projectRoot || String(options.projectRoot || options.target?.cwd || '').trim() || undefined
   const lastKnownCwd = storedSession?.lastKnownCwd || options.target?.cwd
+  const stableScopeKey = [
+    'embedded-tui',
+    projectRoot || '',
+    target?.kind || '',
+    target?.assetId || '',
+    target?.host || '',
+    target?.port || '',
+    target?.username || ''
+  ].join('\0')
+  const launchThreadId = options.launch?.mode === 'resume' ? String(options.launch.threadId || '').trim() : ''
+  const retainedScopeKey = storedSession?.nativeBinding?.engine === 'codex' &&
+    storedSession.nativeBinding.nativeSessionId === launchThreadId
+    ? storedSession.nativeBinding.scopeKey
+    : undefined
   return {
     target,
     projectRoot,
     lastKnownCwd,
-    scopeKey: [
-      'embedded-tui',
-      projectRoot || '',
-      target?.kind || '',
-      target?.assetId || '',
-      target?.connectionId || '',
-      target?.host || ''
-    ].join('\0')
+    scopeKey: retainedScopeKey || stableScopeKey
   }
 }
 

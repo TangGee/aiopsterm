@@ -396,7 +396,8 @@ describe('aiPanelCodexConversationRuntime', () => {
       ok: true,
       data: { sessions: [productSession] }
     }))
-    const { runtime, terminalRuntime } = createHarness()
+    const { openTerminalForAiHostContext, panels, runtime, terminalRuntime } = createHarness()
+    openTerminalForAiHostContext.mockResolvedValue(panels[0])
 
     runtime.startInitialMode()
     await vi.waitFor(() => expect(runtime.activeCodexConversation.value?.id).toBe(productSession.id))
@@ -466,7 +467,7 @@ describe('aiPanelCodexConversationRuntime', () => {
     runtime.dispose()
   })
 
-  it('restores out-of-root Codex history as a visible tab without starting its native thread', async () => {
+  it('rejects Codex restore when the reopened terminal is outside the saved project root', async () => {
     const closedSession = codexProductSession({
       id: 'product-codex-out-of-root-history',
       isOpen: false,
@@ -498,13 +499,8 @@ describe('aiPanelCodexConversationRuntime', () => {
     await vi.waitFor(() => expect(runtime.codexSessionHistory.value).toContainEqual(closedSession))
     terminalRuntime.calls.startSession.mockClear()
 
-    await expect(runtime.restoreCodexProductSession(closedSession.id)).resolves.toBe(true)
-
-    expect(runtime.activeCodexConversation.value).toMatchObject({
-      id: closedSession.id,
-      nativeThreadId: closedSession.nativeBinding?.nativeSessionId,
-      boundTarget: expect.objectContaining({ sessionId: 'terminal-ssh' })
-    })
+    await expect(runtime.restoreCodexProductSession(closedSession.id)).resolves.toBe(false)
+    expect(runtime.activeCodexConversation.value).toBeNull()
     expect(terminalRuntime.calls.startSession).not.toHaveBeenCalled()
     runtime.dispose()
   })
@@ -556,7 +552,7 @@ describe('aiPanelCodexConversationRuntime', () => {
       }
     })
     window.aiops.listProductSessions = vi.fn(async () => ({ ok: true, data: { sessions: [session] } }))
-    const { panels, runtime } = createHarness()
+    const { panels, runtime, terminalRuntime } = createHarness()
     panels.unshift({
       ...localPanel(),
       id: 'panel-unrelated-local',
@@ -1123,7 +1119,7 @@ describe('aiPanelCodexConversationRuntime', () => {
     }))
   })
 
-  it('archives a bound native thread before creating an unbound tab and restores only the replacement after remount', async () => {
+  it('archives a bound native thread and keeps the unbound replacement as an unpersisted draft', async () => {
     const sessions = new Map<string, ProductSessionRecord>()
     let now = 10
     window.aiops.listProductSessions = vi.fn(async () => ({
@@ -1208,9 +1204,7 @@ describe('aiPanelCodexConversationRuntime', () => {
       isOpen: false,
       nativeBinding: { nativeSessionId: nativeConversation.nativeThreadId }
     })
-    expect(sessions.get(replacement!.id)).toMatchObject({ isOpen: true })
-    expect(sessions.get(replacement!.id)?.target).toBeUndefined()
-    expect(sessions.get(replacement!.id)?.nativeBinding).toBeUndefined()
+    expect(sessions.has(replacement!.id)).toBe(false)
     expect(firstHarness.runtime.codexSessionHistory.value.find((session) => session.id === nativeConversation.id)).toMatchObject({
       isOpen: false,
       nativeBinding: { nativeSessionId: nativeConversation.nativeThreadId }
@@ -1219,11 +1213,9 @@ describe('aiPanelCodexConversationRuntime', () => {
     firstHarness.runtime.dispose()
     const secondHarness = createHarness()
     secondHarness.runtime.startInitialMode()
-    await vi.waitFor(() => expect(secondHarness.runtime.activeCodexConversation.value?.id).toBe(replacement?.id))
-
-    expect(secondHarness.runtime.codexConversations.value.map((conversation) => conversation.id)).toEqual([replacement?.id])
-    expect(secondHarness.runtime.activeCodexConversation.value).toMatchObject({ boundTarget: null })
-    expect(secondHarness.runtime.activeCodexConversation.value?.nativeThreadId).toBeUndefined()
+    await vi.waitFor(() => expect(window.aiops.listProductSessions).toHaveBeenCalled())
+    expect(secondHarness.runtime.codexConversations.value).toEqual([])
+    expect(secondHarness.runtime.activeCodexConversation.value).toBeNull()
     expect(secondHarness.terminalRuntime.calls.startSession).not.toHaveBeenCalled()
     secondHarness.runtime.dispose()
   })
@@ -1306,6 +1298,31 @@ describe('aiPanelCodexConversationRuntime', () => {
     expect(terminalRuntime.calls.disposeSubscriptions).toHaveBeenCalled()
     expect(removedAttention).toContain(`codex:${first.id}`)
     expect(attention.some((item) => item.surfaceId === 'agents-ai-panel')).toBe(true)
+  })
+
+  it('closes every Codex session bound to a terminal when that terminal closes', async () => {
+    const { panels, runtime, terminalRuntime } = createHarness()
+    await runtime.createNewCodexConversation()
+    await runtime.bindTerminalPanelToCodex(panels[1], 'first-shared-binding')
+    const firstId = runtime.activeCodexConversation.value?.id
+    await runtime.createNewCodexConversation()
+    await runtime.bindTerminalPanelToCodex(panels[1], 'second-shared-binding')
+    const secondId = runtime.activeCodexConversation.value?.id
+    terminalRuntime.calls.stopSession
+      .mockResolvedValueOnce({ ok: true, data: { id: 'codex-first' } })
+      .mockResolvedValueOnce({ ok: false, errorCode: 'CODEX_STOP_FAILED', errorMessage: 'already closed' })
+
+    await expect(runtime.handleCodexTerminalClosed(panels[1].id, panels[1].sessionId || '')).resolves.toEqual([
+      firstId,
+      secondId
+    ])
+
+    expect(runtime.codexConversations.value.map((conversation) => conversation.id)).not.toEqual(
+      expect.arrayContaining([firstId, secondId])
+    )
+    expect(window.aiops.closeProductSession).toHaveBeenCalledWith(firstId)
+    expect(window.aiops.closeProductSession).toHaveBeenCalledWith(secondId)
+    runtime.dispose()
   })
 
   it('links workspace terminal tab changes to already-bound Codex conversations', async () => {

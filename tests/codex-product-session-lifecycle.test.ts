@@ -207,7 +207,7 @@ describe('Codex product session lifecycle', () => {
         engine: 'codex',
         nativeSessionId: 'thread-after-switch',
         profile: 'embedded-tui',
-        scopeKey: 'embedded-tui\0/srv/app\0ssh\0asset-current\0connection-current\0current.internal'
+        scopeKey: 'embedded-tui\0/srv/app\0ssh\0asset-current\0current.internal\0\0deploy'
       }
     })
     expect(stopRuntime).not.toHaveBeenCalled()
