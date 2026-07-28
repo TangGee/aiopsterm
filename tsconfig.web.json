@@ -13,6 +13,7 @@
     "tests/**/*.ts"
   ],
   "exclude": [
-    "tests/cline-agent-sidecar-runtime.test.ts"
+    "tests/cline-agent-sidecar-runtime.test.ts",
+    "tests/local-editor-files-backend.test.ts"
   ]
 }
