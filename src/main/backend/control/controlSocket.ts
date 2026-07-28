@@ -114,6 +114,7 @@ import {
   systemIdentify
 } from './controlSocketSystemRuntime'
 import { publishRendererMutationEvent } from './controlSocketRendererMutationRuntime'
+import { inspectLocalEditorFile } from '../files/localEditorFiles'
 
 type ControlSocketRequest = {
   id?: string
@@ -168,6 +169,62 @@ const isTmuxCompatMethod = (method: string) =>
     'copy-mode'
   ].includes(method)
 
+const localEditorOpenPaths = (params: Record<string, unknown>) => {
+  if (Array.isArray(params.paths)) return params.paths.filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
+  const path = cleanText(params.path)
+  return path ? [path] : []
+}
+
+const handleLocalEditorOpenRequest = async (params: Record<string, unknown>): Promise<ControlResponse> => {
+  const requestedPaths = localEditorOpenPaths(params)
+  if (!requestedPaths.length) return fail('LOCAL_EDITOR_FILE_PATH_REQUIRED', 'aiopen requires at least one file path.')
+  const openedPaths: string[] = []
+  const failures: Array<{ path: string; errorCode: string; errorMessage: string }> = []
+  for (const requestedPath of requestedPaths) {
+    const inspected = await inspectLocalEditorFile(requestedPath)
+    if (!inspected.ok || !inspected.data) {
+      failures.push({
+        path: requestedPath,
+        errorCode: inspected.errorCode || 'LOCAL_EDITOR_FILE_FAILED',
+        errorMessage: inspected.errorMessage || 'The file could not be opened.'
+      })
+      continue
+    }
+    if (!openedPaths.includes(inspected.data.filePath)) openedPaths.push(inspected.data.filePath)
+  }
+  let rendererData: Record<string, unknown> = {
+    opened: false,
+    openedPaths: [],
+    opened_paths: [],
+    surfaces: []
+  }
+  if (openedPaths.length) {
+    const response = await dispatchRendererControlRequest(
+      'file.editor.open',
+      { ...params, paths: openedPaths },
+      { focus: params.focus !== false }
+    )
+    if (!response.ok) return response
+    rendererData = response.data || rendererData
+    publishRendererMutationEvent('file.editor.open', { ...params, paths: openedPaths }, response)
+  }
+  const data = {
+    ...rendererData,
+    opened: openedPaths.length > 0,
+    openedPaths,
+    opened_paths: openedPaths,
+    failures
+  }
+  if (failures.length) {
+    return fail(
+      openedPaths.length ? 'LOCAL_EDITOR_FILE_OPEN_PARTIAL' : 'LOCAL_EDITOR_FILE_OPEN_FAILED',
+      openedPaths.length ? 'Some files could not be opened.' : 'No files could be opened.',
+      data
+    )
+  }
+  return ok(data)
+}
+
 const handleControlRequest = async (request: ControlSocketRequest): Promise<ControlResponse> => {
   const method = cleanText(request.method)
   const params = request.params || {}
@@ -195,6 +252,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   if (isAgentSessionMethod(method)) return handleAgentSessionControlRequest(method, params)
   if (isSessionMethod(method)) return handleSessionControlRequest(method, params)
   if (isControlMobileTerminalMethod(method)) return handleMobileTerminalControlRequest(method, params)
+  if (method === 'file.editor.open') return handleLocalEditorOpenRequest(params)
   if (isControlProjectFileMethod(method)) {
     const response = await dispatchRendererControlRequest(method, params, { focus: ['project.open', 'markdown.open', 'file.open'].includes(method) && params.focus !== false })
     publishRendererMutationEvent(method, params, response)

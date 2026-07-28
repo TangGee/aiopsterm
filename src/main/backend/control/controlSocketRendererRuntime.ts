@@ -496,7 +496,8 @@ const projectFileControlMethods = new Set([
   'project.set_settings_filter',
   'project.get_state',
   'markdown.open',
-  'file.open'
+  'file.open',
+  'file.editor.open'
 ])
 
 export const isControlProjectFileMethod = (method: string) => projectFileControlMethods.has(method)

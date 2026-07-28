@@ -12,6 +12,7 @@ const usage = () => `aio [--socket <path>] [--json] <command>
 Commands:
   help
   ping
+  aiopen <path>...
   capabilities
   identify
   context [--include-snapshot]
@@ -1028,6 +1029,7 @@ const methodParams = () => {
   if (command === 'capabilities' || command === 'system-capabilities') return { method: 'system.capabilities', params: {} }
   if (command === 'identify' || command === 'system-identify') return { method: 'system.identify', params: { caller: readCallerParams() } }
   if (command === 'context') return workspaceContextMethodParams()
+  if (command === 'aiopen') return aiopenMethodParams()
   if (command === 'recipes' || command === 'recipe' || command === 'examples') return controlRecipesMethodParams()
   if (command === 'completion' || command === 'completions') return shellCompletionMethodParams(args.shift() || 'bash')
   if (command === 'complete') return completeMethodParams(args.shift() || '')
@@ -2327,6 +2329,28 @@ const fileMethodParams = (subcommand) => {
   }
 }
 
+const aiopenMethodParams = () => {
+  let literalPaths = false
+  const pathArgs = args.filter((arg) => {
+    if (arg === '--') {
+      literalPaths = true
+      return false
+    }
+    return literalPaths || !arg.startsWith('--')
+  })
+  const paths = pathArgs
+    .map((filePath) => path.resolve(process.cwd(), filePath))
+  if (!paths.length) throw new Error('aiopen requires at least one file path')
+  return {
+    method: 'file.editor.open',
+    params: {
+      paths,
+      cwd: process.cwd(),
+      focus: true
+    }
+  }
+}
+
 const waitForMethodParams = () => {
   const signal = hasFlag('-S') || hasFlag('--signal')
   const timeout = Number(readOption('--timeout') || 0)
@@ -3424,6 +3448,20 @@ const printAgentSessionLine = (session, prefix = 'agent-session') => {
 }
 
 const printResponse = (response) => {
+  if (
+    !outputJson &&
+    !response.ok &&
+    (response.errorCode === 'LOCAL_EDITOR_FILE_OPEN_PARTIAL' || response.errorCode === 'LOCAL_EDITOR_FILE_OPEN_FAILED')
+  ) {
+    const data = response.data || {}
+    for (const filePath of data.openedPaths || data.opened_paths || []) {
+      process.stdout.write(`opened\t${filePath}\n`)
+    }
+    for (const failure of data.failures || []) {
+      process.stderr.write(`failed\t${failure.path || '-'}\t${failure.errorMessage || failure.errorCode || 'Unable to open file.'}\n`)
+    }
+    return
+  }
   if (!outputJson && !response.ok && response.errorCode === 'TMUX_COMPAT_UNSUPPORTED') {
     const data = response.data || {}
     process.stdout.write(['unsupported', data.command || '-', data.unsupportedReason || response.errorMessage || ''].join('\t') + '\n')
@@ -3434,6 +3472,12 @@ const printResponse = (response) => {
     return
   }
   const data = response.data || {}
+  if (Array.isArray(data.openedPaths) || Array.isArray(data.opened_paths)) {
+    for (const filePath of data.openedPaths || data.opened_paths || []) {
+      process.stdout.write(`opened\t${filePath}\n`)
+    }
+    return
+  }
   if (Array.isArray(data.completions)) {
     for (const item of data.completions) process.stdout.write(`${item}\n`)
     return

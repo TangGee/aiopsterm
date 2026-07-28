@@ -79,7 +79,7 @@ export type ControlSurfaceSummary = {
   title: string
   titleSource?: 'system' | 'user' | 'auto'
   title_source?: 'system' | 'user' | 'auto'
-  surfaceKind: 'terminal' | 'knowledge' | 'managed-ai-session'
+  surfaceKind: 'terminal' | 'knowledge' | 'managed-ai-session' | 'local-file'
   active: boolean
   status?: string
   cwd?: string
@@ -107,6 +107,9 @@ export type ControlSurfaceSummary = {
   managedAiSession?: {
     source: AiAgentSessionSource
     sessionId: string
+  }
+  localFile?: {
+    filePath: string
   }
 }
 

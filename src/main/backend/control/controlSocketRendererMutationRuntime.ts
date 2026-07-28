@@ -22,6 +22,7 @@ const rendererMutationEventName = (method: string) => {
   if (method.startsWith('project.set_')) return 'project.updated'
   if (method === 'markdown.open') return 'markdown.opened'
   if (method === 'file.open') return 'file.opened'
+  if (method === 'file.editor.open') return 'file.editor_opened'
   if (method.startsWith('workspace.group.') && method !== 'workspace.group.list') return method.replace('workspace.group.', 'workspace_group.')
   if (method.startsWith('surface.resume.') && !['surface.resume.get', 'surface.resume.show', 'surface.resume.preview', 'surface.resume.autorun.preview'].includes(method)) return method.replace('surface.resume.', 'surface_resume.')
   if (method === 'surface.focus') return 'surface.focused'
@@ -78,7 +79,7 @@ const rendererMutationEventName = (method: string) => {
 }
 
 const rendererMutationCategory = (method: string) => {
-  if (method.startsWith('project.') || method === 'markdown.open' || method === 'file.open') return 'project'
+  if (method.startsWith('project.') || method === 'markdown.open' || method === 'file.open' || method === 'file.editor.open') return 'project'
   if (method.startsWith('workspace.group.')) return 'workspace'
   if (method.startsWith('workspace.')) return 'workspace'
   if (method.startsWith('remote.tmux.')) return 'workspace'

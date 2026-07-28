@@ -318,6 +318,12 @@ import type {
   ChatImageAttachmentPrepareResult,
   ChatImageAttachmentValidateInput,
   ChatImageAttachmentValidateResult,
+  LocalEditorFileReadResult,
+  LocalEditorFileWatchEvent,
+  LocalEditorFileWatchInput,
+  LocalEditorFileWatchResult,
+  LocalEditorFileWriteInput,
+  LocalEditorFileWriteResult,
   LocalFileReadResult,
   LocalFileWriteResult,
   OpenDialogOptions,
@@ -551,6 +557,11 @@ export type AiopsPreloadApi = {
   saveCustomNotificationSound: (srcAbsPath: string) => Promise<CustomNotificationSoundSaveResult>
   readLocalFile: (filePath: string) => Promise<LocalFileReadResult>
   writeLocalFile: (filePath: string, content: string) => Promise<LocalFileWriteResult>
+  readLocalEditorFile: (filePath: string) => Promise<LocalEditorFileReadResult>
+  writeLocalEditorFile: (input: LocalEditorFileWriteInput) => Promise<LocalEditorFileWriteResult>
+  startLocalEditorFileWatch: (input: LocalEditorFileWatchInput) => Promise<LocalEditorFileWatchResult>
+  stopLocalEditorFileWatch: (watchId: string) => Promise<LocalEditorFileWatchResult>
+  onLocalEditorFileWatchEvent: (listener: (event: LocalEditorFileWatchEvent) => void) => () => void
   stageChatAttachment: (payload: { taskId: string; srcAbsPath: string }) => Promise<ChatAttachmentStageResult>
   validateChatImageAttachment: (input: ChatImageAttachmentValidateInput) => Promise<ChatImageAttachmentValidateResult>
   prepareChatImageAttachment: (input: ChatImageAttachmentPrepareInput) => Promise<ChatImageAttachmentPrepareResult>

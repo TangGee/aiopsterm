@@ -2,7 +2,7 @@ import { createServer, type Server } from 'net'
 import { execFile } from 'child_process'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { readFile, rm } from 'fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { promisify } from 'util'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -10,6 +10,7 @@ const execFileAsync = promisify(execFile)
 
 const servers: Server[] = []
 const socketPaths: string[] = []
+const tempDirs: string[] = []
 
 const runCliCompletion = async (args: string[]) => {
   const result = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', ...args], {
@@ -69,6 +70,7 @@ describe('aio CLI', () => {
   afterEach(async () => {
     await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))))
     await Promise.all(socketPaths.splice(0).map((socketPath) => rm(socketPath, { force: true })))
+    await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
   })
 
   it('prints help and reports unknown commands without a stack trace', async () => {
@@ -164,6 +166,62 @@ describe('aio CLI', () => {
       })
     )
     expect(seen).toEqual([expect.objectContaining({ method: 'terminal.list' })])
+  })
+
+  it('resolves aiopen paths from the invocation directory and reports partial failures', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-aiopen-cli-'))
+    tempDirs.push(dir)
+    const relativePath = join(dir, 'relative file.txt')
+    const absolutePath = join(dir, 'absolute.txt')
+    await writeFile(relativePath, 'relative\n', 'utf8')
+    await writeFile(absolutePath, 'absolute\n', 'utf8')
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      return {
+        id: request.id,
+        ok: false,
+        errorCode: 'LOCAL_EDITOR_FILE_OPEN_PARTIAL',
+        errorMessage: 'Some files could not be opened.',
+        data: {
+          openedPaths: [relativePath, absolutePath],
+          failures: [{
+            path: join(dir, 'missing.txt'),
+            errorCode: 'LOCAL_EDITOR_FILE_NOT_FOUND',
+            errorMessage: 'The requested file does not exist.'
+          }]
+        }
+      }
+    })
+
+    try {
+      await execFileAsync(process.execPath, [
+        join(process.cwd(), 'resources/aiopsterm-control.js'),
+        '--socket',
+        socketPath,
+        'aiopen',
+        'relative file.txt',
+        absolutePath,
+        'missing.txt'
+      ], { cwd: dir })
+      throw new Error('expected partial aiopen request to fail')
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: 1,
+        stdout: `opened\t${relativePath}\nopened\t${absolutePath}\n`,
+        stderr: `failed\t${join(dir, 'missing.txt')}\tThe requested file does not exist.\n`
+      })
+    }
+    expect(seen).toEqual([
+      expect.objectContaining({
+        method: 'file.editor.open',
+        params: {
+          paths: [relativePath, absolutePath, join(dir, 'missing.txt')],
+          cwd: dir,
+          focus: true
+        }
+      })
+    ])
   })
 
   it('routes managed host ssh shortcuts and completion requests', async () => {

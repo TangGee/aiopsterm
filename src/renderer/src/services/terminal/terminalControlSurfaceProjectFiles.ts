@@ -150,6 +150,43 @@ export const createTerminalControlSurfaceProjectFileHandlers = ({
     })
   }
 
+  const openControlLocalEditorFiles = async (params: Record<string, unknown>) => {
+    const paths = controlFileOpenRawPaths(params)
+    if (!paths.length) return controlFail('FILE_PATH_REQUIRED', 'file.editor.open requires at least one path.')
+    const sourcePanel = resolveControlSourceSurfacePanel(params)
+    const previousActivePanelId = workspace.activePanelId
+    const openedPanels = paths
+      .map((filePath) => workspace.openLocalFile(filePath))
+      .filter((panel): panel is TerminalPanel => Boolean(panel))
+    const primary = openedPanels[openedPanels.length - 1] || null
+    if (!primary) return controlFail('LOCAL_FILE_OPEN_FAILED', 'Local files could not be opened.', { paths })
+    if (!controlBool(params.focus, true) && workspace.panels.some((item) => item.id === previousActivePanelId)) {
+      workspace.activePanelId = previousActivePanelId
+    } else {
+      await focusControlSurfacePanel(primary, false)
+    }
+    const surfaces = openedPanels.map((panel) => surfaceSummaryForControl(panel))
+    return controlOk({
+      opened: true,
+      path: primary.localFile?.filePath || '',
+      paths: openedPanels.map((panel) => panel.localFile?.filePath || ''),
+      surfaceId: primary.id,
+      surface_id: primary.id,
+      surfaceRef: panelRefForControl(primary.id),
+      surface_ref: panelRefForControl(primary.id),
+      panelId: primary.id,
+      paneId: primary.id,
+      pane_id: primary.id,
+      sourceSurfaceId: sourcePanel?.id || null,
+      source_surface_id: sourcePanel?.id || null,
+      workspaceId: 'main',
+      workspace_id: 'main',
+      surface: surfaceSummaryForControl(primary),
+      surfaces,
+      snapshot: workspaceSnapshotForControl()
+    })
+  }
+
   const projectStatePayloadForControl = (state: ControlProjectState, panel?: TerminalPanel | null) => ({
     surface_id: state.surfaceId,
     surfaceId: state.surfaceId,
@@ -186,6 +223,7 @@ export const createTerminalControlSurfaceProjectFileHandlers = ({
   }
 
   const handleProjectFileControlRequest = async (method: string, params: Record<string, unknown>) => {
+    if (method === 'file.editor.open') return openControlLocalEditorFiles(params)
     if (method === 'markdown.open' || method === 'file.open') return openControlKnowledgeFiles(params, method)
 
     if (method === 'project.open') {

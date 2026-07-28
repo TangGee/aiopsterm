@@ -99,7 +99,7 @@ export const createTerminalControlSurfaceSessionHandlers = ({
     const now = Date.now()
     const id = controlText(params.id || params.name) || 'latest'
     const panels = workspace.panels
-      .filter((panel) => !isWelcomePlaceholderPanel(panel))
+      .filter((panel) => !isWelcomePlaceholderPanel(panel) && panel.kind !== 'local-file')
       .map(sessionPanelSnapshotForControl)
     return {
       id,

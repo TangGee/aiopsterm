@@ -36,7 +36,7 @@
           role="button"
           tabindex="0"
           :title="terminalTabTooltip(panel)"
-          :draggable="panel.kind === 'terminal' || panel.kind === 'knowledge' || panel.kind === 'managed-ai-session' || panel.kind === 'project-file'"
+          :draggable="panel.kind === 'terminal' || panel.kind === 'knowledge' || panel.kind === 'managed-ai-session' || panel.kind === 'project-file' || panel.kind === 'local-file'"
           @click="activatePanel(panel.id)"
           @keydown.enter.prevent="activatePanel(panel.id)"
           @keydown.space.prevent="activatePanel(panel.id)"
@@ -50,10 +50,10 @@
         >
           <span
             class="terminal-tab-icon"
-            :data-terminal-tab-kind="panel.kind === 'project-file' ? 'project-file' : panel.kind === 'knowledge' ? 'knowledge' : panel.kind === 'managed-ai-session' ? 'managed-ai-session' : panel.sshSession ? 'ssh' : 'local'"
+            :data-terminal-tab-kind="panel.kind === 'local-file' ? 'local-file' : panel.kind === 'project-file' ? 'project-file' : panel.kind === 'knowledge' ? 'knowledge' : panel.kind === 'managed-ai-session' ? 'managed-ai-session' : panel.sshSession ? 'ssh' : 'local'"
             aria-hidden="true"
           >
-            <FileCode2 v-if="panel.kind === 'project-file'" />
+            <FileCode2 v-if="panel.kind === 'project-file' || panel.kind === 'local-file'" />
             <BookOpenText v-else-if="panel.kind === 'knowledge'" />
             <Bot v-else-if="panel.kind === 'managed-ai-session'" />
             <Server v-else-if="panel.sshSession" />
@@ -296,7 +296,7 @@
         v-for="{ panel, style } in splitLayoutItems"
         :key="panel.id"
         class="terminal-pane"
-        :class="{ active: panel.id === workspace.activePanelId, below: panel.split === 'below', 'knowledge-pane': panel.kind === 'knowledge', 'managed-ai-session-pane': panel.kind === 'managed-ai-session', 'project-file-pane': panel.kind === 'project-file', 'with-pane-title': workspace.hasSplitState(panel.id), 'drag-over': paneDragOverPanelId === panel.id, 'ai-attention': panelNeedsAiAttention(panel), 'control-flash': controlFlashingPanelIds.includes(panel.id) }"
+        :class="{ active: panel.id === workspace.activePanelId, below: panel.split === 'below', 'knowledge-pane': panel.kind === 'knowledge', 'managed-ai-session-pane': panel.kind === 'managed-ai-session', 'project-file-pane': panel.kind === 'project-file' || panel.kind === 'local-file', 'with-pane-title': workspace.hasSplitState(panel.id), 'drag-over': paneDragOverPanelId === panel.id, 'ai-attention': panelNeedsAiAttention(panel), 'control-flash': controlFlashingPanelIds.includes(panel.id) }"
         :style="style"
         @click="activatePanelFromPointer($event, panel)"
         @dragenter.prevent="handlePaneDragEnter($event, panel)"
@@ -319,7 +319,7 @@
           :panel-title="panel.title"
         />
         <ProjectFileEditor
-          v-else-if="panel.kind === 'project-file' && panel.projectFile"
+          v-else-if="(panel.kind === 'project-file' && panel.projectFile) || (panel.kind === 'local-file' && panel.localFile)"
           :panel="panel"
         />
         <template v-else>

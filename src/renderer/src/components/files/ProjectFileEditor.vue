@@ -2,8 +2,8 @@
   <section class="project-file-editor">
     <header>
       <div>
-        <strong>{{ panel.projectFile?.relativePath }}</strong>
-        <small>{{ panel.projectFile?.projectRoot }}</small>
+        <strong>{{ editorPath }}</strong>
+        <small>{{ editorRoot }}</small>
       </div>
     </header>
     <div
@@ -23,7 +23,7 @@
     <FilesMonacoEditor
       :model-value="content"
       language="auto"
-      :file-path="projectFile?.relativePath"
+      :file-path="editorPath"
       :minimap="false"
       :readonly="loading || !readReady"
       @update:model-value="handleEditorChange"
@@ -32,7 +32,7 @@
     />
     <footer>
       <span :class="statusClass">{{ statusText }}</span>
-      <span>{{ panel.projectFile?.relativePath }}</span>
+      <span>{{ editorPath }}</span>
     </footer>
   </section>
 </template>
@@ -43,9 +43,11 @@ import FilesMonacoEditor from '@/components/files/FilesMonacoEditor.vue'
 import { useI18n } from '@/i18n'
 import { registerProjectFileEditorFlush } from '@/services/files/projectFileEditorSaveRegistry'
 import { projectFilesClient } from '@/services/files/projectFilesClient'
+import { localFilesClient } from '@/services/app/localFilesClient'
 import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { ProjectFileWatchEvent } from '@shared/contracts/projectFiles'
+import type { LocalEditorFileWatchEvent } from '@shared/contracts/localFiles'
 
 const props = defineProps<{ panel: TerminalPanel }>()
 const workspace = useWorkspaceStore()
@@ -69,9 +71,12 @@ let autosaveTimer: ReturnType<typeof setTimeout> | null = null
 let inFlightSave: Promise<boolean> | null = null
 let conflictEpoch = 0
 let mounted = false
-let watchedRelativePath = ''
+let watchedPath = ''
 
 const projectFile = computed(() => props.panel.projectFile)
+const localFile = computed(() => props.panel.localFile)
+const editorPath = computed(() => localFile.value?.filePath || projectFile.value?.relativePath || '')
+const editorRoot = computed(() => localFile.value ? props.panel.cwd : projectFile.value?.projectRoot || '')
 const dirty = computed(() => content.value !== originContent.value)
 const statusText = computed(() => {
   if (loading.value) return t('projectFiles.editor.status.loading')
@@ -89,6 +94,7 @@ const statusClass = computed(() => ({
 
 watch(dirty, (value) => {
   if (props.panel.projectFile) props.panel.projectFile.dirty = value
+  if (props.panel.localFile) props.panel.localFile.dirty = value
 }, { immediate: true })
 
 const contextInput = () => ({
@@ -120,21 +126,22 @@ const handleEditorChange = (value: string) => {
 }
 
 const reload = async (discardDirty = false) => {
-  if (!projectFile.value || (dirty.value && !discardDirty)) {
+  if ((!projectFile.value && !localFile.value) || (dirty.value && !discardDirty)) {
     if (dirty.value) conflict.value = t('projectFiles.editor.fileChangedUnsaved')
     return
   }
   clearAutosave()
   conflictEpoch += 1
-  const read = projectFilesClient.readFile()
-  if (!read) {
-    error.value = t('projectFiles.serviceUnavailable')
-    return
-  }
   loading.value = true
   error.value = ''
   try {
-    const result = await read(contextInput())
+    const result = localFile.value
+      ? await localFilesClient.readLocalEditorFile()?.(localFile.value.filePath)
+      : await projectFilesClient.readFile()?.(contextInput())
+    if (!result) {
+      error.value = t('projectFiles.serviceUnavailable')
+      return
+    }
     if (!result.ok || !result.data) {
       error.value = t('projectFiles.editor.readFailed')
       return
@@ -152,8 +159,10 @@ const reload = async (discardDirty = false) => {
 }
 
 const saveSnapshot = async (overwrite: boolean) => {
-  if (!projectFile.value || loading.value || !readReady.value || (!dirty.value && !overwrite)) return true
-  const write = projectFilesClient.writeFile()
+  if ((!projectFile.value && !localFile.value) || loading.value || !readReady.value || (!dirty.value && !overwrite)) return true
+  const write = localFile.value
+    ? localFilesClient.writeLocalEditorFile()
+    : projectFilesClient.writeFile()
   if (!write) {
     error.value = t('projectFiles.serviceUnavailable')
     return false
@@ -164,15 +173,15 @@ const saveSnapshot = async (overwrite: boolean) => {
   error.value = ''
   try {
     const result = await write({
-      ...contextInput(),
+      ...(localFile.value ? { filePath: localFile.value.filePath } : contextInput()),
       content: snapshot,
       expectedMtimeMs: mtimeMs.value,
       expectedSize: size.value,
       expectedContentHash: originContentHash.value,
       overwrite
-    })
+    } as never)
     if (!result.ok || !result.data) {
-      if (result.errorCode === 'PROJECT_FILE_CONFLICT') {
+      if (result.errorCode === 'PROJECT_FILE_CONFLICT' || result.errorCode === 'LOCAL_EDITOR_FILE_CONFLICT') {
         conflictEpoch += 1
         conflict.value = t('projectFiles.editor.fileChanged')
       }
@@ -214,7 +223,7 @@ const save = async (overwrite: boolean, drain: boolean): Promise<boolean> => {
   return !drain || !dirty.value
 }
 
-const handleWatchEvent = (event: ProjectFileWatchEvent) => {
+const handleWatchEvent = (event: ProjectFileWatchEvent | LocalEditorFileWatchEvent) => {
   if (event.watchId !== watchId) return
   if (dirty.value || saving.value) {
     clearAutosave()
@@ -237,15 +246,22 @@ const handleWindowBlur = () => {
 }
 
 const restartWatch = async () => {
-  const relativePath = projectFile.value?.relativePath || ''
-  if (!mounted || !relativePath || relativePath === watchedRelativePath) return
-  const stopWatch = projectFilesClient.stopWatch()
-  if (watchedRelativePath && stopWatch) await stopWatch(watchId)
-  watchedRelativePath = ''
-  const startWatch = projectFilesClient.startWatch()
-  if (!startWatch || !projectFile.value) return
-  const result = await startWatch({ ...contextInput(), watchId })
-  if (result.ok) watchedRelativePath = relativePath
+  const filePath = editorPath.value
+  if (!mounted || !filePath || filePath === watchedPath) return
+  const stopWatch = localFile.value
+    ? localFilesClient.stopLocalEditorFileWatch()
+    : projectFilesClient.stopWatch()
+  if (watchedPath && stopWatch) await stopWatch(watchId)
+  watchedPath = ''
+  const startWatch = localFile.value
+    ? localFilesClient.startLocalEditorFileWatch()
+    : projectFilesClient.startWatch()
+  if (!startWatch) return
+  const input = localFile.value
+    ? { filePath: localFile.value.filePath, watchId }
+    : { ...contextInput(), watchId }
+  const result = await startWatch(input as never)
+  if (result.ok) watchedPath = filePath
 }
 
 onMounted(async () => {
@@ -253,13 +269,15 @@ onMounted(async () => {
   unregisterFlush = registerProjectFileEditorFlush(props.panel.id, () => save(false, true))
   window.addEventListener('blur', handleWindowBlur)
   await reload(true)
-  const onWatch = projectFilesClient.onWatchEvent()
+  const onWatch = localFile.value
+    ? localFilesClient.onLocalEditorFileWatchEvent()
+    : projectFilesClient.onWatchEvent()
   offWatch = onWatch?.(handleWatchEvent) || null
   await restartWatch()
 })
 
 watch(
-  () => projectFile.value?.relativePath,
+  editorPath,
   () => { void restartWatch() }
 )
 
@@ -276,8 +294,11 @@ onBeforeUnmount(() => {
   window.removeEventListener('blur', handleWindowBlur)
   unregisterFlush?.()
   offWatch?.()
-  const stopWatch = projectFilesClient.stopWatch()
+  const stopWatch = localFile.value
+    ? localFilesClient.stopLocalEditorFileWatch()
+    : projectFilesClient.stopWatch()
   if (stopWatch) void stopWatch(watchId)
   if (props.panel.projectFile) props.panel.projectFile.dirty = false
+  if (props.panel.localFile) props.panel.localFile.dirty = false
 })
 </script>

@@ -107,7 +107,8 @@ export const createTerminalControlSurfaceDispatcher = ({
     if (
       request.method.startsWith('project.') ||
       request.method === 'markdown.open' ||
-      request.method === 'file.open'
+      request.method === 'file.open' ||
+      request.method === 'file.editor.open'
     ) {
       return projectFileControlHandlers.handleProjectFileControlRequest(request.method, params)
     }

@@ -272,6 +272,9 @@ describe('local terminal backend runtime', () => {
       expect(readFileSync(commandPath, 'utf8')).toContain('ELECTRON_RUN_AS_NODE=1 exec "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_CONTROL_HELPER_PATH" "$@"')
       expect(statSync(commandPath).mode & 0o111).not.toBe(0)
     }
+    const aiopenPath = join(controlBinDir, 'aiopen')
+    expect(readFileSync(aiopenPath, 'utf8')).toContain('ELECTRON_RUN_AS_NODE=1 exec "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_CONTROL_HELPER_PATH" \'aiopen\' "$@"')
+    expect(statSync(aiopenPath).mode & 0o111).not.toBe(0)
     const aiosshPath = join(controlBinDir, 'aiossh')
     expect(readFileSync(aiosshPath, 'utf8')).toContain('ELECTRON_RUN_AS_NODE=1 exec "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_CONTROL_HELPER_PATH" \'ssh\' "$@"')
     expect(statSync(aiosshPath).mode & 0o111).not.toBe(0)

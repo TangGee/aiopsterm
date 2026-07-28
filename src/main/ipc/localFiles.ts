@@ -1,6 +1,7 @@
-import type { IpcMain, IpcMainInvokeEvent, OpenDialogOptions as ElectronOpenDialogOptions, SaveDialogOptions as ElectronSaveDialogOptions } from 'electron'
+import { BrowserWindow, type IpcMain, type IpcMainInvokeEvent, type OpenDialogOptions as ElectronOpenDialogOptions, type SaveDialogOptions as ElectronSaveDialogOptions } from 'electron'
 import { basename, isAbsolute, join } from 'path'
 import { readFile, stat, writeFile } from 'fs/promises'
+import { broadcastWindowEvent } from '@shared/windowEvents'
 import { stageChatAttachment } from '../backend/chat/chatAttachments'
 import {
   prepareChatImageAttachment,
@@ -9,11 +10,20 @@ import {
   validateChatImageAttachment
 } from '../backend/chat/chatImageAttachment'
 import { saveCustomBackgroundFile, saveCustomNotificationSoundFile, writeLocalTextFile } from '../backend/files/localFileWrites'
+import {
+  configureLocalEditorFilesRuntime,
+  readLocalEditorFile,
+  startLocalEditorFileWatch,
+  stopLocalEditorFileWatch,
+  writeLocalEditorFile
+} from '../backend/files/localEditorFiles'
 import type {
   ChatImageAttachmentClipboardInput,
   ChatImageAttachmentFileInput,
   ChatImageAttachmentPrepareInput,
   ChatImageAttachmentValidateInput,
+  LocalEditorFileWatchInput,
+  LocalEditorFileWriteInput,
   OpenDialogOptions,
   SaveDialogOptions
 } from '@shared/contracts/localFiles'
@@ -113,6 +123,9 @@ const e2eOpenDialogFixture = async (input: RegisterLocalFilesIpcInput, options: 
 }
 
 export const registerLocalFilesIpc = (ipcMain: IpcMain, input: RegisterLocalFilesIpcInput) => {
+  configureLocalEditorFilesRuntime({
+    emitWatchEvent: (event) => broadcastWindowEvent(BrowserWindow.getAllWindows(), 'local-editor-files:watch-event', event)
+  })
   ipcMain.handle('dialog:open-file', async (event, options?: OpenDialogOptions) => {
     const fixture = await e2eOpenDialogFixture(input, options)
     if (fixture) return fixture
@@ -152,6 +165,10 @@ export const registerLocalFilesIpc = (ipcMain: IpcMain, input: RegisterLocalFile
     }
   })
   ipcMain.handle('files:write-local', async (_event, filePath: string, content: string) => writeLocalTextFile(filePath, content))
+  ipcMain.handle('local-editor-files:read', (_event, filePath: string) => readLocalEditorFile(filePath))
+  ipcMain.handle('local-editor-files:write', (_event, writeInput: LocalEditorFileWriteInput) => writeLocalEditorFile(writeInput))
+  ipcMain.handle('local-editor-files:watch:start', (_event, watchInput: LocalEditorFileWatchInput) => startLocalEditorFileWatch(watchInput))
+  ipcMain.handle('local-editor-files:watch:stop', (_event, watchId: string) => stopLocalEditorFileWatch(watchId))
   ipcMain.handle('chat:stage-attachment', async (_event, payload: { taskId: string; srcAbsPath: string }) => stageChatAttachment(payload, input.getChatAttachmentsPath()))
   ipcMain.handle('chat:validate-image-attachment', (_event, validateInput?: ChatImageAttachmentValidateInput) => validateChatImageAttachment(validateInput || {}))
   ipcMain.handle('chat:prepare-image-attachment', (_event, prepareInput?: ChatImageAttachmentPrepareInput) => prepareChatImageAttachment(prepareInput || {}))

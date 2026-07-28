@@ -37,6 +37,7 @@ export const controlSocketCapabilities = [
   'app.focus',
   'project.compat',
   'file.open',
+  'file.editor.open',
   'markdown.open',
   'workspace.snapshot',
   'workspace.context',

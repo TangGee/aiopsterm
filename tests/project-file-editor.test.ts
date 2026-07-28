@@ -9,6 +9,7 @@ import {
 } from '@/services/files/projectFileEditorSaveRegistry'
 import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
 import type { ProjectFileWatchEvent } from '@shared/contracts/projectFiles'
+import type { LocalEditorFileWatchEvent } from '@shared/contracts/localFiles'
 
 const projectFiles = vi.hoisted(() => ({
   read: vi.fn(),
@@ -16,6 +17,14 @@ const projectFiles = vi.hoisted(() => ({
   startWatch: vi.fn(),
   stopWatch: vi.fn(),
   listeners: [] as Array<(event: ProjectFileWatchEvent) => void>
+}))
+
+const localFiles = vi.hoisted(() => ({
+  read: vi.fn(),
+  write: vi.fn(),
+  startWatch: vi.fn(),
+  stopWatch: vi.fn(),
+  listeners: [] as Array<(event: LocalEditorFileWatchEvent) => void>
 }))
 
 vi.mock('@/services/files/projectFilesClient', () => ({
@@ -29,6 +38,22 @@ vi.mock('@/services/files/projectFilesClient', () => ({
       return () => {
         const index = projectFiles.listeners.indexOf(listener)
         if (index >= 0) projectFiles.listeners.splice(index, 1)
+      }
+    }
+  }
+}))
+
+vi.mock('@/services/app/localFilesClient', () => ({
+  localFilesClient: {
+    readLocalEditorFile: () => localFiles.read,
+    writeLocalEditorFile: () => localFiles.write,
+    startLocalEditorFileWatch: () => localFiles.startWatch,
+    stopLocalEditorFileWatch: () => localFiles.stopWatch,
+    onLocalEditorFileWatchEvent: () => (listener: (event: LocalEditorFileWatchEvent) => void) => {
+      localFiles.listeners.push(listener)
+      return () => {
+        const index = localFiles.listeners.indexOf(listener)
+        if (index >= 0) localFiles.listeners.splice(index, 1)
       }
     }
   }
@@ -118,12 +143,38 @@ describe('ProjectFileEditor', () => {
     projectFiles.startWatch.mockReset()
     projectFiles.stopWatch.mockReset()
     projectFiles.listeners.splice(0)
+    localFiles.read.mockReset()
+    localFiles.write.mockReset()
+    localFiles.startWatch.mockReset()
+    localFiles.stopWatch.mockReset()
+    localFiles.listeners.splice(0)
     projectFiles.read.mockResolvedValue(readResult('initial\n', 'hash-initial', 100))
     projectFiles.write.mockImplementation(async (input: { content: string }) =>
       writeResult(input.content, `hash-${input.content}`, 200)
     )
     projectFiles.startWatch.mockResolvedValue({ ok: true, data: { watched: true, fallback: false } })
     projectFiles.stopWatch.mockResolvedValue({ ok: true, data: { watched: false, fallback: false } })
+    localFiles.read.mockResolvedValue({
+      ok: true,
+      data: {
+        filePath: '/tmp/example.ts',
+        content: 'local initial\n',
+        contentHash: 'local-hash-initial',
+        size: 14,
+        mtimeMs: 300
+      }
+    })
+    localFiles.write.mockImplementation(async (input: { content: string }) => ({
+      ok: true,
+      data: {
+        filePath: '/tmp/example.ts',
+        contentHash: `local-hash-${input.content}`,
+        size: input.content.length,
+        mtimeMs: 400
+      }
+    }))
+    localFiles.startWatch.mockResolvedValue({ ok: true, data: { filePath: '/tmp/example.ts', watchId: 'watch', watched: true, fallback: false } })
+    localFiles.stopWatch.mockResolvedValue({ ok: true, data: { filePath: '/tmp/example.ts', watchId: 'watch', watched: false, fallback: false } })
   })
 
   afterEach(() => {
@@ -236,5 +287,40 @@ describe('ProjectFileEditor', () => {
       relativePath: 'lib/renamed.ts',
       watchId: 'project-file-editor-project-panel-1'
     }))
+  })
+
+  it('loads and autosaves an arbitrary local file with conflict metadata', async () => {
+    const targetPanel: TerminalPanel = {
+      id: 'local-panel-1',
+      title: 'example.ts',
+      cwd: '/tmp',
+      kind: 'local-file',
+      status: 'ready',
+      output: '',
+      outputSegments: [],
+      localFile: { filePath: '/tmp/example.ts' }
+    }
+    const { wrapper } = await mountEditor(targetPanel)
+
+    expect(localFiles.read).toHaveBeenCalledWith('/tmp/example.ts')
+    expect(localFiles.startWatch).toHaveBeenCalledWith({
+      filePath: '/tmp/example.ts',
+      watchId: 'project-file-editor-local-panel-1'
+    })
+    expect(wrapper.get('[data-testid="editor-stub"]').attributes('data-file-path')).toBe('/tmp/example.ts')
+
+    await wrapper.get('[data-testid="editor-input"]').setValue('local changed\n')
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+
+    expect(localFiles.write).toHaveBeenCalledWith(expect.objectContaining({
+      filePath: '/tmp/example.ts',
+      content: 'local changed\n',
+      expectedMtimeMs: 300,
+      expectedSize: 14,
+      expectedContentHash: 'local-hash-initial',
+      overwrite: false
+    }))
+    expect(targetPanel.localFile?.dirty).toBe(false)
   })
 })

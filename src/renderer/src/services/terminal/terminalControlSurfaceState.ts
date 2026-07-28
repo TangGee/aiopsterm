@@ -213,7 +213,13 @@ export const createTerminalControlSurfaceState = ({
       surface_id: panel.id,
       title: panel.title,
       ...(panel.titleSource ? { titleSource: panel.titleSource, title_source: panel.titleSource } : {}),
-      surfaceKind: panel.kind === 'knowledge' ? 'knowledge' : panel.kind === 'managed-ai-session' ? 'managed-ai-session' : 'terminal',
+      surfaceKind: panel.kind === 'knowledge'
+        ? 'knowledge'
+        : panel.kind === 'managed-ai-session'
+          ? 'managed-ai-session'
+          : panel.kind === 'local-file'
+            ? 'local-file'
+            : 'terminal',
       active: panel.id === workspace.activePanelId,
       status: panel.status,
       cwd: panel.cwd,
@@ -243,7 +249,8 @@ export const createTerminalControlSurfaceState = ({
               sessionId: panel.managedAiSession.sessionId
             }
           }
-        : {})
+        : {}),
+      ...(panel.localFile ? { localFile: { filePath: panel.localFile.filePath } } : {})
     }
   }
 

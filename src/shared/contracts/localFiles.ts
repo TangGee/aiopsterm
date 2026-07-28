@@ -39,6 +39,55 @@ export type LocalFileWriteResult = AiopsMutationResult<{
   mtimeMs: number
 }>
 
+export type LocalEditorFileInspectResult = AiopsMutationResult<{
+  filePath: string
+  size: number
+  mtimeMs: number
+}>
+
+export type LocalEditorFileReadResult = AiopsMutationResult<{
+  filePath: string
+  content: string
+  contentHash: string
+  size: number
+  mtimeMs: number
+}>
+
+export type LocalEditorFileWriteInput = {
+  filePath: string
+  content: string
+  expectedMtimeMs?: number
+  expectedSize?: number
+  expectedContentHash?: string
+  overwrite?: boolean
+}
+
+export type LocalEditorFileWriteResult = AiopsMutationResult<{
+  filePath: string
+  contentHash: string
+  size: number
+  mtimeMs: number
+}>
+
+export type LocalEditorFileWatchInput = {
+  filePath: string
+  watchId: string
+}
+
+export type LocalEditorFileWatchResult = AiopsMutationResult<{
+  filePath: string
+  watchId: string
+  watched: boolean
+  fallback: boolean
+}>
+
+export type LocalEditorFileWatchEvent = {
+  filePath: string
+  watchId: string
+  kind: 'modified' | 'deleted'
+  changedAt: number
+}
+
 export type ChatAttachmentStageResult = {
   mode: 'local'
   taskId: string

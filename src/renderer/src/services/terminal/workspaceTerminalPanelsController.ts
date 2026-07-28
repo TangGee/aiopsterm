@@ -160,9 +160,12 @@ export const createWorkspaceTerminalPanelsController = (
 
   const closePanel = async (id = activePanelId.value) => {
     const targetPanel = panels.value.find((panel) => panel.id === id)
-    if (targetPanel?.kind === 'project-file' && targetPanel.projectFile?.dirty) {
+    if (
+      (targetPanel?.kind === 'project-file' && targetPanel.projectFile?.dirty) ||
+      (targetPanel?.kind === 'local-file' && targetPanel.localFile?.dirty)
+    ) {
       await flushProjectFileEditor(id)
-      if (targetPanel.projectFile.dirty &&
+      if ((targetPanel.projectFile?.dirty || targetPanel.localFile?.dirty) &&
         typeof window !== 'undefined' && !window.confirm('This file could not be saved. Close it anyway?')) {
         return { closed: false, panelId: id, terminalStatus: 'none' as const }
       }
@@ -545,6 +548,42 @@ export const createWorkspaceTerminalPanelsController = (
     return panel
   }
 
+  const openLocalFile = (filePathInput: string) => {
+    const filePath = filePathInput.trim()
+    if (!filePath) return null
+    const existing = panels.value.find(
+      (panel) => panel.kind === 'local-file' && panel.localFile?.filePath === filePath
+    )
+    if (existing) {
+      mode.value = 'terminal'
+      activeModule.value = 'workspace'
+      activePanelId.value = existing.id
+      return existing
+    }
+    const normalized = filePath.replace(/\\/g, '/')
+    const parts = normalized.split('/').filter(Boolean)
+    const title = parts.at(-1) || filePath
+    let parentPath = parts.length > 1
+      ? normalized.slice(0, normalized.lastIndexOf('/')) || '/'
+      : normalized.startsWith('/') ? '/' : ''
+    if (/^[A-Za-z]:$/.test(parentPath)) parentPath = `${parentPath}/`
+    const panel: TerminalPanel = {
+      id: createRendererLocalId('panel'),
+      title,
+      cwd: parentPath,
+      kind: 'local-file',
+      status: 'ready',
+      output: '',
+      outputSegments: [],
+      localFile: { filePath }
+    }
+    panels.value.push(panel)
+    mode.value = 'terminal'
+    activeModule.value = 'workspace'
+    activePanelId.value = panel.id
+    return panel
+  }
+
   const syncKnowledgePanelsAfterRename = (oldRelPath: string, newRelPath: string) => {
     panels.value.forEach((panel) => {
       if (panel.kind !== 'knowledge' || !panel.knowledge?.relPath) return
@@ -630,6 +669,7 @@ export const createWorkspaceTerminalPanelsController = (
     openKnowledgeFile,
     openManagedAiSessionContent,
     openProjectFile,
+    openLocalFile,
     syncKnowledgePanelsAfterRename,
     closeKnowledgePanelsForRemoved,
     appendTerminalOutput,

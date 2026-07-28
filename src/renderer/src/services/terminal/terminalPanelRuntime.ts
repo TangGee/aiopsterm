@@ -42,7 +42,7 @@ export type TerminalPanel = {
   output: string
   outputSegments: TerminalOutputSegment[]
   status: 'ready' | 'connecting' | 'running' | 'closed' | 'error'
-  kind?: 'terminal' | 'knowledge' | 'managed-ai-session' | 'project-file'
+  kind?: 'terminal' | 'knowledge' | 'managed-ai-session' | 'project-file' | 'local-file'
   split?: PanelDirection
   splitSourceId?: string
   splitGroupId?: string
@@ -65,6 +65,10 @@ export type TerminalPanel = {
     sessionId: string
     projectRoot: string
     relativePath: string
+    dirty?: boolean
+  }
+  localFile?: {
+    filePath: string
     dirty?: boolean
   }
   sshSession?: TerminalSshSession

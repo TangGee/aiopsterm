@@ -110,6 +110,7 @@ const controlCommandShims = [
   { name: 'aio', helperArgs: [] },
   { name: 'aictl', helperArgs: [] },
   { name: 'aiopsterm-control', helperArgs: [] },
+  { name: 'aiopen', helperArgs: ['aiopen'] },
   { name: 'aiossh', helperArgs: ['ssh'] },
   { name: 'aiswitch', helperArgs: ['host', 'switch'] }
 ]

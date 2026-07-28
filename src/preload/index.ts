@@ -174,6 +174,15 @@ const api: AiopsPreloadApi = {
   saveCustomNotificationSound: (srcAbsPath: string) => ipcRenderer.invoke('settings:save-custom-notification-sound', srcAbsPath),
   readLocalFile: (filePath: string) => ipcRenderer.invoke('files:read-local', filePath),
   writeLocalFile: (filePath: string, content: string) => ipcRenderer.invoke('files:write-local', filePath, content),
+  readLocalEditorFile: (filePath: string) => ipcRenderer.invoke('local-editor-files:read', filePath),
+  writeLocalEditorFile: (input) => ipcRenderer.invoke('local-editor-files:write', input),
+  startLocalEditorFileWatch: (input) => ipcRenderer.invoke('local-editor-files:watch:start', input),
+  stopLocalEditorFileWatch: (watchId: string) => ipcRenderer.invoke('local-editor-files:watch:stop', watchId),
+  onLocalEditorFileWatchEvent: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
+    ipcRenderer.on('local-editor-files:watch-event', wrapped)
+    return () => ipcRenderer.off('local-editor-files:watch-event', wrapped)
+  },
   stageChatAttachment: (payload) => ipcRenderer.invoke('chat:stage-attachment', payload),
   validateChatImageAttachment: (input) => ipcRenderer.invoke('chat:validate-image-attachment', input),
   prepareChatImageAttachment: (input) => ipcRenderer.invoke('chat:prepare-image-attachment', input),

@@ -3,7 +3,7 @@ import type { ProductSessionContextRef } from '@shared/contracts/productSessions
 
 export type ClassicTerminalPanelLike = {
   id: string
-  kind?: 'terminal' | 'knowledge' | 'managed-ai-session' | 'project-file'
+  kind?: 'terminal' | 'knowledge' | 'managed-ai-session' | 'project-file' | 'local-file'
   sessionId?: string | null
   title?: string
   cwd?: string

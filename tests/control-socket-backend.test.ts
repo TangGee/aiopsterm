@@ -1096,6 +1096,55 @@ describe('control socket backend', () => {
     )
   })
 
+  it('validates aiopen files before opening valid paths in the renderer', async () => {
+    const backend = await loadBackend()
+    backend.registerControlSocketIpc({
+      handle: (_channel, handler) => {
+        mockIpcHandler = handler
+      }
+    })
+    mockWindow = createMockWindow((request) => ({
+      ok: true,
+      data: {
+        opened: true,
+        openedPaths: (request.params as { paths?: string[] }).paths || [],
+        surfaces: [{ panelId: 'local-file-panel', surfaceKind: 'local-file' }]
+      }
+    }))
+    backend.configureControlSocketRuntime({ getWindows: () => [mockWindow] })
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-aiopen-control-'))
+    const validPath = join(dir, 'valid.txt')
+    const missingPath = join(dir, 'missing.txt')
+    await writeFile(validPath, 'valid\n', 'utf8')
+    try {
+      await expect(backend.__testing.handleControlRequest({
+        method: 'file.editor.open',
+        params: { paths: [validPath, missingPath] }
+      })).resolves.toEqual(expect.objectContaining({
+        ok: false,
+        errorCode: 'LOCAL_EDITOR_FILE_OPEN_PARTIAL',
+        data: expect.objectContaining({
+          opened: true,
+          openedPaths: [validPath],
+          failures: [
+            expect.objectContaining({
+              path: missingPath,
+              errorCode: 'LOCAL_EDITOR_FILE_NOT_FOUND'
+            })
+          ]
+        })
+      }))
+      expect(mockWindow.requests).toEqual([
+        expect.objectContaining({
+          method: 'file.editor.open',
+          params: expect.objectContaining({ paths: [validPath] })
+        })
+      ])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('writes terminal text through the runtime without requiring renderer focus', async () => {
     const backend = await loadBackend()
     const writes: Array<{ sessionId: string; data: string }> = []
