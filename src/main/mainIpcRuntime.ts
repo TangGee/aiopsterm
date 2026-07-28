@@ -375,6 +375,7 @@ export const registerMainIpcRuntime = (input: MainIpcRuntimeInput) => {
     registry: input.productSessionRegistry,
     permanentlyDelete: permanentlyDeleteProductSession,
     isMutationBlocked: permanentlyDeleteProductSession.blocksBinding,
+    logEvent: logRuntimeEvent,
     broadcastChange: (event) => broadcastWindowEvent(BrowserWindow.getAllWindows(), 'product-session:changed', event),
     stopNativeBinding: async (engine, nativeSessionId) => {
       if (engine !== 'cline') return false

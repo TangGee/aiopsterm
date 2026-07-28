@@ -188,6 +188,15 @@ export const codexWorkspaceDirectory = (codexHome: string, options: CodexSession
   return join(codexHome, 'workspaces', `${readable}-${digest}`)
 }
 const codexThreadIdPattern = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i
+const codexThreadDeletionAlreadyAbsent = (error: unknown) => {
+  const candidate = error as { message?: unknown; stderr?: unknown; stdout?: unknown } | null
+  const detail = [candidate?.message, candidate?.stderr, candidate?.stdout]
+    .filter((value): value is string | Buffer => typeof value === 'string' || Buffer.isBuffer(value))
+    .map((value) => String(value))
+    .join('\n')
+    .toLowerCase()
+  return detail.includes('thread not found:')
+}
 const codexRolloutTimestampPattern = /^\d{4}-\d{2}-\d{2}t\d{2}-\d{2}-\d{2}$/
 const codexThreadInfoPollMs = 250
 const codexSettledThreadInfoPollMs = 1000
@@ -609,6 +618,7 @@ export const deleteCodexNativeThread = async (threadIdInput: string) => {
       }
     })
   } catch (error) {
+    if (codexThreadDeletionAlreadyAbsent(error)) return false
     const reason = error instanceof Error ? error.message : String(error)
     throw Object.assign(new Error(`Codex thread deletion failed: ${reason}`), {
       code: 'CODEX_THREAD_DELETE_FAILED',

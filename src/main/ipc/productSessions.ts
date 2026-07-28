@@ -25,6 +25,11 @@ type RegisterProductSessionsIpcInput = {
   permanentlyDelete?: (id: string) => Promise<ProductSessionPermanentDeleteOutcome>
   isMutationBlocked?: (id: string) => boolean
   broadcastChange?: (event: ProductSessionChangeEvent) => void
+  logEvent?: (
+    level: 'info' | 'warn',
+    event: string,
+    fields?: Record<string, unknown>
+  ) => void
 }
 
 const failure = (error: unknown) => ({
@@ -141,9 +146,25 @@ export const registerProductSessionsIpc = (ipcMain: IpcMain, input: RegisterProd
   })
 
   ipcMain.handle('product-session:delete', async (_event, id: string) => {
+    const normalizedId = String(id || '')
+    input.logEvent?.('info', 'product-session.delete.requested', {
+      productSessionId: normalizedId
+    })
     try {
-      return { ok: true as const, data: await permanentlyDelete(id) }
+      const data = await permanentlyDelete(normalizedId)
+      input.logEvent?.('info', 'product-session.delete.completed', {
+        productSessionId: normalizedId,
+        deleted: data.deleted
+      })
+      return { ok: true as const, data }
     } catch (error) {
+      input.logEvent?.('warn', 'product-session.delete.failed', {
+        productSessionId: normalizedId,
+        errorCode: error instanceof ProductSessionRegistryError
+          ? error.code
+          : (error as { code?: unknown } | null)?.code,
+        errorMessage: error instanceof Error ? error.message : String(error)
+      })
       return failure(error)
     }
   })

@@ -191,7 +191,8 @@ describe('product session IPC', () => {
       nativeBinding: { engine: 'codex', nativeSessionId: 'thread-1' }
     })
     const deleteNativeBinding = vi.fn(async () => undefined)
-    registerProductSessionsIpc(ipcMain, { registry: store, deleteNativeBinding })
+    const logEvent = vi.fn()
+    registerProductSessionsIpc(ipcMain, { registry: store, deleteNativeBinding, logEvent })
 
     expect(await handlers.get('product-session:delete')?.({}, 'product-1')).toEqual({
       ok: true,
@@ -199,6 +200,44 @@ describe('product session IPC', () => {
     })
     expect(deleteNativeBinding).toHaveBeenCalledWith({ engine: 'codex', nativeSessionId: 'thread-1' })
     expect(store.get('product-1')).toBeNull()
+    expect(logEvent.mock.calls).toEqual([
+      ['info', 'product-session.delete.requested', { productSessionId: 'product-1' }],
+      ['info', 'product-session.delete.completed', { productSessionId: 'product-1', deleted: true }]
+    ])
+  })
+
+  it('logs permanent Product Session deletion failures', async () => {
+    const modulePath = '../src/main/ipc/productSessions'
+    const { registerProductSessionsIpc } = await import(modulePath)
+    const { ipcMain, handlers } = harness()
+    const store = registry()
+    const logEvent = vi.fn()
+    registerProductSessionsIpc(ipcMain, {
+      registry: store,
+      permanentlyDelete: async () => {
+        throw Object.assign(new Error('native deletion failed'), {
+          code: 'CODEX_THREAD_DELETE_FAILED'
+        })
+      },
+      logEvent
+    })
+
+    expect(await handlers.get('product-session:delete')?.({}, 'product-1')).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'PRODUCT_SESSION_OPERATION_FAILED',
+        errorMessage: 'native deletion failed'
+      })
+    )
+    expect(logEvent).toHaveBeenLastCalledWith(
+      'warn',
+      'product-session.delete.failed',
+      {
+        productSessionId: 'product-1',
+        errorCode: 'CODEX_THREAD_DELETE_FAILED',
+        errorMessage: 'native deletion failed'
+      }
+    )
   })
 
   it('forwards registry changes to the product-session preload event broadcaster', async () => {

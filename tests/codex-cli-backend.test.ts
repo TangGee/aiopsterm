@@ -378,6 +378,50 @@ describe('Codex CLI backend runtime', () => {
     )
   })
 
+  it('treats an already missing Codex thread as an idempotent native deletion', async () => {
+    const backend = await loadBackend()
+    const threadId = '123e4567-e89b-12d3-a456-426614174009'
+    const execFile = vi.fn(async () => {
+      throw Object.assign(new Error('Codex delete command failed'), {
+        stderr: `Error: invalid request: thread not found: ${threadId}`
+      })
+    })
+    backend.configureCodexCliRuntime({
+      getUserDataPath: () => '/tmp/aiopsterm-user-data',
+      binaryPath: CODEX_PACKAGE_BINARY,
+      binaryHealthCheck: false,
+      existsSync: codexPackageExists,
+      execFile
+    })
+
+    await expect(backend.deleteCodexNativeThread(threadId)).resolves.toBe(false)
+    expect(execFile).toHaveBeenCalledWith(
+      CODEX_PACKAGE_BINARY,
+      ['delete', '--force', threadId],
+      expect.any(Object)
+    )
+  })
+
+  it('preserves Codex thread deletion failures that are not missing-thread responses', async () => {
+    const backend = await loadBackend()
+    const execFile = vi.fn(async () => {
+      throw Object.assign(new Error('Codex delete command failed'), {
+        stderr: 'Error: database is locked'
+      })
+    })
+    backend.configureCodexCliRuntime({
+      getUserDataPath: () => '/tmp/aiopsterm-user-data',
+      binaryPath: CODEX_PACKAGE_BINARY,
+      binaryHealthCheck: false,
+      existsSync: codexPackageExists,
+      execFile
+    })
+
+    await expect(
+      backend.deleteCodexNativeThread('123e4567-e89b-12d3-a456-426614174010')
+    ).rejects.toMatchObject({ code: 'CODEX_THREAD_DELETE_FAILED' })
+  })
+
   it('stops a running Codex thread before permanently deleting it', async () => {
     const backend = await loadBackend()
     const pty = new MockPtyProcess()
