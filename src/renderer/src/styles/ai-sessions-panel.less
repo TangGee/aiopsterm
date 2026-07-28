@@ -245,6 +245,7 @@
 }
 
 .ai-session-library-section {
+  position: relative;
   margin-top: 5px;
 }
 
@@ -257,7 +258,7 @@
   height: 23px;
   border: 0;
   border-radius: 6px;
-  padding: 0 8px 0 10px;
+  padding: 0 36px 0 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -265,6 +266,31 @@
   background: transparent;
   color: var(--theme-module-active-text-muted);
   text-align: left;
+}
+
+.ai-session-library-create {
+  position: absolute;
+  top: 0;
+  right: 6px;
+  width: 23px;
+  height: 23px;
+  border: 0;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--theme-module-active-text-muted);
+}
+
+.ai-session-library-create:hover {
+  background: color-mix(in srgb, var(--theme-module-active-accent) 14%, transparent);
+  color: var(--theme-module-active-accent);
+}
+
+.ai-session-library-create svg {
+  width: 13px;
+  height: 13px;
 }
 
 .ai-session-library-section-header:hover {
@@ -684,6 +710,237 @@
   background: var(--theme-module-active-card-bg);
   color: var(--theme-module-active-text);
   padding: 6px 9px;
+}
+
+.ai-session-create-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, #000 52%, transparent);
+}
+
+.ai-session-create-dialog {
+  width: min(520px, 100%);
+  max-height: min(680px, calc(100vh - 48px));
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+  overflow: hidden;
+  background: var(--theme-module-active-overlay-bg);
+  color: var(--theme-module-active-text);
+  box-shadow: var(--theme-module-active-shadow-soft);
+}
+
+.ai-session-create-dialog > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ai-session-create-dialog h3 {
+  margin: 0;
+  color: var(--theme-module-active-text);
+  font-size: 16px;
+}
+
+.ai-session-create-dialog p {
+  margin: 5px 0 0;
+  color: var(--theme-module-active-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ai-session-create-close {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--theme-module-active-text-muted);
+}
+
+.ai-session-create-close:hover {
+  background: color-mix(in srgb, var(--theme-module-active-text) 8%, transparent);
+  color: var(--theme-module-active-text);
+}
+
+.ai-session-create-close svg {
+  width: 15px;
+  height: 15px;
+}
+
+.ai-session-create-field {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.ai-session-create-field > label {
+  color: var(--theme-module-active-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ai-session-create-directory {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.ai-session-create-directory input {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 7px;
+  padding: 0 10px;
+  overflow: hidden;
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
+  text-overflow: ellipsis;
+}
+
+.ai-session-create-directory button,
+.ai-session-create-dialog footer button {
+  min-height: 34px;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
+}
+
+.ai-session-create-directory button:hover,
+.ai-session-create-dialog footer button:hover {
+  border-color: var(--theme-module-active-accent);
+}
+
+.ai-session-create-directory button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ai-session-create-agents {
+  min-height: 120px;
+  max-height: 310px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  padding-right: 3px;
+}
+
+.ai-session-create-agent {
+  width: 100%;
+  min-height: 52px;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
+  text-align: left;
+}
+
+.ai-session-create-agent:hover {
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 60%, var(--theme-module-active-border));
+}
+
+.ai-session-create-agent.selected {
+  border-color: var(--theme-module-active-accent);
+  background: color-mix(in srgb, var(--theme-module-active-accent) 12%, var(--theme-module-active-card-bg));
+}
+
+.ai-session-create-agent.unavailable {
+  opacity: 0.62;
+}
+
+.ai-session-create-agent-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-session-create-agent-main strong,
+.ai-session-create-agent-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-session-create-agent-main strong {
+  font-size: 12px;
+}
+
+.ai-session-create-agent-main small {
+  color: var(--theme-module-active-text-muted);
+  font-size: 10px;
+}
+
+.ai-session-create-agent-status {
+  flex: 0 0 auto;
+  color: var(--theme-core-warning);
+  font-size: 10px;
+}
+
+.ai-session-create-agent-status.ready {
+  color: var(--theme-core-success);
+}
+
+.ai-session-create-error {
+  color: var(--theme-core-danger);
+  font-size: 12px;
+}
+
+.ai-session-create-dialog > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ai-session-create-dialog footer .ai-session-create-settings {
+  border-color: transparent;
+  padding-left: 0;
+  background: transparent;
+  color: var(--theme-module-active-accent);
+}
+
+.ai-session-create-footer-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-session-create-dialog footer button.primary {
+  border-color: var(--theme-module-active-accent);
+  background: var(--theme-module-active-accent);
+  color: #fff;
+}
+
+.ai-session-create-dialog button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .ai-session-context-menu {

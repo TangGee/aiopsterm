@@ -7,6 +7,14 @@
       <div class="ai-sessions-header-actions">
         <button
           class="ai-sessions-icon-button"
+          :title="t('aiSessions.create')"
+          :aria-label="t('aiSessions.create')"
+          @click="openCreateDialog()"
+        >
+          <Plus />
+        </button>
+        <button
+          class="ai-sessions-icon-button"
           :title="t('aiSessions.refresh')"
           @click="workspace.refreshManagedAiSessions()"
         >
@@ -56,6 +64,121 @@
         <strong>{{ modeTooltip.label }}</strong>
         {{ modeTooltip.tooltip }}
       </span>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="createDialogOpen"
+        ref="createDialogElement"
+        class="ai-session-create-backdrop"
+        role="presentation"
+        tabindex="-1"
+        @click.self="closeCreateDialog"
+        @keydown.esc.prevent="closeCreateDialog"
+      >
+        <section
+          class="ai-session-create-dialog"
+          role="dialog"
+          aria-modal="true"
+          :aria-labelledby="'ai-session-create-title'"
+        >
+          <header>
+            <div>
+              <h3 id="ai-session-create-title">{{ t('aiSessions.createTitle') }}</h3>
+              <p>{{ t('aiSessions.createDescription') }}</p>
+            </div>
+            <button
+              type="button"
+              class="ai-session-create-close"
+              :aria-label="t('common.close')"
+              :disabled="createBusy"
+              @click="closeCreateDialog"
+            >
+              <X />
+            </button>
+          </header>
+
+          <div class="ai-session-create-field">
+            <label>{{ t('aiSessions.directory') }}</label>
+            <div class="ai-session-create-directory">
+              <input
+                :value="createDirectory"
+                readonly
+                :placeholder="t('aiSessions.directoryPlaceholder')"
+              />
+              <button
+                type="button"
+                :disabled="createBusy"
+                @click="chooseCreateDirectory"
+              >
+                <FolderOpen />
+                {{ t('aiSessions.chooseDirectory') }}
+              </button>
+            </div>
+          </div>
+
+          <div class="ai-session-create-field">
+            <label>{{ t('aiSessions.agent') }}</label>
+            <div class="ai-session-create-agents">
+              <button
+                v-for="agent in createAgentOptions"
+                :key="agent.source"
+                type="button"
+                class="ai-session-create-agent"
+                :class="{ selected: createAgentSource === agent.source, unavailable: !agent.available }"
+                :aria-pressed="createAgentSource === agent.source"
+                :disabled="!agent.available || createBusy"
+                @click="createAgentSource = agent.source"
+              >
+                <span class="ai-session-create-agent-main">
+                  <strong>{{ agent.label }}</strong>
+                  <small>{{ t('aiSessions.agentCommand') }}: {{ agent.launchCommand }}</small>
+                </span>
+                <span
+                  class="ai-session-create-agent-status"
+                  :class="{ ready: agent.available }"
+                >
+                  {{ t(agent.statusKey) }}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <div
+            v-if="createError"
+            class="ai-session-create-error"
+          >
+            {{ createError }}
+          </div>
+
+          <footer>
+            <button
+              type="button"
+              class="ai-session-create-settings"
+              @click="openAgentHookSettings"
+            >
+              {{ t('aiSessions.openHookSettings') }}
+            </button>
+            <span class="ai-session-create-footer-actions">
+              <button
+                type="button"
+                :disabled="createBusy"
+                @click="closeCreateDialog"
+              >
+                {{ t('common.cancel') }}
+              </button>
+              <button
+                type="button"
+                class="primary"
+                :disabled="!canCreateSession"
+                @click="startCreatedSession"
+              >
+                {{ createBusy ? t('aiSessions.createStarting') : t('aiSessions.createSubmit') }}
+              </button>
+            </span>
+          </footer>
+        </section>
+      </div>
     </Teleport>
 
     <Teleport to="body">
@@ -207,6 +330,16 @@
                   {{ section.childCount }}
                 </span>
               </small>
+            </button>
+            <button
+              v-if="libraryGrouping === 'project' && section.projectPath"
+              type="button"
+              class="ai-session-library-create"
+              :title="t('aiSessions.createInProject')"
+              :aria-label="t('aiSessions.createInProject')"
+              @click.stop="openCreateDialog(section.projectPath)"
+            >
+              <Plus />
             </button>
             <template v-if="!isLibrarySectionCollapsed(section.key)">
               <template
@@ -412,6 +545,16 @@
                   {{ section.childCount }}
                 </span>
               </small>
+            </button>
+            <button
+              v-if="libraryGrouping === 'project' && section.projectPath"
+              type="button"
+              class="ai-session-library-create"
+              :title="t('aiSessions.createInProject')"
+              :aria-label="t('aiSessions.createInProject')"
+              @click.stop="openCreateDialog(section.projectPath)"
+            >
+              <Plus />
             </button>
             <template v-if="!isLibrarySectionCollapsed(section.key)">
               <template
@@ -747,10 +890,10 @@
           <small>{{ t('aiSessions.emptyDescription') }}</small>
           <button
             class="ai-sessions-empty-action"
-            @click="workspace.refreshManagedAiSessions()"
+            @click="openCreateDialog()"
           >
-            <RefreshCw />
-            {{ t('aiSessions.refresh') }}
+            <Plus />
+            {{ t('aiSessions.create') }}
           </button>
         </div>
       </div>
@@ -760,7 +903,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
-import { Activity, Archive, Bot, Check, ChevronDown, FileText, FolderTree, GitBranch, Inbox, List, LocateFixed, RefreshCw, Search, Trash2 } from 'lucide-vue-next'
+import { Activity, Archive, Bot, Check, ChevronDown, FileText, FolderOpen, FolderTree, GitBranch, Inbox, List, LocateFixed, Plus, RefreshCw, Search, Trash2, X } from 'lucide-vue-next'
 import type { ManagedAiPanelModeButton } from '@/services/ai/aiSessionsPanelViewRuntime'
 import { useAiSessionsPanelRuntime } from '@/services/ai/aiSessionsPanelRuntime'
 
@@ -770,6 +913,18 @@ const {
   query,
   mode,
   libraryGrouping,
+  createDialogOpen,
+  createDirectory,
+  createAgentSource,
+  createAgentOptions,
+  createBusy,
+  createError,
+  canCreateSession,
+  openCreateDialog,
+  closeCreateDialog,
+  chooseCreateDirectory,
+  startCreatedSession,
+  openAgentHookSettings,
   modeButtons,
   contextMenu,
   contextMenuSession,
@@ -811,6 +966,7 @@ const {
 } = useAiSessionsPanelRuntime()
 
 const sessionListElement = ref<HTMLElement | null>(null)
+const createDialogElement = ref<HTMLElement | null>(null)
 const rowMetaWidth = ref(0)
 let measureCanvasContext: CanvasRenderingContext2D | null = null
 let listResizeObserver: ResizeObserver | null = null
@@ -876,6 +1032,10 @@ const deactivatePanelSurface = () => {
 
 watch(rowMetaSignature, () => {
   void nextTick(updateRowMetaWidth)
+})
+
+watch(createDialogOpen, (open) => {
+  if (open) void nextTick(() => createDialogElement.value?.focus())
 })
 
 onMounted(startPanelSurfaceObservers)

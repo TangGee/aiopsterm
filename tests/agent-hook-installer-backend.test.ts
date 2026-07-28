@@ -146,6 +146,9 @@ describe('agent hook installer backend', () => {
     expect(__testing.hookDefinitions.map((definition) => definition.source)).toEqual(
       expect.arrayContaining(['opencode', 'amp', 'pi', 'omp', 'kiro', 'rovodev'])
     )
+    expect(__testing.hookDefinitions.find((definition) => definition.source === 'rovodev')).toEqual(
+      expect.objectContaining({ launchCommand: 'acli rovodev run' })
+    )
   })
 
   it('installs Kiro agent JSON hooks with timeout_ms entries', async () => {

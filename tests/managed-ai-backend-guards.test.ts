@@ -68,6 +68,7 @@ const hookSnapshot: AgentHookInstallerSnapshot = {
       source: 'codex',
       label: 'Codex',
       binaryName: 'codex',
+      launchCommand: 'codex',
       binaryPath: '/usr/local/bin/codex',
       configPath: '/home/unit/.codex/config.toml',
       configExists: true,

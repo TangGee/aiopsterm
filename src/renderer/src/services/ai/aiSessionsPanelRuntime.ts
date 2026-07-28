@@ -1,6 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { copyTextToClipboard } from '@/services/app/clipboardRuntime'
+import { localFilesClient } from '@/services/app/localFilesClient'
 import {
   managedAiSessionTerminalSwitchTelemetry,
   type ManagedAiSessionTerminalSwitchTelemetry,
@@ -46,6 +47,7 @@ import {
 } from '@/services/ai/aiSessionsPanelViewRuntime'
 import type { ManagedAiSession, ManagedAiSessionState } from '@/services/ai/workspaceManagedAiTypes'
 import type { AiAgentSessionEventName, AiAgentSessionSource } from '@shared/contracts/managedAiSessions'
+import type { AgentHookInstallerSource, AgentHookInstallerStatus } from '@shared/contracts/agentHooks'
 
 const aiSessionsPanelStateStorageKey = 'aiopsterm.aiSessionsPanelState'
 
@@ -53,6 +55,16 @@ type AiSessionsPanelStoredState = {
   libraryGrouping?: ManagedAiLibraryGrouping
   collapsedLibrarySections?: string[]
   expandedChildGroups?: string[]
+  lastCreatedAgentSource?: AgentHookInstallerSource
+}
+
+export type AiSessionLaunchOption = AgentHookInstallerStatus & {
+  available: boolean
+  statusKey:
+    | 'aiSessions.agentReady'
+    | 'aiSessions.agentCliMissing'
+    | 'aiSessions.agentHookMissing'
+    | 'aiSessions.agentConfigError'
 }
 
 const validLibraryGrouping = (value: unknown): value is ManagedAiLibraryGrouping =>
@@ -67,7 +79,10 @@ const readAiSessionsPanelState = (): AiSessionsPanelStoredState => {
     return {
       ...(validLibraryGrouping(parsed.libraryGrouping) ? { libraryGrouping: parsed.libraryGrouping } : {}),
       collapsedLibrarySections: stringArray(parsed.collapsedLibrarySections),
-      expandedChildGroups: stringArray(parsed.expandedChildGroups)
+      expandedChildGroups: stringArray(parsed.expandedChildGroups),
+      ...(typeof parsed.lastCreatedAgentSource === 'string'
+        ? { lastCreatedAgentSource: parsed.lastCreatedAgentSource as AgentHookInstallerSource }
+        : {})
     }
   } catch {
     return {}
@@ -97,6 +112,12 @@ export const useAiSessionsPanelRuntime = (options: AiSessionsPanelRuntimeOptions
   const libraryGrouping = ref<ManagedAiLibraryGrouping>(storedPanelState.libraryGrouping || 'project')
   const collapsedLibrarySections = ref<Set<string>>(new Set(storedPanelState.collapsedLibrarySections || []))
   const expandedChildGroups = ref<Set<string>>(new Set(storedPanelState.expandedChildGroups || []))
+  const lastCreatedAgentSource = ref<AgentHookInstallerSource | undefined>(storedPanelState.lastCreatedAgentSource)
+  const createDialogOpen = ref(false)
+  const createDirectory = ref('')
+  const createAgentSource = ref<AgentHookInstallerSource | ''>('')
+  const createBusy = ref(false)
+  const createError = ref('')
   const filter = ref<ManagedAiStateFilter>('needsInput')
   const eventFilter = ref<ManagedAiRequestKindFilter>('all')
   const replyText = ref('')
@@ -109,13 +130,124 @@ export const useAiSessionsPanelRuntime = (options: AiSessionsPanelRuntimeOptions
     sessionKey: ''
   })
   const eventFilters = computed(() => aiSessionsEventFilterOptions.map((option) => ({ key: option.key, label: t(option.labelKey) })))
-  watch([libraryGrouping, collapsedLibrarySections, expandedChildGroups], () => {
+  watch([libraryGrouping, collapsedLibrarySections, expandedChildGroups, lastCreatedAgentSource], () => {
     writeAiSessionsPanelState({
       libraryGrouping: libraryGrouping.value,
       collapsedLibrarySections: [...collapsedLibrarySections.value],
-      expandedChildGroups: [...expandedChildGroups.value]
+      expandedChildGroups: [...expandedChildGroups.value],
+      ...(lastCreatedAgentSource.value ? { lastCreatedAgentSource: lastCreatedAgentSource.value } : {})
     })
   })
+
+  const createAgentOptions = computed<AiSessionLaunchOption[]>(() =>
+    workspace.agentHookInstallers.map((installer) => {
+      const statusKey = installer.error
+        ? 'aiSessions.agentConfigError'
+        : !installer.binaryPath
+          ? 'aiSessions.agentCliMissing'
+          : !installer.installed
+            ? 'aiSessions.agentHookMissing'
+            : 'aiSessions.agentReady'
+      return {
+        ...installer,
+        available: statusKey === 'aiSessions.agentReady',
+        statusKey
+      }
+    })
+  )
+  const selectedCreateAgent = computed(() =>
+    createAgentOptions.value.find((agent) => agent.source === createAgentSource.value) || null
+  )
+  const canCreateSession = computed(() =>
+    Boolean(createDirectory.value.trim() && selectedCreateAgent.value?.available && !createBusy.value)
+  )
+
+  const selectDefaultCreateAgent = () => {
+    const last = createAgentOptions.value.find((agent) => agent.source === lastCreatedAgentSource.value)
+    const next = last || createAgentOptions.value.find((agent) => agent.available) || createAgentOptions.value[0]
+    createAgentSource.value = next?.source || ''
+  }
+
+  const openCreateDialog = async (projectPath = '') => {
+    createDirectory.value = projectPath.trim()
+    createError.value = ''
+    createDialogOpen.value = true
+    await workspace.refreshAgentHookInstallers({ silent: true })
+    selectDefaultCreateAgent()
+  }
+
+  const closeCreateDialog = () => {
+    if (createBusy.value) return
+    createDialogOpen.value = false
+    createError.value = ''
+  }
+
+  const chooseCreateDirectory = async () => {
+    const showOpenDialog = localFilesClient.showOpenDialog()
+    if (!showOpenDialog) {
+      createError.value = t('aiSessions.createDirectoryUnavailable')
+      return
+    }
+    try {
+      const result = await showOpenDialog({
+        properties: ['openDirectory'],
+        ...(createDirectory.value.trim() ? { defaultPath: createDirectory.value.trim() } : {})
+      })
+      if (!result || result.canceled || !result.filePaths.length) return
+      createDirectory.value = result.filePaths[0]
+      createError.value = ''
+    } catch (error) {
+      createError.value = error instanceof Error ? error.message : String(error)
+    }
+  }
+
+  const projectDirectoryName = (directory: string) => {
+    const normalized = directory.trim().replace(/[\\/]+$/, '')
+    return normalized.split(/[\\/]/).at(-1) || normalized
+  }
+
+  const startCreatedSession = async () => {
+    const agent = selectedCreateAgent.value
+    const directory = createDirectory.value.trim()
+    if (!agent?.available || !directory || createBusy.value) return false
+    createBusy.value = true
+    createError.value = ''
+    try {
+      const panel = await workspace.openLocalTerminalPanel({
+        title: `${agent.label} - ${projectDirectoryName(directory)}`,
+        cwd: directory,
+        preserveActiveModule: true
+      })
+      if (!panel) {
+        createError.value = t('aiSessions.createTerminalFailed')
+        return false
+      }
+      const decision = await workspace.runTerminalCommand(panel.id, agent.launchCommand, {
+        source: 'agent',
+        writeToShell: true
+      })
+      if (decision.status !== 'allow' && decision.status !== 'needs-approval') {
+        createDialogOpen.value = false
+        workspace.setTopNotice(t('aiSessions.createAgentFailed'))
+        return false
+      }
+      lastCreatedAgentSource.value = agent.source
+      createDialogOpen.value = false
+      workspace.setTopNotice(t('aiSessions.createAgentStarted', { agent: agent.label }))
+      return true
+    } catch (error) {
+      createError.value = error instanceof Error ? error.message : String(error)
+      return false
+    } finally {
+      createBusy.value = false
+    }
+  }
+
+  const openAgentHookSettings = () => {
+    createDialogOpen.value = false
+    workspace.setActiveModule('settings')
+    workspace.setActiveSettingsSection('aiNotifications')
+  }
 
   const sourceLabel = (source: AiAgentSessionSource) => managedAiSourceLabel(source)
   const stateLabel = (state: ManagedAiSessionState) => t(managedAiSessionStateLabelKey(state))
@@ -511,6 +643,19 @@ export const useAiSessionsPanelRuntime = (options: AiSessionsPanelRuntimeOptions
     query,
     mode,
     libraryGrouping,
+    createDialogOpen,
+    createDirectory,
+    createAgentSource,
+    createAgentOptions,
+    selectedCreateAgent,
+    createBusy,
+    createError,
+    canCreateSession,
+    openCreateDialog,
+    closeCreateDialog,
+    chooseCreateDirectory,
+    startCreatedSession,
+    openAgentHookSettings,
     collapsedLibrarySections,
     expandedChildGroups,
     eventFilter,

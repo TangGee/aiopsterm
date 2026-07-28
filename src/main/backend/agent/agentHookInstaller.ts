@@ -176,6 +176,7 @@ const statusForDefinition = async (definition: AgentHookDefinition): Promise<Age
     source: definition.source,
     label: definition.label,
     binaryName: definition.binaryName,
+    launchCommand: definition.launchCommand || definition.binaryName,
     binaryPath,
     configPath,
     configExists: await pathExists(configPath),

@@ -1580,7 +1580,7 @@ describe('AppShell', () => {
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled()
   })
 
-  it('rescans AI conversations from the empty AI session panel', async () => {
+  it('opens AI session creation from the empty AI session panel', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useWorkspaceStore()
@@ -1601,9 +1601,11 @@ describe('AppShell', () => {
     await wrapper.find('.ai-sessions-empty-action').trigger('click')
     await flushPromises()
 
-    expect(window.aiops.listManagedAiSessions).toHaveBeenCalled()
+    expect(document.body.querySelector('.ai-session-create-dialog')?.textContent).toContain('新建 AI 会话')
+    expect(window.aiops.listAgentHookInstallers).toHaveBeenCalled()
     expect(store.activeModule).toBe('aiSessions')
-    expect(store.topNotice).toBe('AI 会话已刷新')
+    document.body.querySelector<HTMLButtonElement>('.ai-session-create-close')?.click()
+    await flushPromises()
   })
 
   it('rescans AI conversations from the AI session panel header', async () => {
@@ -1634,7 +1636,7 @@ describe('AppShell', () => {
       }
     } as any)
 
-    await wrapper.find('.ai-sessions-icon-button').trigger('click')
+    await wrapper.findAll('.ai-sessions-icon-button').at(1)!.trigger('click')
     await flushPromises()
 
     expect(window.aiops.listManagedAiSessions).toHaveBeenCalled()

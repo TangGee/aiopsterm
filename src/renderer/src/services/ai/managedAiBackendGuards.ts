@@ -278,6 +278,7 @@ export const isAgentHookInstallerStatus = (value: unknown): value is AgentHookIn
   isAgentHookInstallerSource(value.source) &&
   isNonEmptyString(value.label) &&
   isNonEmptyString(value.binaryName) &&
+  isNonEmptyString(value.launchCommand) &&
   typeof value.binaryPath === 'string' &&
   isNonEmptyString(value.configPath) &&
   typeof value.configExists === 'boolean' &&

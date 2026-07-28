@@ -13,6 +13,7 @@ export type AgentHookDefinition = {
   source: AgentHookInstallerSource
   label: string
   binaryName: string
+  launchCommand?: string
   configDirName: string
   configFileName: string
   configDirEnv?: string
@@ -247,6 +248,7 @@ export const hookDefinitions: AgentHookDefinition[] = [
     source: 'rovodev',
     label: 'Rovo Dev',
     binaryName: 'acli',
+    launchCommand: 'acli rovodev run',
     configDirName: '.rovodev',
     configFileName: 'config.yml',
     yamlTemplate: 'rovodev',

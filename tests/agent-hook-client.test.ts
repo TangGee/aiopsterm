@@ -7,6 +7,7 @@ const codexInstaller = {
   source: 'codex' as const,
   label: 'Codex',
   binaryName: 'codex',
+  launchCommand: 'codex',
   binaryPath: '/usr/bin/codex',
   configPath: '/home/test/.codex/hooks.json',
   configExists: true,

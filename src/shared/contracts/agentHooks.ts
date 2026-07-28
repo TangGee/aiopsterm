@@ -21,6 +21,7 @@ export type AgentHookInstallerStatus = {
   source: AgentHookInstallerSource
   label: string
   binaryName: string
+  launchCommand: string
   binaryPath: string
   configPath: string
   configExists: boolean

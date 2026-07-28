@@ -310,6 +310,18 @@ describe('aiSessionsPanelViewRuntime', () => {
       ['api ①', 2, 1, 1, ['claude-api', 'gemini-api']],
       ['docs', 1, 0, 0, ['codex-docs']]
     ])
+    expect(
+      buildManagedAiLibrarySections({
+        sessions: duplicateProjectSessions,
+        grouping: 'project',
+        unknownProjectLabel: 'Unknown project'
+      }).map((section) => [section.label, section.projectPath])
+    ).toEqual([
+      ['api ②', '/work/marketing/api'],
+      ['Unknown project', undefined],
+      ['api ①', '/work/api'],
+      ['docs', '/work/docs']
+    ])
 
     expect(
       buildManagedAiLibrarySections({

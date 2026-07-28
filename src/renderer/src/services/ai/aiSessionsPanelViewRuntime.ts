@@ -33,6 +33,7 @@ export type ManagedAiProjectDisplayLabelSet = {
 export type ManagedAiLibrarySection = {
   key: string
   label: string
+  projectPath?: string
   count: number
   childCount: number
   pendingCount: number
@@ -458,6 +459,9 @@ export const buildManagedAiLibrarySections = (input: {
     sections.set(key, {
       key,
       label,
+      ...(input.grouping === 'project'
+        ? { projectPath: String(session.canonicalCwd || session.cwd || '').trim() || undefined }
+        : {}),
       count: (existing?.count || 0) + 1,
       childCount: (existing?.childCount || 0) + (managedAiSessionIsChild(session) ? 1 : 0),
       pendingCount: (existing?.pendingCount || 0) + (!managedAiSessionIsChild(session) && session.state === 'needsInput' ? 1 : 0),

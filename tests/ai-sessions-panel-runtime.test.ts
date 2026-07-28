@@ -303,4 +303,76 @@ describe('managed AI session terminal switch telemetry', () => {
       scope.stop()
     }
   })
+
+  it('creates a local Agent session and remembers the last selected Agent', async () => {
+    const workspace = useWorkspaceStore()
+    workspace.agentHookInstallers = [
+      {
+        source: 'codex',
+        label: 'Codex',
+        binaryName: 'codex',
+        launchCommand: 'codex',
+        binaryPath: '/usr/bin/codex',
+        configPath: '/home/test/.codex/hooks.json',
+        configExists: true,
+        installed: false,
+        scriptPath: '/opt/aiopsterm/agent-hook.js',
+        warnings: []
+      },
+      {
+        source: 'claude-code',
+        label: 'Claude Code',
+        binaryName: 'claude',
+        launchCommand: 'claude',
+        binaryPath: '/usr/bin/claude',
+        configPath: '/home/test/.claude/settings.json',
+        configExists: true,
+        installed: true,
+        scriptPath: '/opt/aiopsterm/agent-hook.js',
+        warnings: []
+      }
+    ]
+    vi.spyOn(workspace, 'refreshAgentHookInstallers').mockResolvedValue(true)
+    const openTerminal = vi.spyOn(workspace, 'openLocalTerminalPanel').mockResolvedValue({ id: 'panel-new' } as any)
+    const runCommand = vi.spyOn(workspace, 'runTerminalCommand').mockResolvedValue({
+      status: 'allow',
+      execution: {
+        command: 'claude',
+        panelIds: ['panel-new'],
+        inputText: 'claude',
+        writeToShell: true,
+        source: 'agent'
+      }
+    })
+    const scope = effectScope()
+    const runtime = scope.run(() => useAiSessionsPanelRuntime())!
+
+    try {
+      await runtime.openCreateDialog('/work/project')
+      expect(runtime.createAgentOptions.value.find((agent) => agent.source === 'codex')).toEqual(
+        expect.objectContaining({
+          available: false,
+          statusKey: 'aiSessions.agentHookMissing'
+        })
+      )
+      runtime.createAgentSource.value = 'claude-code'
+      await expect(runtime.startCreatedSession()).resolves.toBe(true)
+      await flushMicrotasks()
+
+      expect(openTerminal).toHaveBeenCalledWith({
+        title: 'Claude Code - project',
+        cwd: '/work/project',
+        preserveActiveModule: true
+      })
+      expect(runCommand).toHaveBeenCalledWith('panel-new', 'claude', {
+        source: 'agent',
+        writeToShell: true
+      })
+      expect(JSON.parse(window.localStorage.getItem('aiopsterm.aiSessionsPanelState') || '{}')).toEqual(
+        expect.objectContaining({ lastCreatedAgentSource: 'claude-code' })
+      )
+    } finally {
+      scope.stop()
+    }
+  })
 })
