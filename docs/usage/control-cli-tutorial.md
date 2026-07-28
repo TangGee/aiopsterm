@@ -9,6 +9,7 @@ aiopsterm 创建的本地终端会自动把这些命令加入 `PATH`：
 - `aio`：推荐使用的短命令。
 - `aictl`：语义更明确的兼容别名。
 - `aiopsterm-control`：长兼容别名。
+- `aiopen`：在 aiopsterm 主工作区文件编辑器中打开本地文本文件。
 - `aiossh`：快速连接已管理主机，等价于 `aio ssh <host>`。
 
 普通用户和脚本优先写 `aio`：
@@ -122,6 +123,32 @@ aio capture-pane --panel <panel-id> --scrollback --lines 500
 ```
 
 `terminal send` 等价于用户在终端里输入文本。它是原始输入能力，不会经过 AI 命令审批流程；只在明确知道目标终端和要发送内容时使用。
+
+## Local File Editing
+
+`aiopen` 使用 aiopsterm 主工作区的文件编辑器打开本地文本文件。相对路径以执行命令时的当前目录为基准，绝对路径直接使用：
+
+```bash
+aiopen ./src/main.ts
+aiopen /var/log/example.log
+```
+
+一次可以打开多个文件：
+
+```bash
+aiopen ./src/main.ts ./src/config.ts /tmp/debug.log
+```
+
+每个文件会成为一个主工作区标签页，并使用与 AI 项目文件相同的自动保存、失焦保存、磁盘变更监听和冲突处理。已经打开的同一路径会复用原标签页。
+
+`aiopen` 只接受已经存在的本地文本文件。目录、不存在的文件、二进制文件和超过 2 MiB 的文件会失败。如果一组路径中只有部分文件无效，有效文件仍会打开，但命令退出码为非零，并在标准错误中逐项输出失败原因。
+
+在 aiopsterm 管理的本地终端中，`aiopen` 会自动加入 `PATH`。从普通系统终端调用打包控制 helper 时，需要显式指定当前实例的控制套接字：
+
+```bash
+ELECTRON_RUN_AS_NODE=1 <aiopsterm-executable> <helper-path> \
+  --socket <control-socket-path> aiopen ./src/main.ts
+```
 
 ## SSH Remote Panels
 

@@ -112,10 +112,13 @@ The mobile chat compatibility slice maps control_compat's agent-chat RPC names o
 The project/file compatibility slice maps control_compat project openers onto aiopsterm's shared main work panel:
 
 - `markdown.open`: open a Knowledge file as a knowledge surface in the shared main work panel, with optional `line` / `startLine` and `endLine` jump metadata.
-- `file.open`: open one or more Knowledge files through `path` or `paths`. Arbitrary absolute local files are recognized but return `unsupported=true` because aiopsterm does not yet expose a generic local-file surface in the shared terminal workspace.
+- `file.open`: open one or more Knowledge files through `path` or `paths`.
+- `file.editor.open`: validate and open one or more existing absolute local text files as `local-file` surfaces in the shared main work panel. The main process canonicalizes paths, rejects directories, missing files, binary files, and files larger than 2 MiB, then dispatches valid paths to the renderer. Mixed valid and invalid input returns `LOCAL_EDITOR_FILE_OPEN_PARTIAL`: valid files remain open while the response and CLI exit status report failure.
 - `project.open`: create or focus a project compatibility surface. If `path` points to a Knowledge file, the file is opened; otherwise aiopsterm records project metadata on a terminal surface without creating an Xcode-style project navigator.
 - `project.set_tab`, `project.set_scheme`, `project.set_configuration`, `project.set_selected_target`, `project.set_selected_file`, and `project.set_settings_filter`: update renderer-owned project compatibility metadata for automation scripts that expect these control_compat methods.
 - `project.get_state`: return the stored project compatibility state. Xcode-only concepts such as schemes, targets, and build settings are marked with `unsupported=true` until aiopsterm has a native equivalent.
+
+The bundled `aiopen <path>...` shim resolves relative paths against the caller's current working directory and sends canonical absolute candidates through `file.editor.open`. Renderer local-file surfaces reuse the project-file editor's autosave and close-flush registry. Reads include a content hash, size, and modification time; writes use those values for optimistic conflict detection. Parent-directory watchers report external modification or deletion events so dirty editor content is never silently overwritten.
 
 The workspace group slice adds control_compat-style group metadata for the shared main work panel:
 
