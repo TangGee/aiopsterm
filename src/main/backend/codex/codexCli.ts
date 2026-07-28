@@ -343,6 +343,36 @@ const resolveCodexThreadTitleFromState = (codexHome: string, threadId: string) =
   }
 }
 
+const codexThreadExistsInState = (codexHome: string, threadId: string): boolean | null => {
+  const statePath = join(codexHome, 'state_5.sqlite')
+  if (!getExistsSync()(statePath)) return false
+  let db: CodexStateDatabase | null = null
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const loaded = require('better-sqlite3') as
+      | (new (path: string, options: { readonly: boolean; fileMustExist: boolean }) => CodexStateDatabase)
+      | { default?: new (path: string, options: { readonly: boolean; fileMustExist: boolean }) => CodexStateDatabase }
+    const Database = typeof loaded === 'function' ? loaded : loaded.default
+    if (!Database) return null
+    db = new Database(statePath, { readonly: true, fileMustExist: true })
+    return Boolean(db.prepare('SELECT id FROM threads WHERE id = ? LIMIT 1').get(threadId))
+  } catch {
+    return null
+  } finally {
+    db?.close()
+  }
+}
+
+const codexThreadPersistenceState = async (
+  codexHome: string,
+  threadId: string
+): Promise<'present' | 'absent' | 'unknown'> => {
+  const existsInState = codexThreadExistsInState(codexHome, threadId)
+  const rolloutPath = await findCodexSavedSessionRolloutPath(threadId)
+  if (existsInState || rolloutPath) return 'present'
+  return existsInState === false ? 'absent' : 'unknown'
+}
+
 const resolveCodexThreadTitle = (codexHome: string, threadId: string) =>
   runtimeConfig.resolveThreadTitle
     ? runtimeConfig.resolveThreadTitle(codexHome, threadId)
@@ -619,6 +649,11 @@ export const deleteCodexNativeThread = async (threadIdInput: string) => {
     })
   } catch (error) {
     if (codexThreadDeletionAlreadyAbsent(error)) return false
+    try {
+      if (await codexThreadPersistenceState(codexHome, threadId) === 'absent') return false
+    } catch {
+      // Preserve the original Codex deletion error when persistence cannot be inspected.
+    }
     const reason = error instanceof Error ? error.message : String(error)
     throw Object.assign(new Error(`Codex thread deletion failed: ${reason}`), {
       code: 'CODEX_THREAD_DELETE_FAILED',

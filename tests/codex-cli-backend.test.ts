@@ -402,15 +402,14 @@ describe('Codex CLI backend runtime', () => {
     )
   })
 
-  it('preserves Codex thread deletion failures that are not missing-thread responses', async () => {
+  it('treats a generic Codex delete failure as already absent when no native persistence remains', async () => {
     const backend = await loadBackend()
+    const userDataPath = await createTemporaryUserData()
     const execFile = vi.fn(async () => {
-      throw Object.assign(new Error('Codex delete command failed'), {
-        stderr: 'Error: database is locked'
-      })
+      throw new Error('Command failed\nError: failed to delete session')
     })
     backend.configureCodexCliRuntime({
-      getUserDataPath: () => '/tmp/aiopsterm-user-data',
+      getUserDataPath: () => userDataPath,
       binaryPath: CODEX_PACKAGE_BINARY,
       binaryHealthCheck: false,
       existsSync: codexPackageExists,
@@ -418,7 +417,36 @@ describe('Codex CLI backend runtime', () => {
     })
 
     await expect(
-      backend.deleteCodexNativeThread('123e4567-e89b-12d3-a456-426614174010')
+      backend.deleteCodexNativeThread('123e4567-e89b-12d3-a456-426614174011')
+    ).resolves.toBe(false)
+  })
+
+  it('preserves Codex thread deletion failures that are not missing-thread responses', async () => {
+    const backend = await loadBackend()
+    const userDataPath = await createTemporaryUserData()
+    const threadId = '123e4567-e89b-12d3-a456-426614174010'
+    const rolloutDirectory = join(userDataPath, 'codex-agent', 'sessions', '2026', '07', '28')
+    const rolloutPath = join(
+      rolloutDirectory,
+      `rollout-2026-07-28T00-00-00-${threadId}.jsonl`
+    )
+    await mkdir(rolloutDirectory, { recursive: true })
+    await writeFile(rolloutPath, '{"type":"session_meta"}\n', 'utf8')
+    const execFile = vi.fn(async () => {
+      throw Object.assign(new Error('Codex delete command failed'), {
+        stderr: 'Error: database is locked'
+      })
+    })
+    backend.configureCodexCliRuntime({
+      getUserDataPath: () => userDataPath,
+      binaryPath: CODEX_PACKAGE_BINARY,
+      binaryHealthCheck: false,
+      existsSync: (path: string) => codexPackageExists(path) || path === rolloutPath,
+      execFile
+    })
+
+    await expect(
+      backend.deleteCodexNativeThread(threadId)
     ).rejects.toMatchObject({ code: 'CODEX_THREAD_DELETE_FAILED' })
   })
 
