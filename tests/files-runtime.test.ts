@@ -276,6 +276,14 @@ describe('filesRuntime', () => {
       '.env',
       'readme.md'
     ])
+    expect(visibleFileBrowserEntries(rows, true, { key: 'name', direction: 'asc' }, ' ReAd ').map((entry) => entry.name)).toEqual([
+      'readme.md'
+    ])
+    expect(visibleFileBrowserEntries(rows, true, { key: 'name', direction: 'asc' }, 'RELEASE').map((entry) => entry.name)).toEqual([
+      'release'
+    ])
+    expect(visibleFileBrowserEntries(rows, false, { key: 'name', direction: 'asc' }, '.env')).toEqual([])
+    expect(visibleFileBrowserEntries(rows, true, { key: 'name', direction: 'asc' }, 'missing')).toEqual([])
     expect(nextFileBrowserSortState({ key: 'name', direction: 'asc' }, 'name')).toEqual({ key: 'name', direction: 'desc' })
     expect(nextFileBrowserSortState({ key: 'name', direction: 'asc' }, 'modifiedAt')).toEqual({ key: 'modifiedAt', direction: 'desc' })
     expect(permissionToModePrefix('directory')).toBe('d')

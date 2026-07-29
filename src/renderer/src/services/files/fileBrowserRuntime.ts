@@ -31,6 +31,8 @@ export const useFileBrowserRuntime = (props: FileBrowserRuntimeProps, emit: File
   const pathInput = ref(props.session.rootPath)
   const currentPath = ref(props.session.rootPath)
   const entries = ref<FileBrowserEntry[]>([])
+  const searchOpen = ref(false)
+  const searchQuery = ref('')
   const showHidden = ref(true)
   const loading = ref(false)
   const error = ref('')
@@ -79,7 +81,8 @@ export const useFileBrowserRuntime = (props: FileBrowserRuntimeProps, emit: File
   ]
   const permissionOptions = ['读', '写', '执行']
   const permissionCode = computed(() => filePermissionCode(permissions))
-  const visibleEntries = computed(() => visibleFileBrowserEntries(entries.value, showHidden.value, sortState))
+  const visibleEntries = computed(() => visibleFileBrowserEntries(entries.value, showHidden.value, sortState, searchQuery.value))
+  const searchActive = computed(() => Boolean(searchQuery.value.trim()))
   const pathRuntime = computed(() => createFileBrowserPathRuntime(fileBrowserPathStyleForSession(props.session, platform.value)))
   const targetBreadcrumb = computed(() => pathRuntime.value.targetBreadcrumb(moveDialog.targetPath))
   const dirname = (path: string) => pathRuntime.value.dirname(path)
@@ -103,6 +106,23 @@ export const useFileBrowserRuntime = (props: FileBrowserRuntimeProps, emit: File
     }, 4500)
   }
 
+  const clearSearch = () => {
+    searchQuery.value = ''
+  }
+
+  const closeSearch = () => {
+    searchOpen.value = false
+    clearSearch()
+  }
+
+  const toggleSearch = () => {
+    if (searchOpen.value) {
+      closeSearch()
+      return
+    }
+    searchOpen.value = true
+  }
+
   const backend = createFileBrowserBackendRuntime({
     props,
     workspace,
@@ -122,6 +142,7 @@ export const useFileBrowserRuntime = (props: FileBrowserRuntimeProps, emit: File
     error.value = ''
     try {
       const result = await backend.loadDirectoryEntries(normalizedPath)
+      if (result.path !== currentPath.value) closeSearch()
       entries.value = result.rows
       currentPath.value = result.path
       pathInput.value = result.path
@@ -207,6 +228,7 @@ export const useFileBrowserRuntime = (props: FileBrowserRuntimeProps, emit: File
   watch(
     () => props.session.id,
     async () => {
+      closeSearch()
       await refreshPlatform()
       currentPath.value = pathRuntime.value.normalize(props.session.rootPath)
       pathInput.value = currentPath.value
@@ -230,6 +252,9 @@ export const useFileBrowserRuntime = (props: FileBrowserRuntimeProps, emit: File
 
   return {
     pathInput,
+    searchOpen,
+    searchQuery,
+    searchActive,
     showHidden,
     loading,
     error,
@@ -257,6 +282,9 @@ export const useFileBrowserRuntime = (props: FileBrowserRuntimeProps, emit: File
     targetBreadcrumb,
     dirname,
     formatSize,
+    toggleSearch,
+    clearSearch,
+    closeSearch,
     toggleSort,
     loadEntries,
     commitPath,

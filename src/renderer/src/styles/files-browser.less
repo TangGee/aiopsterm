@@ -15,14 +15,54 @@
 
 .file-browser-header {
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) repeat(4, 30px);
   gap: 6px;
   align-items: center;
   min-width: 0;
 }
 
-.file-browser.transfer-mode .file-browser-header {
-  grid-template-columns: 30px minmax(0, 1fr) repeat(3, 30px);
+.file-browser-header.session-local {
+  grid-template-columns: 30px minmax(0, 1fr) repeat(4, 30px);
+}
+
+.file-browser-header.session-remote {
+  grid-template-columns: 30px minmax(0, 1fr) repeat(5, 30px);
+}
+
+.file-browser-search {
+  grid-column: 1 / -1;
+  height: 30px;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 6px;
+  background: var(--theme-module-active-card-bg);
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 24px;
+  align-items: center;
+  padding: 0 5px;
+}
+
+.file-browser-search > svg {
+  width: 15px;
+  height: 15px;
+  color: var(--theme-module-active-text-muted);
+}
+
+.file-browser-search input {
+  min-width: 0;
+  height: 26px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--theme-module-active-text);
+}
+
+.file-browser-search button {
+  width: 24px;
+  height: 24px;
+}
+
+.file-browser-search button svg {
+  width: 14px;
+  height: 14px;
 }
 
 .file-path-input {

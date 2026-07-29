@@ -188,7 +188,7 @@
       v-if="!loading && !entries.length"
       class="file-empty"
     >
-      暂无文件
+      {{ searchActive ? '未找到匹配文件' : '暂无文件' }}
     </div>
   </div>
 </template>
@@ -215,6 +215,7 @@ import type { FileBrowserEntry, FileBrowserSortState } from '@/services/files/fi
 defineProps<{
   uiMode: 'transfer' | 'default'
   entries: FileBrowserEntry[]
+  searchActive: boolean
   loading: boolean
   dragActive: boolean
   dropForbidden: boolean

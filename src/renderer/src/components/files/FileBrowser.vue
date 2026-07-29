@@ -5,13 +5,18 @@
   >
     <FileBrowserHeader
       v-model:path-input="pathInput"
+      v-model:search-query="searchQuery"
       v-model:show-hidden="showHidden"
       :session-kind="session.kind"
+      :search-open="searchOpen"
+      @clear-search="clearSearch"
+      @close-search="closeSearch"
       @go-back="goBack"
       @commit-path="commitPath"
       @open-local-folder="openLocalFolder"
       @queue-upload="queueUpload"
       @refresh="() => loadEntries()"
+      @toggle-search="toggleSearch"
     />
 
     <p
@@ -25,6 +30,7 @@
       v-model:rename-value="renameValue"
       :ui-mode="uiMode"
       :entries="visibleEntries"
+      :search-active="searchActive"
       :loading="loading"
       :drag-active="dragActive"
       :drop-forbidden="dropForbidden"
@@ -124,6 +130,9 @@ const moveModalRef = ref<InstanceType<typeof FileBrowserMoveModal> | null>(null)
 
 const {
   pathInput,
+  searchOpen,
+  searchQuery,
+  searchActive,
   showHidden,
   loading,
   error,
@@ -151,6 +160,9 @@ const {
   targetBreadcrumb,
   dirname,
   formatSize,
+  toggleSearch,
+  clearSearch,
+  closeSearch,
   toggleSort,
   loadEntries,
   commitPath,

@@ -1,5 +1,8 @@
 <template>
-  <header class="file-browser-header">
+  <header
+    class="file-browser-header"
+    :class="`session-${sessionKind}`"
+  >
     <button
       class="file-icon-button primary"
       title="回退"
@@ -52,25 +55,77 @@
     >
       <RefreshCw />
     </button>
+    <button
+      class="file-icon-button"
+      :class="{ primary: searchOpen }"
+      title="搜索当前目录"
+      @click="$emit('toggle-search')"
+    >
+      <Search />
+    </button>
+    <div
+      v-if="searchOpen"
+      class="file-browser-search"
+    >
+      <Search />
+      <input
+        ref="searchInput"
+        :value="searchQuery"
+        placeholder="搜索当前目录中的文件和文件夹"
+        @input="$emit('update:search-query', ($event.target as HTMLInputElement).value)"
+        @keydown.esc.prevent.stop="$emit('close-search')"
+      />
+      <button
+        v-if="searchQuery"
+        title="清空搜索"
+        @click="clearSearch"
+      >
+        <X />
+      </button>
+    </div>
   </header>
 </template>
 
 <script setup lang="ts">
-import { Eye, EyeOff, FolderOpen, RefreshCw, Undo2, Upload, UploadCloud } from 'lucide-vue-next'
+import { nextTick, ref, watch } from 'vue'
+import { Eye, EyeOff, FolderOpen, RefreshCw, Search, Undo2, Upload, UploadCloud, X } from 'lucide-vue-next'
 
-defineProps<{
+const props = defineProps<{
   pathInput: string
+  searchOpen: boolean
+  searchQuery: string
   sessionKind: string
   showHidden: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   'update:path-input': [value: string]
+  'update:search-query': [value: string]
   'update:show-hidden': [value: boolean]
+  'clear-search': []
+  'close-search': []
   'go-back': []
   'commit-path': []
   'open-local-folder': []
   'queue-upload': [kind: 'file' | 'directory']
   refresh: []
+  'toggle-search': []
 }>()
+
+const searchInput = ref<HTMLInputElement | null>(null)
+
+const clearSearch = async () => {
+  emit('clear-search')
+  await nextTick()
+  searchInput.value?.focus()
+}
+
+watch(
+  () => props.searchOpen,
+  async (open) => {
+    if (!open) return
+    await nextTick()
+    searchInput.value?.focus()
+  }
+)
 </script>

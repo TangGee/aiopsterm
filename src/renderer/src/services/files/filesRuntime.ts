@@ -201,9 +201,14 @@ export const parseFilePermissionMode = (mode: string): FilePermissionSelection |
 export const visibleFileBrowserEntries = (
   entries: FileBrowserEntry[],
   showHidden: boolean,
-  sortState: FileBrowserSortState
+  sortState: FileBrowserSortState,
+  query = ''
 ) => {
-  const visible = showHidden ? entries : entries.filter((entry) => entry.name === '..' || !entry.name.startsWith('.'))
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const visibleByHiddenState = showHidden ? entries : entries.filter((entry) => entry.name === '..' || !entry.name.startsWith('.'))
+  const visible = normalizedQuery
+    ? visibleByHiddenState.filter((entry) => entry.name !== '..' && entry.name.toLocaleLowerCase().includes(normalizedQuery))
+    : visibleByHiddenState
   const parentRows = visible.filter((entry) => entry.name === '..')
   const rows = visible.filter((entry) => entry.name !== '..')
   const direction = sortState.direction === 'asc' ? 1 : -1
