@@ -20,7 +20,7 @@ describe('product session resource runtime', () => {
         sshSession: {
           assetId: 'asset-prod',
           connectionId: 'connection-prod-1',
-          assetName: 'Production',
+          assetName: '10.0.0.8',
           host: '10.0.0.8',
           port: 22,
           username: 'ops'
@@ -61,5 +61,15 @@ describe('product session resource runtime', () => {
     ])
     expect(options.filter((option) => option.kind === 'terminal')).toHaveLength(3)
     expect(options.filter((option) => option.kind === 'host').map((option) => option.context.assetId)).toEqual(['asset-stage'])
+    expect(options.find((option) => option.id === 'terminal:panel-prod-1')).toMatchObject({
+      label: 'Production',
+      context: {
+        label: 'Production',
+        assetName: 'Production',
+        panelId: 'panel-prod-1',
+        terminalSessionId: 'terminal-prod-1',
+        host: '10.0.0.8'
+      }
+    })
   })
 })

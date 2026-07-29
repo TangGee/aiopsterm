@@ -19,6 +19,7 @@ import {
 } from '@/services/ai/classicClineTaskRuntime'
 import {
   classicHostBindingMatchesContext,
+  classicHostContextWithCatalog,
   classicHostContextFromTerminalPanel,
   classicHostTargetId,
   classicSessionContextRef,
@@ -580,15 +581,20 @@ export const createWorkspaceAiChatController = (
       const restoredTerminalSessionIds = new Set<string>()
       for (const binding of storedBindings) {
         if (generation !== classicContextRestoreGeneration || selectedConversationId.value !== id) return
+        const catalogBinding = classicHostContextWithCatalog(binding, catalog)
         let panel = resolveClassicHostTerminalPanel(binding)
-        let context = panel ? classicHostContextFromTerminalPanel(panel) : null
+        const resolvedPanelContext = panel ? classicHostContextFromTerminalPanel(panel) : null
+        let context = resolvedPanelContext
+          ? classicHostContextWithCatalog(resolvedPanelContext, catalog)
+          : null
         if (context && !classicHostBindingMatchesContext(binding, context)) {
           panel = null
           context = null
         }
         if (!panel) {
-          panel = await openTerminalForAiHostContext(binding, { silent: true })
-          context = panel ? classicHostContextFromTerminalPanel(panel) : null
+          panel = await openTerminalForAiHostContext(catalogBinding, { silent: true })
+          const panelContext = panel ? classicHostContextFromTerminalPanel(panel) : null
+          context = panelContext ? classicHostContextWithCatalog(panelContext, catalog) : null
         }
         if (!context || !classicHostBindingMatchesContext(binding, context)) continue
         if (context.terminalSessionId && restoredTerminalSessionIds.has(context.terminalSessionId)) continue

@@ -195,6 +195,29 @@ export const classicHostBindingMatchesContext = (
   return sameHostRef(ref, candidate)
 }
 
+export const classicHostContextWithCatalog = (
+  context: AiContextOption,
+  catalog: Pick<AiContextCatalog, 'categories'>
+): AiContextOption => {
+  if (context.kind !== 'hosts' || isClassicLocalHostContext(context)) return { ...context }
+  const configuredHosts = catalog.categories.find((category) => category.id === 'hosts')?.options || []
+  const contextAssetId = text(context.assetId) || text(context.id)
+  const configured = configuredHosts.find((candidate) =>
+    candidate.kind === 'hosts' &&
+    (
+      (contextAssetId && (text(candidate.assetId) || text(candidate.id)) === contextAssetId) ||
+      sameHostRef(context, candidate)
+    )
+  )
+  if (!configured) return { ...context }
+  const displayLabel = text(configured.assetName) || text(configured.label)
+  return {
+    ...context,
+    ...(displayLabel ? { label: displayLabel, assetName: displayLabel } : {}),
+    ...(!text(context.detail) && text(configured.detail) ? { detail: configured.detail } : {})
+  }
+}
+
 const matchingCatalogOption = (ref: ProductSessionContextRef, options: AiContextOption[]) => {
   if (ref.kind === 'hosts' && isClassicLocalHostContext(ref)) {
     return options.find((candidate) => candidate.kind === 'hosts' && isClassicLocalHostContext(candidate))

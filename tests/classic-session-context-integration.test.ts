@@ -250,8 +250,8 @@ describe('Classic session context integration', () => {
     expect(window.aiops.createTerminal).not.toHaveBeenCalled()
     const request = vi.mocked(window.aiops.createAiChatExchangeRequest).mock.calls.at(-1)?.[0]
     expect(request?.hostTargets).toEqual([
-      expect.objectContaining({ targetId: 'asset-1::test-session-asset-1', terminalSessionId: 'test-session-asset-1', label: '10.24.8.12', kind: 'ssh' }),
-      expect.objectContaining({ targetId: 'asset-2::test-session-asset-2', terminalSessionId: 'test-session-asset-2', label: '10.24.12.44', kind: 'ssh' })
+      expect.objectContaining({ targetId: 'asset-1::test-session-asset-1', terminalSessionId: 'test-session-asset-1', label: 'prod-bastion', kind: 'ssh' }),
+      expect.objectContaining({ targetId: 'asset-2::test-session-asset-2', terminalSessionId: 'test-session-asset-2', label: 'staging-api', kind: 'ssh' })
     ])
     expect(request).not.toHaveProperty('terminalSessionId')
   })

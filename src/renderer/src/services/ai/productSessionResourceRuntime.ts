@@ -1,4 +1,5 @@
 import {
+  classicHostContextWithCatalog,
   classicHostContextFromTerminalPanel,
   classicStableHostTargetId,
   type ClassicTerminalPanelLike
@@ -21,14 +22,16 @@ export const productSessionResourceOptions = (
   catalog: Pick<AiContextCatalog, 'categories'>,
   activePanelId = ''
 ) => {
+  const configuredHosts = catalog.categories.find((category) => category.id === 'hosts')?.options || []
   const terminalOptions: ProductSessionResourceOption[] = panels
     .flatMap((panel) => {
-      const context = classicHostContextFromTerminalPanel(panel)
-      if (!context) return []
+      const panelContext = classicHostContextFromTerminalPanel(panel)
+      if (!panelContext) return []
+      const context = classicHostContextWithCatalog(panelContext, catalog)
       return [{
         id: `terminal:${panel.id}`,
         kind: 'terminal' as const,
-        label: text(panel.title) || context.label,
+        label: context.assetName || context.label || text(panel.title),
         detail: context.detail || context.label,
         context,
         panelId: panel.id
@@ -40,7 +43,6 @@ export const productSessionResourceOptions = (
     )
 
   const openedTargetIds = new Set(terminalOptions.map((option) => classicStableHostTargetId(option.context)))
-  const configuredHosts = catalog.categories.find((category) => category.id === 'hosts')?.options || []
   const hostOptions: ProductSessionResourceOption[] = configuredHosts
     .filter((context) => context.kind === 'hosts' && !openedTargetIds.has(classicStableHostTargetId(context)))
     .map((context) => ({

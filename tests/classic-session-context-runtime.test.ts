@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   classicActiveHostContext,
+  classicHostContextWithCatalog,
   classicHostTargetId,
   classicOpenedHostContexts,
   classicSessionContextRefs,
@@ -13,6 +14,41 @@ import type { AiContextCatalog, AiContextOption } from '@shared/contracts/aiChat
 const emptyCatalog = (): AiContextCatalog => ({ categories: [], openedHosts: [], selectedDefaults: [] })
 
 describe('Classic session context runtime', () => {
+  it('uses the configured asset name while preserving the exact terminal binding', () => {
+    expect(classicHostContextWithCatalog({
+      id: 'asset-prod',
+      kind: 'hosts',
+      label: '10.0.0.8',
+      assetId: 'asset-prod',
+      connectionId: 'connection-prod',
+      panelId: 'panel-prod',
+      terminalSessionId: 'terminal-prod',
+      host: '10.0.0.8',
+      port: 22,
+      username: 'ops'
+    }, {
+      categories: [{
+        id: 'hosts',
+        label: 'Hosts',
+        options: [{
+          id: 'asset-prod',
+          kind: 'hosts',
+          label: 'Production',
+          assetName: 'Production',
+          host: '10.0.0.8',
+          port: 22,
+          username: 'ops'
+        }]
+      }]
+    })).toEqual(expect.objectContaining({
+      label: 'Production',
+      assetName: 'Production',
+      connectionId: 'connection-prod',
+      panelId: 'panel-prod',
+      terminalSessionId: 'terminal-prod'
+    }))
+  })
+
   it('persists ordered stable refs without content or binary payloads', () => {
     const contexts: AiContextOption[] = [
       { id: 'asset-prod', kind: 'hosts', label: '10.0.0.8', host: '10.0.0.8', port: 22, username: 'ops', data: 'secret' },
