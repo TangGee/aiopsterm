@@ -60,22 +60,26 @@ export const registerAiChatIpc = (ipcMain: IpcMain, runtime: RegisterAiChatIpcIn
       const trustedTargetId = String(trusted.targetId || '').trim()
       const trustedTerminalSessionId = String(trusted.terminalSessionId || '').trim()
       const trustedLabel = String(trusted.label || '').trim()
+      const scopedTrustedTargetId = `${trustedTargetId}::${trustedTerminalSessionId}`
+      const canonicalTargetId = targetId === trustedTargetId || targetId === scopedTrustedTargetId
+        ? targetId
+        : ''
       if (
         !trustedTargetId ||
         !trustedTerminalSessionId ||
         !trustedLabel ||
+        !canonicalTargetId ||
         (trusted.kind !== 'local' && trusted.kind !== 'ssh') ||
         trustedTerminalSessionId !== targetTerminalSessionId ||
-        trustedTargetId !== targetId ||
         trusted.kind !== kind ||
-        targetIds.has(trustedTargetId) ||
+        targetIds.has(canonicalTargetId) ||
         terminalSessionIds.has(trustedTerminalSessionId)
       ) return terminalSessionError()
-      targetIds.add(trustedTargetId)
+      targetIds.add(canonicalTargetId)
       terminalSessionIds.add(trustedTerminalSessionId)
       const cwd = String(trusted.cwd || '').trim()
       trustedTargets.push({
-        targetId: trustedTargetId,
+        targetId: canonicalTargetId,
         terminalSessionId: trustedTerminalSessionId,
         label: trustedLabel,
         kind: trusted.kind,

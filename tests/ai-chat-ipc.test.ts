@@ -77,8 +77,26 @@ describe('AI chat IPC product binding', () => {
     await handlers.get('ai:chat-response')?.(event, { prompt: 'inspect', mode: 'agent', hostTargets })
     expect(backend.generateAiChatResponse).toHaveBeenCalledWith(expect.objectContaining({ hostTargets: canonicalTargets }))
 
+    backend.generateAiChatResponse.mockClear()
+    const scopedHostTargets = hostTargets.map((target) => ({
+      ...target,
+      targetId: `${target.targetId}::${target.terminalSessionId}`
+    }))
+    await handlers.get('ai:chat-response')?.(event, {
+      prompt: 'inspect scoped terminals',
+      mode: 'agent',
+      hostTargets: scopedHostTargets
+    })
+    expect(backend.generateAiChatResponse).toHaveBeenCalledWith(expect.objectContaining({
+      hostTargets: canonicalTargets.map((target) => ({
+        ...target,
+        targetId: `${target.targetId}::${target.terminalSessionId}`
+      }))
+    }))
+
     const mismatches = [
       [{ ...hostTargets[0], targetId: 'asset-spoofed' }],
+      [{ ...hostTargets[0], targetId: 'asset-a::terminal-spoofed' }],
       [{ ...hostTargets[0], kind: 'local' }],
       [{ targetId: 'asset-c', terminalSessionId: 'terminal-other', label: 'Host C', kind: 'ssh' }]
     ]
