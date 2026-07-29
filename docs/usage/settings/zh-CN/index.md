@@ -9,6 +9,7 @@
 - [计费概览](billing.md)
 - [AI 通知](ai-notifications.md)
 - [主机Agent](ai-remote-host-management.md)
+  - [命令安全设置](command-security.md)
   - [MCP 设置](mcp.md)
   - [Skills 设置](skills.md)
   - [规则设置](rules.md)

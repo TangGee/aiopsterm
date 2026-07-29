@@ -73,6 +73,7 @@ export const createSettingsWorkspaceAdvancedPages = (
             h('div', { class: 'security-config-path', title: workspace.securityConfigPath }, workspace.securityConfigPath),
             h('div', { class: 'settings-action-row' }, [
               workspace.securityConfigEditorLastSaved ? h('span', { class: 'security-config-saved' }, 'Saved') : null,
+              h('button', { class: 'settings-button', onClick: () => workspace.openSettingsPageDocumentation('commandSecurity') }, t('settings.ai.commandSecurity.help')),
               h('button', { class: 'settings-button', onClick: () => workspace.resetSecurityConfigEditor() }, 'Reset'),
               h('button', { class: 'settings-button primary', disabled: Boolean(workspace.securityConfigEditorError), onClick: () => workspace.saveSecurityConfigEditor() }, 'Save'),
               h('button', { class: 'settings-button', onClick: () => workspace.closeSecurityConfigEditor() }, 'Close')

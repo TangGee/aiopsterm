@@ -349,6 +349,7 @@ export type SettingsDocumentationPage =
   | 'billing'
   | 'aiNotifications'
   | 'aiRemoteHostManagement'
+  | 'commandSecurity'
   | 'mcp'
   | 'exportMcp'
   | 'skills'

@@ -9102,6 +9102,7 @@ describe('AppShell', () => {
     const invokeControlHandler = controlHandler as unknown as (request: any) => Promise<any>
     expect(invokeControlHandler).toBeTruthy()
     const store = useWorkspaceStore()
+    store.securitySettings.security.securityPolicy.blockCritical = false
     await openLocalShellFromActiveTab(wrapper)
     await flushPromises()
     const panelId = store.activePanelId
@@ -11036,6 +11037,7 @@ describe('AppShell', () => {
     expect(wrapper.find('.terminal-suggestions').text()).toContain('journalctl -u nginx')
     expect(wrapper.find('.terminal-suggestions .ai-trigger-loading').exists()).toBe(false)
 
+    store.securitySettings.security.securityPolicy.blockCritical = false
     await wrapper.find('.command-line input').setValue('rm /tmp/file')
     await wrapper.find('.command-line input').trigger('keydown', { key: 'Enter' })
     expect(store.terminalSecurityPrompt?.command).toBe('rm /tmp/file')
@@ -17480,7 +17482,17 @@ describe('AppShell', () => {
     await workspace.findAll('.settings-checkbox-item').find((row) => row.text().includes('自动执行只读命令'))!.find('input').setValue(true)
     await flushPromises()
     expect(store.aiPreferences.autoExecuteReadOnlyCommands).toBe(true)
-    await workspace.findAll('.security-config-row button').find((button) => button.text().includes('打开安全配置'))!.trigger('click')
+    const commandSecurityCard = workspace.find('.command-security-settings-card')
+    expect(commandSecurityCard.text()).toContain('人工终端键盘输入与粘贴不会被拦截')
+    const strictSecurityRow = commandSecurityCard.findAll('.settings-checkbox-item').find((row) => row.text().includes('严格白名单模式'))!
+    await strictSecurityRow.find('input').setValue(true)
+    await flushPromises()
+    expect(store.securitySettings.security.enableStrictMode).toBe(true)
+    const dangerousCommandsEditor = commandSecurityCard.findAll('textarea')[0]
+    await dangerousCommandsEditor.setValue('rm\nrm\nshutdown\n')
+    await flushPromises()
+    expect(store.securitySettings.security.dangerousCommands).toEqual(['rm', 'shutdown'])
+    await commandSecurityCard.findAll('button').find((button) => button.text().includes('高级 JSON 配置'))!.trigger('click')
     await flushPromises()
     expect(store.securityConfigEditorOpen).toBe(true)
     expect(workspace.text()).toContain('security-config.json')
@@ -17522,7 +17534,7 @@ describe('AppShell', () => {
     expect(window.aiops.writeSecurityConfig).toHaveBeenCalledWith(JSON.stringify(securityConfig, null, 2))
     expect(window.aiops.saveConfig).not.toHaveBeenCalled()
     expect(store.config.securityConfig).toEqual(securityConfig)
-    await workspace.find('.security-config-toolbar .settings-button').trigger('click')
+    await workspace.findAll('.security-config-toolbar .settings-button').find((button) => button.text() === 'Reset')!.trigger('click')
     expect(store.securitySettings).toEqual({
       security: {
         enableCommandSecurity: true,

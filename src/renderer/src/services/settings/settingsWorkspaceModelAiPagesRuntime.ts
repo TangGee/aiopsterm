@@ -182,6 +182,8 @@ export const createSettingsWorkspaceModelAiPages = (
           settingsPageTitle(t('settings.ai.remoteHostManagement'), 'aiRemoteHostManagement'),
           h('h3', t('settings.ai.general')),
           h(RemoteHostBehaviorSettingsCard),
+          h('h3', t('settings.ai.commandSecurity.title')),
+          h(CommandSecuritySettingsCard),
           h('h3', t('settings.ai.terminal')),
           h(RemoteHostTerminalSettingsCard)
         ])
@@ -386,12 +388,116 @@ export const createSettingsWorkspaceModelAiPages = (
             checked: workspace.aiPreferences.autoApproval,
             onboardingId: 'settings-ai-auto-approval',
             onChange: (checked: boolean) => workspace.updateAiPreferences({ autoApproval: checked })
+          })
+        ])
+    }
+  })
+
+  const CommandSecuritySettingsCard = defineComponent({
+    name: 'CommandSecuritySettingsCard',
+    setup() {
+      const policyValue = (ask: boolean) => (ask ? 'ask' : 'block')
+      const updateList = async (
+        event: Event,
+        key: 'dangerousCommands' | 'blacklistPatterns' | 'whitelistPatterns'
+      ) => {
+        const textarea = event.target as HTMLTextAreaElement
+        const previous = workspace.securitySettings.security[key].join('\n')
+        const values = [...new Set(textarea.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean))]
+        const saved = await workspace.updateSecuritySettings({ [key]: values })
+        if (!saved) textarea.value = previous
+      }
+      const policySelect = (
+        label: string,
+        value: 'ask' | 'block',
+        onChange: (value: 'ask' | 'block') => Promise<boolean>
+      ) =>
+        selectRow(
+          label,
+          value,
+          [
+            { value: 'block', label: t('settings.ai.commandSecurity.block') },
+            { value: 'ask', label: t('settings.ai.commandSecurity.ask') }
+          ],
+          (next) => onChange(next as 'ask' | 'block')
+        )
+      const listEditor = (
+        label: string,
+        key: 'dangerousCommands' | 'blacklistPatterns' | 'whitelistPatterns'
+      ) =>
+        h('label', { class: 'command-security-list-field' }, [
+          h('span', label),
+          h('textarea', {
+            class: 'settings-input command-security-list',
+            value: workspace.securitySettings.security[key].join('\n'),
+            disabled: !workspace.securitySettings.security.enableCommandSecurity,
+            rows: 4,
+            onChange: (event: Event) => void updateList(event, key)
           }),
-          h('div', { class: 'security-config-row' }, [
-            h('span', t('settings.ai.securityConfig')),
-            h('button', { class: 'settings-button', onClick: () => workspace.openSecurityConfigEditor() }, t('settings.ai.openSecurityConfig'))
+          h('small', t('settings.ai.commandSecurity.listHint'))
+        ])
+
+      return () => {
+        const security = workspace.securitySettings.security
+        const disabled = !security.enableCommandSecurity
+        return h('div', { class: 'settings-section-card command-security-settings-card' }, [
+          h('p', { class: 'command-security-scope' }, t('settings.ai.commandSecurity.scope')),
+          h(SettingsCheckbox, {
+            label: t('settings.ai.commandSecurity.enabled'),
+            description: t('settings.ai.commandSecurity.enabledDescription'),
+            checked: security.enableCommandSecurity,
+            onChange: (checked: boolean) => workspace.updateSecuritySettings({ enableCommandSecurity: checked })
+          }),
+          h('div', { class: ['command-security-dependent-settings', { disabled }] }, [
+            h(SettingsCheckbox, {
+              label: t('settings.ai.commandSecurity.strict'),
+              description: t('settings.ai.commandSecurity.strictDescription'),
+              checked: security.enableStrictMode,
+              onChange: (checked: boolean) => workspace.updateSecuritySettings({ enableStrictMode: checked })
+            }),
+            numberRow(
+              t('settings.ai.commandSecurity.maxLength'),
+              security.maxCommandLength,
+              1,
+              100000,
+              (value) => workspace.updateSecuritySettings({ maxCommandLength: value }),
+              1,
+              true
+            ),
+            policySelect(
+              t('settings.ai.commandSecurity.criticalPolicy'),
+              security.securityPolicy.blockCritical ? 'block' : 'ask',
+              (value) => workspace.updateSecuritySettings({ securityPolicy: { blockCritical: value === 'block' } })
+            ),
+            policySelect(
+              t('settings.ai.commandSecurity.highPolicy'),
+              policyValue(security.securityPolicy.askForHigh),
+              (value) => workspace.updateSecuritySettings({ securityPolicy: { askForHigh: value === 'ask' } })
+            ),
+            policySelect(
+              t('settings.ai.commandSecurity.mediumPolicy'),
+              policyValue(security.securityPolicy.askForMedium),
+              (value) => workspace.updateSecuritySettings({ securityPolicy: { askForMedium: value === 'ask' } })
+            ),
+            policySelect(
+              t('settings.ai.commandSecurity.blacklistPolicy'),
+              policyValue(security.securityPolicy.askForBlacklist),
+              (value) => workspace.updateSecuritySettings({ securityPolicy: { askForBlacklist: value === 'ask' } })
+            ),
+            listEditor(t('settings.ai.commandSecurity.dangerousCommands'), 'dangerousCommands'),
+            listEditor(t('settings.ai.commandSecurity.blacklist'), 'blacklistPatterns'),
+            listEditor(t('settings.ai.commandSecurity.whitelist'), 'whitelistPatterns')
+          ]),
+          workspace.securityConfigEditorError
+            ? h('p', { class: 'command-security-error' }, workspace.securityConfigEditorError)
+            : null,
+          h('div', { class: 'settings-action-row command-security-actions' }, [
+            h('button', { class: 'settings-button', onClick: () => workspace.resetSecurityConfigEditor() }, t('settings.ai.commandSecurity.reset')),
+            h('button', { class: 'settings-button', onClick: () => workspace.openSettingsPageDocumentation('commandSecurity') }, t('settings.ai.commandSecurity.help')),
+            h('button', { class: 'settings-button', onClick: () => workspace.openSecurityConfigEditor() }, t('settings.ai.commandSecurity.advanced'))
           ])
         ])
+      }
     }
   })
 

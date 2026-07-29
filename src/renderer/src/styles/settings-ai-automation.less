@@ -19,10 +19,58 @@
   padding-left: 26px;
 }
 
-.security-config-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
+.command-security-settings-card,
+.command-security-dependent-settings {
+  display: grid;
+  gap: 14px;
+}
+
+.command-security-scope,
+.command-security-error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.command-security-scope {
+  color: var(--theme-module-active-text-muted);
+}
+
+.command-security-error {
+  color: var(--theme-core-danger);
+}
+
+.command-security-dependent-settings.disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.command-security-list-field {
+  display: grid;
+  gap: 6px;
+}
+
+.command-security-list-field > span {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.command-security-list-field small {
+  color: var(--theme-module-active-text-muted);
+  font-size: 12px;
+}
+
+.command-security-list {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 88px;
+  resize: vertical;
+  font-family: var(--theme-font-mono);
+  line-height: 1.5;
+}
+
+.command-security-actions {
+  flex-wrap: wrap;
 }
 
 .agent-hook-installer-card {

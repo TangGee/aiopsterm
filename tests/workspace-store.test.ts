@@ -1561,6 +1561,7 @@ describe('workspace store', () => {
 
   it('routes risky managed AI session resume commands through terminal security approval', async () => {
     const store = useWorkspaceStore()
+    store.securitySettings.security.securityPolicy.blockCritical = false
     store.applyLocalTerminalSession('panel-main', {
       id: 'terminal-session-1',
       kind: 'local',
@@ -2811,6 +2812,33 @@ describe('workspace store', () => {
 
     expect(decision?.status).toBe('allow')
     expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-session', 'uptime\n')
+  })
+
+  it('writes a large manual paste once without applying command security', async () => {
+    const store = useWorkspaceStore()
+    const text = `rm -rf /tmp\n${'plain text '.repeat(100_000)}`
+    store.activePanel.sessionId = 'manual-paste-session'
+    store.securitySettings = {
+      security: {
+        ...store.securitySettings.security,
+        enableStrictMode: true,
+        blacklistPatterns: ['rm *'],
+        maxCommandLength: 1
+      }
+    }
+
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    const decision = await store.runTerminalCommand(store.activePanel.id, text, {
+      inputText: text,
+      shellText: text,
+      writeToShell: true,
+      source: 'manual-paste'
+    })
+
+    expect(decision?.status).toBe('allow')
+    expect(window.aiops.writeTerminal).toHaveBeenCalledTimes(1)
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('manual-paste-session', text)
+    expect(store.terminalSecurityPrompt).toBeNull()
   })
 
   it('does not continue the legacy renderer agent loop after Cline migration', async () => {
@@ -7283,6 +7311,7 @@ describe('workspace store', () => {
 
   it('fails closed on malformed terminal write envelopes across direct, global, approved, and quick command paths', async () => {
     const store = useWorkspaceStore()
+    store.securitySettings.security.securityPolicy.blockCritical = false
     const byteLength = (data: string) => new TextEncoder().encode(data).length
 
     store.activePanel.sessionId = 'terminal-write-main'
@@ -7377,6 +7406,7 @@ describe('workspace store', () => {
 
   it('manages External reference-style quick command scripts and macro snippets', async () => {
     const store = useWorkspaceStore()
+    store.securitySettings.security.securityPolicy.blockCritical = false
     await store.refreshQuickCommands()
 
     expect(store.filteredQuickCommands.some((command) => command.snippet_name === '当前目录')).toBe(true)

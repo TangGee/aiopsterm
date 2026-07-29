@@ -105,7 +105,8 @@ const dangerousSeverity = (command: string): NonNullable<CommandSecurityResult['
 }
 
 const shouldAskForSeverity = (config: SecurityUserConfig['security'], severity: NonNullable<CommandSecurityResult['severity']>) => {
-  if (severity === 'critical' || severity === 'low') return true
+  if (severity === 'critical') return !config.securityPolicy.blockCritical
+  if (severity === 'low') return true
   return severity === 'high' ? config.securityPolicy.askForHigh : config.securityPolicy.askForMedium
 }
 
@@ -190,4 +191,3 @@ export const validateCommandSecurity = (securityConfig: SecurityUserConfig, comm
   }
   return { isAllowed: true, action: 'allow' }
 }
-

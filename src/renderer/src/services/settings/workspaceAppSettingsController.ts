@@ -428,6 +428,7 @@ export const createWorkspaceAppSettingsController = (state: WorkspaceAppSettings
     closeSecurityConfigEditor,
     updateSecurityConfigEditorContent,
     saveSecurityConfigEditor,
+    updateSecuritySettings,
     resetSecurityConfigEditor
   } = createWorkspaceSettingsConfigEditorsController(
     {
@@ -726,6 +727,7 @@ export const createWorkspaceAppSettingsController = (state: WorkspaceAppSettings
     closeSecurityConfigEditor,
     updateSecurityConfigEditorContent,
     saveSecurityConfigEditor,
+    updateSecuritySettings,
     resetSecurityConfigEditor,
     updatePrivacySettings,
     checkAboutUpdate,

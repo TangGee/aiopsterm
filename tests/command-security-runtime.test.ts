@@ -41,9 +41,15 @@ describe('command security runtime', () => {
     expect(ask).toEqual(expect.objectContaining({ isAllowed: true, category: 'blacklist', action: 'ask', requiresApproval: true }))
   })
 
-  it('asks for critical dangerous commands and inspects compound commands', () => {
-    const result = validateCommandSecurity(config({ blacklistPatterns: [] }), 'pwd && rm /etc/passwd')
-    expect(result).toEqual(expect.objectContaining({ isAllowed: true, category: 'dangerous', severity: 'critical', action: 'ask', requiresApproval: true }))
+  it('blocks or asks for critical dangerous commands according to policy', () => {
+    const blocked = validateCommandSecurity(config({ blacklistPatterns: [] }), 'pwd && rm /etc/passwd')
+    expect(blocked).toEqual(expect.objectContaining({ isAllowed: false, category: 'dangerous', severity: 'critical', action: 'block', requiresApproval: false }))
+
+    const ask = validateCommandSecurity(
+      config({ blacklistPatterns: [], securityPolicy: { blockCritical: false } as any }),
+      'pwd && rm /etc/passwd'
+    )
+    expect(ask).toEqual(expect.objectContaining({ isAllowed: true, category: 'dangerous', severity: 'critical', action: 'ask', requiresApproval: true }))
   })
 
   it('blocks commands outside the whitelist in strict mode', () => {

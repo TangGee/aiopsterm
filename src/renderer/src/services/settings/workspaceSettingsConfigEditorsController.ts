@@ -40,6 +40,10 @@ type WorkspaceSettingsConfigEditorsControllerDeps = {
   closeMcpConfigEditor: () => void
 }
 
+type SecuritySettingsPatch = Partial<Omit<SecuritySettings['security'], 'securityPolicy'>> & {
+  securityPolicy?: Partial<SecuritySettings['security']['securityPolicy']>
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 
 export const createWorkspaceSettingsConfigEditorsController = (
@@ -403,6 +407,42 @@ export const createWorkspaceSettingsConfigEditorsController = (
     }
   }
 
+  const updateSecuritySettings = async (patch: SecuritySettingsPatch) => {
+    const current = securitySettings.value.security
+    const normalized = normalizeSecurityConfig({
+      security: {
+        ...current,
+        ...patch,
+        securityPolicy: {
+          ...current.securityPolicy,
+          ...(patch.securityPolicy || {})
+        }
+      }
+    }).normalized
+    const writeSecurityConfig = settingsConfigClient.writeSecurityConfig()
+    if (!writeSecurityConfig) {
+      securityConfigEditorError.value = 'Save failed: security config service unavailable'
+      securityConfigEditorLastSaved.value = false
+      setSettingsNotice('安全配置保存服务不可用')
+      return false
+    }
+    try {
+      const result = await writeSecurityConfig(JSON.stringify(normalized, null, 2))
+      if (!applySavedSecurityConfig(result, normalized, 'Save')) {
+        setSettingsNotice(securityConfigEditorError.value || '安全配置保存失败')
+        return false
+      }
+      setSettingsNotice('安全配置已保存')
+      return true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      securityConfigEditorError.value = `Save failed: ${message}`
+      securityConfigEditorLastSaved.value = false
+      setSettingsNotice(message || '安全配置保存失败')
+      return false
+    }
+  }
+
   const resetSecurityConfigEditor = async () => {
     if (securityConfigSaveTimer) {
       window.clearTimeout(securityConfigSaveTimer)
@@ -452,6 +492,7 @@ export const createWorkspaceSettingsConfigEditorsController = (
     closeSecurityConfigEditor,
     updateSecurityConfigEditorContent,
     saveSecurityConfigEditor,
+    updateSecuritySettings,
     resetSecurityConfigEditor
   }
 }

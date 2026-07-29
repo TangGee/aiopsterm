@@ -16,7 +16,7 @@ This subpage manages command execution, context enrichment, security approval, a
 - Experience Extraction: Controls whether AI responses extract reusable operations experience.
 - AI Session Auto-Naming: After an Agent turn ends, summarize the current session title into 2-5 words with the current model. Manual titles are not overwritten.
 - Auto Approval: Allows low-risk read-only actions to pass automatically. High-risk commands still require approval.
-- Security Config: Opens `security-config.json`, where command security policy, blacklist, whitelist, and risk approval rules are maintained.
+- Command Security: Uses a visual form to maintain block lists, allow lists, dangerous commands, and approval rules for structured commands. Manual terminal input and paste are not affected. See [Command Security Settings](command-security.md) for advanced JSON fields.
 
 ## Terminal
 

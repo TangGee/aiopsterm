@@ -523,7 +523,7 @@ export const createTerminalWorkspaceShellRuntime = (
       inputText: text,
       shellText: text,
       writeToShell: true,
-      source: 'direct'
+      source: 'manual-paste'
     })
     if (result?.status === 'allow') syncTerminalView(panel)
     menu.visible = false

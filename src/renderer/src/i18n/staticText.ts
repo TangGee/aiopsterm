@@ -53,6 +53,8 @@ const exactEnUS: Record<string, string> = {
   '扩展': 'Extensions',
   '插件': 'Plugins',
   '终端命令': 'Terminal commands',
+  '安全配置保存服务不可用': 'Security configuration save service is unavailable',
+  '安全配置保存失败': 'Security configuration save failed',
   '发送到终端': 'Send to terminal',
   '正在导入': 'Importing',
   '导入资产': 'Import assets',

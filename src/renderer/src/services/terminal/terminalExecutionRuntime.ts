@@ -3,7 +3,7 @@ import type { SecurityUserConfig } from '@shared/contracts/appRuntime'
 import { validateCommandSecurity, type CommandSecurityResult } from '@/services/terminal/commandSecurityRuntime'
 import { isTerminalWorkspacePanel, type TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
 
-export type TerminalCommandSource = 'direct' | 'global' | 'snippet' | 'agent'
+export type TerminalCommandSource = 'direct' | 'global' | 'snippet' | 'agent' | 'manual-paste'
 
 export type TerminalSecurityExecution = {
   command: string
@@ -86,6 +86,7 @@ export const prepareTerminalSecurityExecution = (
   execution: TerminalSecurityExecution,
   options: TerminalExecutionPrepareOptions
 ): TerminalSecurityDecision => {
+  if (execution.source === 'manual-paste') return { status: 'allow', execution }
   const securityCommands = execution.securityCommands?.length ? execution.securityCommands : [execution.command]
   for (const securityCommand of securityCommands) {
     const result = validateCommandSecurity(options.securitySettings, securityCommand)

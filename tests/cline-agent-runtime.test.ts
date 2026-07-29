@@ -1996,7 +1996,7 @@ describe('Cline Agent Electron runtime boundary', () => {
   })
 
   it('lets Main security override a model that mislabels a dangerous command as read-only', async () => {
-    const { configureClineAgentRuntime, respondClineAgentApproval, runClineAgentTurn } = await loadRuntime()
+    const { configureClineAgentRuntime, runClineAgentTurn } = await loadRuntime()
     let supervisorOptions: any
     let finishSend: (decision: unknown) => void = () => undefined
     const sendFinished = new Promise((resolve) => {
@@ -2043,22 +2043,11 @@ describe('Cline Agent Electron runtime boundary', () => {
       ...trustedHostBinding,
       tools: classicAgentTools()
     }))
-    expect(outcome).toMatchObject({
-      status: 'approval-required',
-      event: {
-        toolCallId: 'tool-call-dangerous-mislabel',
-        autoApprovable: false,
-        reason: expect.stringContaining('rm')
-      }
+    expect(outcome).toMatchObject({ status: 'done' })
+    await expect(sendFinished).resolves.toEqual({
+      approved: false,
+      reason: expect.stringContaining('rm')
     })
-    expect(respondClineAgentApproval({
-      taskId: 'task-1',
-      turnId: 'turn-1',
-      toolCallId: 'tool-call-dangerous-mislabel',
-      ...trustedApprovalTarget,
-      approved: false
-    })).toMatchObject({ ok: true })
-    await expect(sendFinished).resolves.toEqual({ approved: false, reason: undefined })
     expect(terminalBridgeMocks.callCodexTerminalBridgeTool).not.toHaveBeenCalled()
   })
 

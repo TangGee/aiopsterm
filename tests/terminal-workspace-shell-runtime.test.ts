@@ -243,7 +243,7 @@ describe('terminalWorkspaceShellRuntime', () => {
       inputText: 'pwd\n',
       shellText: 'pwd\n',
       writeToShell: true,
-      source: 'direct'
+      source: 'manual-paste'
     })
     expect(calls.syncTerminalView).toHaveBeenCalledWith(workspace.panels[0])
 

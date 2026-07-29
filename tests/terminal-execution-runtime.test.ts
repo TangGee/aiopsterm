@@ -59,7 +59,10 @@ describe('terminalExecutionRuntime', () => {
       execution: { ...execution, command: 'pwd' }
     })
 
-    const approval = prepareTerminalSecurityExecution(execution, { securitySettings: securityConfig(), promptId: 'prompt-approve' })
+    const approval = prepareTerminalSecurityExecution(execution, {
+      securitySettings: securityConfig({ securityPolicy: { blockCritical: false } }),
+      promptId: 'prompt-approve'
+    })
     expect(approval.status).toBe('needs-approval')
     if (approval.status === 'needs-approval') {
       expect(approval.prompt).toEqual(
@@ -87,6 +90,29 @@ describe('terminalExecutionRuntime', () => {
     }
   })
 
+  it('allows manual terminal paste without applying command security', () => {
+    const text = `rm -rf /tmp\n${'plain text '.repeat(100_000)}`
+    const execution: TerminalSecurityExecution = {
+      command: text.trim(),
+      panelIds: ['panel-1'],
+      inputText: text,
+      shellText: text,
+      writeToShell: true,
+      source: 'manual-paste'
+    }
+
+    expect(
+      prepareTerminalSecurityExecution(execution, {
+        securitySettings: securityConfig({
+          enableStrictMode: true,
+          blacklistPatterns: ['rm *'],
+          maxCommandLength: 1
+        }),
+        promptId: 'manual-paste'
+      })
+    ).toEqual({ status: 'allow', execution })
+  })
+
   it('checks every quick-command security command before allowing execution', () => {
     const execution: TerminalSecurityExecution = {
       command: 'disk check',
@@ -99,7 +125,10 @@ describe('terminalExecutionRuntime', () => {
       snippetSegments: [{ text: 'df -h\nrm /tmp/later\n', delayBeforeMs: 0 }]
     }
 
-    const decision = prepareTerminalSecurityExecution(execution, { securitySettings: securityConfig(), promptId: 'prompt-snippet' })
+    const decision = prepareTerminalSecurityExecution(execution, {
+      securitySettings: securityConfig({ securityPolicy: { blockCritical: false } }),
+      promptId: 'prompt-snippet'
+    })
     expect(decision.status).toBe('needs-approval')
     if (decision.status === 'needs-approval') {
       expect(decision.prompt.command).toBe('rm /tmp/later')
