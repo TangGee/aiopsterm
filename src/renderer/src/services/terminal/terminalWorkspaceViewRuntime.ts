@@ -7,6 +7,8 @@ import { writeRendererRuntimeLog as writeRuntimeLog } from '@/services/app/runti
 import { terminalClient } from '@/services/terminal/terminalClient'
 import { terminalThemeForAppTheme, type TerminalSurfaceMode } from '@/services/terminal/terminalThemeRuntime'
 import {
+  isTerminalDeletePreviousWordShortcut,
+  terminalDeletePreviousWordInput,
   terminalShortcutActionForEvent,
   type TerminalShortcutAction
 } from '@/services/terminal/terminalKeyboardShortcuts'
@@ -452,6 +454,12 @@ export const createTerminalWorkspaceViewRuntime = ({
 
   const attachTerminalKeyboardShortcutHandler = (panel: TerminalPanel, view: TerminalView) => {
     view.terminal.attachCustomKeyEventHandler?.((event) => {
+      if (isTerminalDeletePreviousWordShortcut(event) && view.terminal.input) {
+        event.preventDefault()
+        event.stopPropagation()
+        view.terminal.input(terminalDeletePreviousWordInput, true)
+        return false
+      }
       const action = terminalShortcutActionForEvent(event)
       if (!action || !terminalKeyboardShortcutHandler) return true
       const handled = terminalKeyboardShortcutHandler(panel.id, action, event)

@@ -21,7 +21,12 @@ import {
   threadedTerminalCapability,
   type ThreadedTerminalHost
 } from '@/services/terminal/threadedTerminalRuntime'
-import { isTerminalCopyShortcut, isTerminalPasteShortcut } from '@/services/terminal/terminalKeyboardShortcuts'
+import {
+  isTerminalCopyShortcut,
+  isTerminalDeletePreviousWordShortcut,
+  isTerminalPasteShortcut,
+  terminalDeletePreviousWordInput
+} from '@/services/terminal/terminalKeyboardShortcuts'
 import type { CodexTargetEventKind } from '@/services/ai/codexTargetRuntime'
 import type { TerminalSettings } from '@/services/settings/workspaceConfigRuntime'
 import type { RuntimeLogLevel } from '@shared/contracts/appRuntime'
@@ -858,6 +863,12 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     conversation.fit = fit as TConversation['fit']
     applyTerminalSettings(conversation, settings, { refit: false })
     terminal.attachCustomKeyEventHandler((event) => {
+      if (isTerminalDeletePreviousWordShortcut(event) && terminal.input) {
+        event.preventDefault()
+        event.stopPropagation()
+        terminal.input(terminalDeletePreviousWordInput)
+        return false
+      }
       if (!codexTerminalCopyShortcut(event) && !codexTerminalPasteShortcut(event)) return true
       event.preventDefault()
       event.stopPropagation()

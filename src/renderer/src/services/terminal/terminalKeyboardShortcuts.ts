@@ -55,6 +55,11 @@ export const isTerminalPasteShortcut = (event: TerminalKeyboardEvent) => {
 export const isPlainTerminalControlShortcut = (event: TerminalKeyboardEvent) =>
   event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey && keyName(event).length === 1
 
+export const terminalDeletePreviousWordInput = '\x17'
+
+export const isTerminalDeletePreviousWordShortcut = (event: TerminalKeyboardEvent) =>
+  event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey && keyName(event) === 'backspace'
+
 export const terminalShortcutActionForEvent = (event: TerminalKeyboardEvent): TerminalShortcutAction | null => {
   const key = keyName(event)
   const primary = hasPrimaryModifier(event)

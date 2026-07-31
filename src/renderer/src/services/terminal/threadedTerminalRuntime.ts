@@ -11,7 +11,9 @@ import {
 } from '@/services/terminal/threadedTerminalMetrics'
 import {
   isTerminalCopyShortcut,
-  isTerminalPasteShortcut
+  isTerminalDeletePreviousWordShortcut,
+  isTerminalPasteShortcut,
+  terminalDeletePreviousWordInput
 } from '@/services/terminal/terminalKeyboardShortcuts'
 import type {
   ThreadedTerminalCellMetrics,
@@ -880,7 +882,10 @@ const keyEventToInput = (event: KeyboardEvent, mode: ThreadedTerminalModeState =
   if (event.isComposing || event.key === 'Process') return ''
   if (event.key === 'Enter') return '\r'
   if (event.key === 'Tab') return event.shiftKey ? '\x1b[Z' : '\t'
-  if (event.key === 'Backspace') return event.ctrlKey ? '\b' : '\x7f'
+  if (event.key === 'Backspace') {
+    if (isTerminalDeletePreviousWordShortcut(event)) return terminalDeletePreviousWordInput
+    return event.ctrlKey ? '\b' : '\x7f'
+  }
   if (event.key === 'Escape') return '\x1b'
   if (event.key.startsWith('Arrow')) return arrowKeyToInput(event, mode)
   if (event.key === 'Home') {

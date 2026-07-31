@@ -732,9 +732,11 @@ describe('threadedTerminalRuntime', () => {
     expect(afterCopy.core.slice(beforeCopy.core.length).filter((message: any) => message.type === 'input')).toEqual([])
 
     input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'c', ctrlKey: true }))
+    input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Backspace', ctrlKey: true }))
     const afterInterrupt = await workerMessages()
     expect(afterInterrupt.core).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'input', terminalId: 'panel-1', data: '\x03' })
+      expect.objectContaining({ type: 'input', terminalId: 'panel-1', data: '\x03' }),
+      expect.objectContaining({ type: 'input', terminalId: 'panel-1', data: '\x17' })
     ]))
     expect(input.value).toBe('')
     host.dispose()

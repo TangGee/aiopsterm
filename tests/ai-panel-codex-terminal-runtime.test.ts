@@ -71,6 +71,9 @@ class FakeTerminal implements AiPanelCodexTerminalLike {
   paste = vi.fn((data: string) => {
     this.dataHandler?.(data)
   })
+  input = vi.fn((data: string) => {
+    this.dataHandler?.(data)
+  })
   getSelection = vi.fn(() => '')
   attachCustomKeyEventHandler = vi.fn((handler: (event: KeyboardEvent) => boolean) => {
     this.keyHandler = handler
@@ -342,6 +345,12 @@ describe('aiPanelCodexTerminalRuntime', () => {
     expect(stopPropagation).toHaveBeenCalled()
 
     conversation.sessionId = 'codex-session-1'
+    const deleteWordKeyEvent = new KeyboardEvent('keydown', { key: 'Backspace', ctrlKey: true })
+    expect(terminal.keyHandler?.(deleteWordKeyEvent)).toBe(false)
+    await flushAsyncHandlers()
+    expect(terminal.input).toHaveBeenCalledWith('\x17')
+    expect(clientBundle.bridges.writeCodexSessionBridge).toHaveBeenCalledWith('codex-session-1', '\x17')
+
     terminal.dataHandler?.('ls\n')
     await flushAsyncHandlers()
     expect(clientBundle.bridges.setCodexSessionTargetBridge).toHaveBeenCalledWith('codex-session-1', target)

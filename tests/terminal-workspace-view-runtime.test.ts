@@ -179,6 +179,10 @@ class FakeTerminal {
   scrollToBottom = vi.fn()
   refresh = vi.fn()
   input = vi.fn()
+  customKeyHandler: ((event: KeyboardEvent) => boolean) | null = null
+  attachCustomKeyEventHandler = vi.fn((handler: (event: KeyboardEvent) => boolean) => {
+    this.customKeyHandler = handler
+  })
   write = vi.fn((data: string, callback?: () => void) => {
     this.output += data
     callback?.()
@@ -317,6 +321,21 @@ afterEach(() => {
 })
 
 describe('terminalWorkspaceViewRuntime', () => {
+  it('maps Ctrl+Backspace to the terminal delete-previous-word control input', async () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const { runtime } = createRuntime(panel)
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(2)
+
+    const terminal = runtime.terminalViews.get(panel.id)?.terminal as unknown as FakeTerminal
+    const event = new KeyboardEvent('keydown', { key: 'Backspace', ctrlKey: true, cancelable: true })
+    expect(terminal.customKeyHandler?.(event)).toBe(false)
+    expect(event.defaultPrevented).toBe(true)
+    expect(terminal.input).toHaveBeenCalledWith('\x17', true)
+  })
+
   it('focuses the active terminal when its view is created or appears after a pending focus request', async () => {
     const panel = createEmptyTerminalPanel('panel-1', 'Local')
     const { runtime } = createRuntime(panel)
