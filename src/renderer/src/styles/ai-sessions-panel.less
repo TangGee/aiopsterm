@@ -812,6 +812,12 @@
   text-overflow: ellipsis;
 }
 
+.ai-session-create-directory-hint {
+  color: var(--theme-module-active-text-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
 .ai-session-create-directory button,
 .ai-session-create-dialog footer button {
   min-height: 34px;
@@ -836,74 +842,35 @@
   height: 14px;
 }
 
-.ai-session-create-agents {
-  min-height: 120px;
-  max-height: 310px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  overflow-y: auto;
-  padding-right: 3px;
-}
-
-.ai-session-create-agent {
+.ai-session-create-agent-select {
   width: 100%;
-  min-height: 52px;
+  height: 36px;
   border: 1px solid var(--theme-module-active-border);
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 10px;
+  border-radius: 7px;
+  padding: 0 10px;
   background: var(--theme-module-active-card-bg);
   color: var(--theme-module-active-text);
-  text-align: left;
 }
 
-.ai-session-create-agent:hover {
+.ai-session-create-agent-select:hover,
+.ai-session-create-agent-select:focus {
   border-color: color-mix(in srgb, var(--theme-module-active-accent) 60%, var(--theme-module-active-border));
 }
 
-.ai-session-create-agent.selected {
-  border-color: var(--theme-module-active-accent);
-  background: color-mix(in srgb, var(--theme-module-active-accent) 12%, var(--theme-module-active-card-bg));
-}
-
-.ai-session-create-agent.unavailable {
-  opacity: 0.62;
-}
-
-.ai-session-create-agent-main {
-  min-width: 0;
+.ai-session-create-agent-detail {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.ai-session-create-agent-main strong,
-.ai-session-create-agent-main small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ai-session-create-agent-main strong {
-  font-size: 12px;
-}
-
-.ai-session-create-agent-main small {
+  justify-content: space-between;
+  gap: 12px;
   color: var(--theme-module-active-text-muted);
   font-size: 10px;
 }
 
-.ai-session-create-agent-status {
+.ai-session-create-agent-detail span:last-child {
   flex: 0 0 auto;
   color: var(--theme-core-warning);
-  font-size: 10px;
 }
 
-.ai-session-create-agent-status.ready {
+.ai-session-create-agent-detail span.ready {
   color: var(--theme-core-success);
 }
 

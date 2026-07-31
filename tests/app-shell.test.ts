@@ -1602,6 +1602,11 @@ describe('AppShell', () => {
     await flushPromises()
 
     expect(document.body.querySelector('.ai-session-create-dialog')?.textContent).toContain('新建 AI 会话')
+    const directoryInput = document.body.querySelector<HTMLInputElement>('.ai-session-create-directory input')
+    const agentSelect = document.body.querySelector<HTMLSelectElement>('.ai-session-create-agent-select')
+    expect(directoryInput?.readOnly).toBe(false)
+    expect(agentSelect).not.toBeNull()
+    expect(document.body.querySelector('.ai-session-create-agents')).toBeNull()
     expect(window.aiops.listAgentHookInstallers).toHaveBeenCalled()
     expect(store.activeModule).toBe('aiSessions')
     document.body.querySelector<HTMLButtonElement>('.ai-session-create-close')?.click()

@@ -34,6 +34,7 @@ describe('localFilesClient', () => {
       })),
       readLocalFile: vi.fn(async () => ({ content: 'hello', mtimeMs: 1781884800000, size: 5 })),
       writeLocalFile: vi.fn(async (filePath, content) => ({ ok: true, data: { filePath, bytes: content.length, size: content.length, mtimeMs: 1781884800000 } })),
+      ensureLocalDirectory: vi.fn(async ({ directoryPath }) => ({ ok: true, data: { directoryPath, created: true } })),
       stageChatAttachment: vi.fn(async ({ taskId, srcAbsPath }) => ({
         mode: 'local' as const,
         taskId,
@@ -72,6 +73,10 @@ describe('localFilesClient', () => {
     await expect(localFilesClient.writeLocalFile()?.('/tmp/query.sql', 'select 1;')).resolves.toEqual(
       expect.objectContaining({ ok: true, data: expect.objectContaining({ filePath: '/tmp/query.sql', bytes: 9 }) })
     )
+    await expect(localFilesClient.ensureLocalDirectory()?.({ directoryPath: '/tmp/project', createIfMissing: true })).resolves.toEqual({
+      ok: true,
+      data: { directoryPath: '/tmp/project', created: true }
+    })
     await expect(localFilesClient.stageChatAttachment()?.({ taskId: 'conv-1', srcAbsPath: '/tmp/note.md' })).resolves.toEqual(
       expect.objectContaining({ mode: 'local', taskId: 'conv-1', name: 'note.md' })
     )
@@ -95,6 +100,7 @@ describe('localFilesClient', () => {
     expect(window.aiops.saveCustomNotificationSound).toHaveBeenCalledWith('/tmp/notify.wav')
     expect(window.aiops.readLocalFile).toHaveBeenCalledWith('/tmp/note.md')
     expect(window.aiops.writeLocalFile).toHaveBeenCalledWith('/tmp/query.sql', 'select 1;')
+    expect(window.aiops.ensureLocalDirectory).toHaveBeenCalledWith({ directoryPath: '/tmp/project', createIfMissing: true })
     expect(window.aiops.stageChatAttachment).toHaveBeenCalledWith({ taskId: 'conv-1', srcAbsPath: '/tmp/note.md' })
     expect(window.aiops.validateChatImageAttachment).toHaveBeenCalledWith({ mediaType: 'image/png', name: 'image.png', size: 4 })
     expect(window.aiops.prepareChatImageAttachment).toHaveBeenCalledWith({ mediaType: 'image/png', data: 'AAAA', name: 'image.png', size: 4 })
@@ -110,6 +116,7 @@ describe('localFilesClient', () => {
       saveCustomNotificationSound: undefined as any,
       readLocalFile: undefined as any,
       writeLocalFile: undefined as any,
+      ensureLocalDirectory: undefined as any,
       stageChatAttachment: undefined as any,
       validateChatImageAttachment: undefined as any,
       prepareChatImageAttachment: undefined as any,
@@ -123,6 +130,7 @@ describe('localFilesClient', () => {
     expect(localFilesClient.saveCustomNotificationSound()).toBeUndefined()
     expect(localFilesClient.readLocalFile()).toBeUndefined()
     expect(localFilesClient.writeLocalFile()).toBeUndefined()
+    expect(localFilesClient.ensureLocalDirectory()).toBeUndefined()
     expect(localFilesClient.stageChatAttachment()).toBeUndefined()
     expect(localFilesClient.validateChatImageAttachment()).toBeUndefined()
     expect(localFilesClient.prepareChatImageAttachment()).toBeUndefined()

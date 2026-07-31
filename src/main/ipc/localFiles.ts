@@ -1,6 +1,7 @@
 import { BrowserWindow, type IpcMain, type IpcMainInvokeEvent, type OpenDialogOptions as ElectronOpenDialogOptions, type SaveDialogOptions as ElectronSaveDialogOptions } from 'electron'
-import { basename, isAbsolute, join } from 'path'
-import { readFile, stat, writeFile } from 'fs/promises'
+import { homedir } from 'os'
+import { basename, isAbsolute, join, normalize } from 'path'
+import { mkdir, readFile, stat, writeFile } from 'fs/promises'
 import { broadcastWindowEvent } from '@shared/windowEvents'
 import { stageChatAttachment } from '../backend/chat/chatAttachments'
 import {
@@ -22,6 +23,8 @@ import type {
   ChatImageAttachmentFileInput,
   ChatImageAttachmentPrepareInput,
   ChatImageAttachmentValidateInput,
+  EnsureLocalDirectoryInput,
+  EnsureLocalDirectoryResult,
   LocalEditorFileWatchInput,
   LocalEditorFileWriteInput,
   OpenDialogOptions,
@@ -73,6 +76,49 @@ const writeFixture = async (input: RegisterLocalFilesIpcInput, filePath: string,
     await writeFixtureFile(filePath, content)
   }
   return { canceled: false, filePaths: [filePath] }
+}
+
+const nodeErrorCode = (error: unknown) =>
+  error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : ''
+
+const expandHomeDirectory = (directoryPath: string) => {
+  if (directoryPath === '~') return homedir()
+  if (directoryPath.startsWith('~/') || directoryPath.startsWith('~\\')) {
+    return join(homedir(), directoryPath.slice(2))
+  }
+  return directoryPath
+}
+
+const ensureLocalDirectory = async (input?: EnsureLocalDirectoryInput): Promise<EnsureLocalDirectoryResult> => {
+  const requestedPath = typeof input?.directoryPath === 'string' ? input.directoryPath.trim() : ''
+  if (!requestedPath) {
+    return { ok: false, errorCode: 'LOCAL_DIRECTORY_PATH_REQUIRED', errorMessage: 'Directory path is required' }
+  }
+  const expandedPath = expandHomeDirectory(requestedPath)
+  if (!isAbsolute(expandedPath)) {
+    return { ok: false, errorCode: 'LOCAL_DIRECTORY_PATH_NOT_ABSOLUTE', errorMessage: 'Directory path must be absolute' }
+  }
+  const directoryPath = normalize(expandedPath)
+  try {
+    const metadata = await stat(directoryPath)
+    if (!metadata.isDirectory()) {
+      return { ok: false, errorCode: 'LOCAL_DIRECTORY_NOT_DIRECTORY', errorMessage: 'Path must reference a directory' }
+    }
+    return { ok: true, data: { directoryPath, created: false } }
+  } catch (error) {
+    if (nodeErrorCode(error) !== 'ENOENT') {
+      return { ok: false, errorCode: 'LOCAL_DIRECTORY_INSPECT_FAILED', errorMessage: error instanceof Error ? error.message : String(error) }
+    }
+  }
+  if (!input?.createIfMissing) {
+    return { ok: false, errorCode: 'LOCAL_DIRECTORY_NOT_FOUND', errorMessage: 'Directory does not exist' }
+  }
+  try {
+    await mkdir(directoryPath, { recursive: true })
+    return { ok: true, data: { directoryPath, created: true } }
+  } catch (error) {
+    return { ok: false, errorCode: 'LOCAL_DIRECTORY_CREATE_FAILED', errorMessage: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 const e2eOpenDialogFixture = async (input: RegisterLocalFilesIpcInput, options: OpenDialogOptions | undefined) => {
@@ -165,6 +211,7 @@ export const registerLocalFilesIpc = (ipcMain: IpcMain, input: RegisterLocalFile
     }
   })
   ipcMain.handle('files:write-local', async (_event, filePath: string, content: string) => writeLocalTextFile(filePath, content))
+  ipcMain.handle('files:ensure-directory', async (_event, ensureInput?: EnsureLocalDirectoryInput) => ensureLocalDirectory(ensureInput))
   ipcMain.handle('local-editor-files:read', (_event, filePath: string) => readLocalEditorFile(filePath))
   ipcMain.handle('local-editor-files:write', (_event, writeInput: LocalEditorFileWriteInput) => writeLocalEditorFile(writeInput))
   ipcMain.handle('local-editor-files:watch:start', (_event, watchInput: LocalEditorFileWatchInput) => startLocalEditorFileWatch(watchInput))

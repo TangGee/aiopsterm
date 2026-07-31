@@ -163,7 +163,7 @@ export const useAiSessionsPanelRuntime = (options: AiSessionsPanelRuntimeOptions
   )
 
   const selectDefaultCreateAgent = () => {
-    const last = createAgentOptions.value.find((agent) => agent.source === lastCreatedAgentSource.value)
+    const last = createAgentOptions.value.find((agent) => agent.source === lastCreatedAgentSource.value && agent.available)
     const next = last || createAgentOptions.value.find((agent) => agent.available) || createAgentOptions.value[0]
     createAgentSource.value = next?.source || ''
   }
@@ -206,13 +206,33 @@ export const useAiSessionsPanelRuntime = (options: AiSessionsPanelRuntimeOptions
     return normalized.split(/[\\/]/).at(-1) || normalized
   }
 
+  const createDirectoryErrorMessage = (errorCode?: string) => {
+    if (errorCode === 'LOCAL_DIRECTORY_PATH_REQUIRED') return t('aiSessions.createDirectoryRequired')
+    if (errorCode === 'LOCAL_DIRECTORY_PATH_NOT_ABSOLUTE') return t('aiSessions.createDirectoryAbsolute')
+    if (errorCode === 'LOCAL_DIRECTORY_NOT_DIRECTORY') return t('aiSessions.createDirectoryNotDirectory')
+    if (errorCode === 'LOCAL_DIRECTORY_NOT_FOUND') return t('aiSessions.createDirectoryNotFound')
+    return t('aiSessions.createDirectoryFailed')
+  }
+
   const startCreatedSession = async () => {
     const agent = selectedCreateAgent.value
-    const directory = createDirectory.value.trim()
-    if (!agent?.available || !directory || createBusy.value) return false
+    const requestedDirectory = createDirectory.value.trim()
+    if (!agent?.available || !requestedDirectory || createBusy.value) return false
     createBusy.value = true
     createError.value = ''
     try {
+      const ensureDirectory = localFilesClient.ensureLocalDirectory()
+      if (!ensureDirectory) {
+        createError.value = t('aiSessions.createDirectoryServiceUnavailable')
+        return false
+      }
+      const ensured = await ensureDirectory({ directoryPath: requestedDirectory, createIfMissing: true })
+      if (!ensured.ok || !ensured.data?.directoryPath) {
+        createError.value = createDirectoryErrorMessage(ensured.errorCode)
+        return false
+      }
+      const directory = ensured.data.directoryPath
+      createDirectory.value = directory
       const panel = await workspace.openLocalTerminalPanel({
         title: `${agent.label} - ${projectDirectoryName(directory)}`,
         cwd: directory,

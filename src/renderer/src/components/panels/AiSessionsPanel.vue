@@ -102,9 +102,12 @@
             <label>{{ t('aiSessions.directory') }}</label>
             <div class="ai-session-create-directory">
               <input
-                :value="createDirectory"
-                readonly
+                ref="createDirectoryInput"
+                v-model="createDirectory"
                 :placeholder="t('aiSessions.directoryPlaceholder')"
+                :disabled="createBusy"
+                @input="createError = ''"
+                @keydown.enter.prevent="startCreatedSession"
               />
               <button
                 type="button"
@@ -115,32 +118,31 @@
                 {{ t('aiSessions.chooseDirectory') }}
               </button>
             </div>
+            <small class="ai-session-create-directory-hint">{{ t('aiSessions.directoryHint') }}</small>
           </div>
 
           <div class="ai-session-create-field">
             <label>{{ t('aiSessions.agent') }}</label>
-            <div class="ai-session-create-agents">
-              <button
+            <select
+              v-model="createAgentSource"
+              class="ai-session-create-agent-select"
+              :disabled="createBusy || !createAgentOptions.length"
+            >
+              <option
                 v-for="agent in createAgentOptions"
                 :key="agent.source"
-                type="button"
-                class="ai-session-create-agent"
-                :class="{ selected: createAgentSource === agent.source, unavailable: !agent.available }"
-                :aria-pressed="createAgentSource === agent.source"
-                :disabled="!agent.available || createBusy"
-                @click="createAgentSource = agent.source"
+                :value="agent.source"
+                :disabled="!agent.available"
               >
-                <span class="ai-session-create-agent-main">
-                  <strong>{{ agent.label }}</strong>
-                  <small>{{ t('aiSessions.agentCommand') }}: {{ agent.launchCommand }}</small>
-                </span>
-                <span
-                  class="ai-session-create-agent-status"
-                  :class="{ ready: agent.available }"
-                >
-                  {{ t(agent.statusKey) }}
-                </span>
-              </button>
+                {{ agent.label }} - {{ t(agent.statusKey) }}
+              </option>
+            </select>
+            <div
+              v-if="selectedCreateAgent"
+              class="ai-session-create-agent-detail"
+            >
+              <span>{{ t('aiSessions.agentCommand') }}: {{ selectedCreateAgent.launchCommand }}</span>
+              <span :class="{ ready: selectedCreateAgent.available }">{{ t(selectedCreateAgent.statusKey) }}</span>
             </div>
           </div>
 
@@ -917,6 +919,7 @@ const {
   createDirectory,
   createAgentSource,
   createAgentOptions,
+  selectedCreateAgent,
   createBusy,
   createError,
   canCreateSession,
@@ -967,6 +970,7 @@ const {
 
 const sessionListElement = ref<HTMLElement | null>(null)
 const createDialogElement = ref<HTMLElement | null>(null)
+const createDirectoryInput = ref<HTMLInputElement | null>(null)
 const rowMetaWidth = ref(0)
 let measureCanvasContext: CanvasRenderingContext2D | null = null
 let listResizeObserver: ResizeObserver | null = null
@@ -1035,7 +1039,7 @@ watch(rowMetaSignature, () => {
 })
 
 watch(createDialogOpen, (open) => {
-  if (open) void nextTick(() => createDialogElement.value?.focus())
+  if (open) void nextTick(() => (createDirectoryInput.value || createDialogElement.value)?.focus())
 })
 
 onMounted(startPanelSurfaceObservers)

@@ -333,6 +333,10 @@ describe('managed AI session terminal switch telemetry', () => {
       }
     ]
     vi.spyOn(workspace, 'refreshAgentHookInstallers').mockResolvedValue(true)
+    vi.mocked(window.aiops.ensureLocalDirectory).mockResolvedValueOnce({
+      ok: true,
+      data: { directoryPath: '/work/project', created: false }
+    })
     const openTerminal = vi.spyOn(workspace, 'openLocalTerminalPanel').mockResolvedValue({ id: 'panel-new' } as any)
     const runCommand = vi.spyOn(workspace, 'runTerminalCommand').mockResolvedValue({
       status: 'allow',
@@ -355,7 +359,7 @@ describe('managed AI session terminal switch telemetry', () => {
           statusKey: 'aiSessions.agentHookMissing'
         })
       )
-      runtime.createAgentSource.value = 'claude-code'
+      expect(runtime.createAgentSource.value).toBe('claude-code')
       await expect(runtime.startCreatedSession()).resolves.toBe(true)
       await flushMicrotasks()
 
@@ -364,6 +368,10 @@ describe('managed AI session terminal switch telemetry', () => {
         cwd: '/work/project',
         preserveActiveModule: true
       })
+      expect(window.aiops.ensureLocalDirectory).toHaveBeenCalledWith({
+        directoryPath: '/work/project',
+        createIfMissing: true
+      })
       expect(runCommand).toHaveBeenCalledWith('panel-new', 'claude', {
         source: 'agent',
         writeToShell: true
@@ -371,6 +379,41 @@ describe('managed AI session terminal switch telemetry', () => {
       expect(JSON.parse(window.localStorage.getItem('aiopsterm.aiSessionsPanelState') || '{}')).toEqual(
         expect.objectContaining({ lastCreatedAgentSource: 'claude-code' })
       )
+    } finally {
+      scope.stop()
+    }
+  })
+
+  it('does not open a terminal when the project directory cannot be created', async () => {
+    const workspace = useWorkspaceStore()
+    workspace.agentHookInstallers = [
+      {
+        source: 'codex',
+        label: 'Codex',
+        binaryName: 'codex',
+        launchCommand: 'codex',
+        binaryPath: '/usr/bin/codex',
+        configPath: '/home/test/.codex/hooks.json',
+        configExists: true,
+        installed: true,
+        scriptPath: '/opt/aiopsterm/agent-hook.js',
+        warnings: []
+      }
+    ]
+    vi.spyOn(workspace, 'refreshAgentHookInstallers').mockResolvedValue(true)
+    const openTerminal = vi.spyOn(workspace, 'openLocalTerminalPanel')
+    vi.mocked(window.aiops.ensureLocalDirectory).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'LOCAL_DIRECTORY_PATH_NOT_ABSOLUTE'
+    })
+    const scope = effectScope()
+    const runtime = scope.run(() => useAiSessionsPanelRuntime())!
+
+    try {
+      await runtime.openCreateDialog('relative/project')
+      await expect(runtime.startCreatedSession()).resolves.toBe(false)
+      expect(runtime.createError.value).toBe('请输入绝对路径或 ~/ 路径')
+      expect(openTerminal).not.toHaveBeenCalled()
     } finally {
       scope.stop()
     }

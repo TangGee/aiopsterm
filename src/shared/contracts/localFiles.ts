@@ -39,6 +39,16 @@ export type LocalFileWriteResult = AiopsMutationResult<{
   mtimeMs: number
 }>
 
+export type EnsureLocalDirectoryInput = {
+  directoryPath: string
+  createIfMissing: boolean
+}
+
+export type EnsureLocalDirectoryResult = AiopsMutationResult<{
+  directoryPath: string
+  created: boolean
+}>
+
 export type LocalEditorFileInspectResult = AiopsMutationResult<{
   filePath: string
   size: number

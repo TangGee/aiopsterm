@@ -318,6 +318,8 @@ import type {
   ChatImageAttachmentPrepareResult,
   ChatImageAttachmentValidateInput,
   ChatImageAttachmentValidateResult,
+  EnsureLocalDirectoryInput,
+  EnsureLocalDirectoryResult,
   LocalEditorFileReadResult,
   LocalEditorFileWatchEvent,
   LocalEditorFileWatchInput,
@@ -557,6 +559,7 @@ export type AiopsPreloadApi = {
   saveCustomNotificationSound: (srcAbsPath: string) => Promise<CustomNotificationSoundSaveResult>
   readLocalFile: (filePath: string) => Promise<LocalFileReadResult>
   writeLocalFile: (filePath: string, content: string) => Promise<LocalFileWriteResult>
+  ensureLocalDirectory: (input: EnsureLocalDirectoryInput) => Promise<EnsureLocalDirectoryResult>
   readLocalEditorFile: (filePath: string) => Promise<LocalEditorFileReadResult>
   writeLocalEditorFile: (input: LocalEditorFileWriteInput) => Promise<LocalEditorFileWriteResult>
   startLocalEditorFileWatch: (input: LocalEditorFileWatchInput) => Promise<LocalEditorFileWatchResult>

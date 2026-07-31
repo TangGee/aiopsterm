@@ -174,6 +174,7 @@ const api: AiopsPreloadApi = {
   saveCustomNotificationSound: (srcAbsPath: string) => ipcRenderer.invoke('settings:save-custom-notification-sound', srcAbsPath),
   readLocalFile: (filePath: string) => ipcRenderer.invoke('files:read-local', filePath),
   writeLocalFile: (filePath: string, content: string) => ipcRenderer.invoke('files:write-local', filePath, content),
+  ensureLocalDirectory: (input) => ipcRenderer.invoke('files:ensure-directory', input),
   readLocalEditorFile: (filePath: string) => ipcRenderer.invoke('local-editor-files:read', filePath),
   writeLocalEditorFile: (input) => ipcRenderer.invoke('local-editor-files:write', input),
   startLocalEditorFileWatch: (input) => ipcRenderer.invoke('local-editor-files:watch:start', input),

@@ -3485,7 +3485,10 @@ const defaultShortcuts = [
   { id: 'newTerminal', action: '新建终端', shortcut: 'Ctrl+Shift+T' },
   { id: 'toggleAi', action: '显示/隐藏 AI 侧边栏', shortcut: 'Ctrl+Shift+A' },
   { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
-  { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' }
+  { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' },
+  { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+E' },
+  { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
+  { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' }
 ]
 
 const defaultRules = [
@@ -6832,6 +6835,10 @@ Object.defineProperty(window, 'aiops', {
     getPathForFile: vi.fn((file: File & { path?: string }) => String(file?.path || '')),
     showOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: ['/tmp/imported-note.md'] })),
     showSaveDialog: vi.fn(async (options?: { defaultPath?: string }) => ({ canceled: false, filePath: `/tmp/${options?.defaultPath || 'downloaded-file'}` })),
+    ensureLocalDirectory: vi.fn(async (input: { directoryPath: string }) => ({
+      ok: true,
+      data: { directoryPath: input.directoryPath, created: false }
+    })),
     exportChat: vi.fn(async (input: AiChatExportInput) => {
       const markdown = buildChatExportMarkdown(input, new Date('2026-06-04T12:00:00+08:00'))
       return {

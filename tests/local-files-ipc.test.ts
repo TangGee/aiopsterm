@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IpcMain } from 'electron'
 import { mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
-import { basename, join } from 'path'
+import { basename, join, normalize } from 'path'
 
 const backendMocks = vi.hoisted(() => ({
   prepareChatImageAttachment: vi.fn(),
@@ -136,6 +136,7 @@ describe('local files IPC registrar', () => {
       'settings:save-custom-notification-sound',
       'files:read-local',
       'files:write-local',
+      'files:ensure-directory',
       'local-editor-files:read',
       'local-editor-files:write',
       'local-editor-files:watch:start',
@@ -231,6 +232,56 @@ describe('local files IPC registrar', () => {
       size: Buffer.byteLength(content, 'utf-8')
     })
     await expect(handlers.get('files:read-local')?.({}, 'relative.md')).rejects.toThrow('filePath must be absolute')
+  })
+
+  it('validates existing directories and creates missing nested directories', async () => {
+    const { registerLocalFilesIpc } = await loadBackend()
+    const { ipcMain, handlers } = createIpcHarness()
+    const root = await createTempDir()
+    const nested = join(root, 'new', 'project')
+
+    registerLocalFilesIpc(ipcMain, createRegistrationInput())
+
+    await expect(handlers.get('files:ensure-directory')?.({}, {
+      directoryPath: root,
+      createIfMissing: true
+    })).resolves.toEqual({ ok: true, data: { directoryPath: normalize(root), created: false } })
+    await expect(handlers.get('files:ensure-directory')?.({}, {
+      directoryPath: nested,
+      createIfMissing: true
+    })).resolves.toEqual({ ok: true, data: { directoryPath: normalize(nested), created: true } })
+    await expect(handlers.get('files:ensure-directory')?.({}, {
+      directoryPath: nested,
+      createIfMissing: true
+    })).resolves.toEqual({ ok: true, data: { directoryPath: normalize(nested), created: false } })
+  })
+
+  it('rejects invalid local directory targets without creating them', async () => {
+    const { registerLocalFilesIpc } = await loadBackend()
+    const { ipcMain, handlers } = createIpcHarness()
+    const root = await createTempDir()
+    const filePath = join(root, 'project.txt')
+    const missing = join(root, 'missing')
+    await writeFile(filePath, 'project', 'utf-8')
+
+    registerLocalFilesIpc(ipcMain, createRegistrationInput())
+
+    await expect(handlers.get('files:ensure-directory')?.({}, {
+      directoryPath: 'relative/project',
+      createIfMissing: true
+    })).resolves.toMatchObject({ ok: false, errorCode: 'LOCAL_DIRECTORY_PATH_NOT_ABSOLUTE' })
+    await expect(handlers.get('files:ensure-directory')?.({}, {
+      directoryPath: filePath,
+      createIfMissing: true
+    })).resolves.toMatchObject({ ok: false, errorCode: 'LOCAL_DIRECTORY_NOT_DIRECTORY' })
+    await expect(handlers.get('files:ensure-directory')?.({}, {
+      directoryPath: missing,
+      createIfMissing: false
+    })).resolves.toMatchObject({ ok: false, errorCode: 'LOCAL_DIRECTORY_NOT_FOUND' })
+    await expect(handlers.get('files:ensure-directory')?.({}, {
+      directoryPath: '~',
+      createIfMissing: false
+    })).resolves.toMatchObject({ ok: true, data: { created: false } })
   })
 
   it('forwards background writes, local writes, and chat attachment requests to backend boundaries', async () => {

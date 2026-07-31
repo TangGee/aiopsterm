@@ -10,6 +10,7 @@ type LocalFilesBridge = Pick<
   | 'saveCustomNotificationSound'
   | 'readLocalFile'
   | 'writeLocalFile'
+  | 'ensureLocalDirectory'
   | 'readLocalEditorFile'
   | 'writeLocalEditorFile'
   | 'startLocalEditorFileWatch'
@@ -32,6 +33,7 @@ export const localFilesClient = {
   saveCustomNotificationSound: () => bridgeMethod('saveCustomNotificationSound'),
   readLocalFile: () => bridgeMethod('readLocalFile'),
   writeLocalFile: () => bridgeMethod('writeLocalFile'),
+  ensureLocalDirectory: () => bridgeMethod('ensureLocalDirectory'),
   readLocalEditorFile: () => bridgeMethod('readLocalEditorFile'),
   writeLocalEditorFile: () => bridgeMethod('writeLocalEditorFile'),
   startLocalEditorFileWatch: () => bridgeMethod('startLocalEditorFileWatch'),
