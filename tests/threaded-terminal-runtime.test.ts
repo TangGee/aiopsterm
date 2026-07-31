@@ -1349,10 +1349,71 @@ describe('threadedTerminalRuntime', () => {
     window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, detail: 2, clientX: 9 * 8, clientY: 0 }))
     expect(host.getSelection()).toBe('command-value')
 
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, detail: 2, clientX: 2 * 8, clientY: 15 }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, detail: 2, clientX: 2 * 8, clientY: 15 }))
+    expect(host.getSelection()).toBe('tailwrapped-tail')
+
     element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, detail: 3, clientX: 9 * 4, clientY: 15 }))
     window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, detail: 3, clientX: 9 * 4, clientY: 15 }))
     expect(host.getSelection()).toBe('first command-value tailwrapped-tail next')
     expect(host.getSelectionPosition()).toEqual({ start: { x: 0, y: 0 }, end: { x: 80, y: 1 } })
+    host.dispose()
+  })
+
+  it('uses VTE word characters while keeping commas as field boundaries', () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    const element = createHostElement()
+    Object.defineProperty(element, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, width: 800, height: 400, right: 800, bottom: 400, x: 0, y: 0, toJSON: () => ({}) })
+    })
+    host.open(element)
+    const csvLine = './account_dev.txt:acct01,10.1.2.3,user_a,secret-value'
+    const vteWord = 'ops-user@host/path_name?key=value\\share#tag%25&x+1~end\u00b7tail'
+    host.applySnapshot({
+      terminalId: 'panel-1',
+      seq: 1,
+      cols: 80,
+      rows: 10,
+      cursorX: 0,
+      cursorY: 9,
+      cursorAbsoluteY: 9,
+      viewportY: 0,
+      baseY: 0,
+      lines: [
+        { y: 0, text: csvLine, cells: [] },
+        { y: 1, text: vteWord, cells: [] }
+      ],
+      dirtyRows: [0, 1],
+      full: true,
+      visible: true,
+      priority: 'active'
+    })
+
+    const doubleClickAt = (column: number, row = 0) => {
+      const event = { bubbles: true, button: 0, detail: 2, clientX: column * 8 + 1, clientY: row * 15 }
+      element.dispatchEvent(new MouseEvent('mousedown', event))
+      window.dispatchEvent(new MouseEvent('mouseup', event))
+    }
+
+    doubleClickAt(csvLine.indexOf('account_dev'))
+    expect(host.getSelection()).toBe('./account_dev.txt')
+
+    doubleClickAt(csvLine.indexOf('10.1.2.3') + 2)
+    expect(host.getSelection()).toBe('10.1.2.3')
+
+    doubleClickAt(csvLine.indexOf('user_a') + 2)
+    expect(host.getSelection()).toBe('user_a')
+
+    doubleClickAt(csvLine.indexOf(','))
+    expect(host.getSelection()).toBe(',')
+
+    doubleClickAt(csvLine.indexOf(':'))
+    expect(host.getSelection()).toBe(':')
+
+    doubleClickAt(vteWord.indexOf('path_name'), 1)
+    expect(host.getSelection()).toBe(vteWord)
     host.dispose()
   })
 

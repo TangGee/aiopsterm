@@ -164,7 +164,8 @@ type ThreadedTerminalRenderGroupResolution = {
   container: HTMLElement
 }
 
-const defaultWordSeparators = new Set(Array.from(' ()[]{}\'"`'))
+const vteWordCharExceptions = new Set(Array.from('-#%&+./=?@\\_~\u00b7'))
+const unicodeLetterOrNumber = /[\p{L}\p{N}]/u
 
 const isThreadedTerminalSearchHost = (value: unknown): value is ThreadedTerminalSearchHost => {
   const candidate = value as Partial<ThreadedTerminalSearchHost> | null | undefined
@@ -2411,8 +2412,9 @@ export class ThreadedTerminalHost {
     this.lastSelectionMouseEvent = null
   }
 
-  private isWordSeparator(char: string) {
-    return defaultWordSeparators.has(char)
+  private isWordCharacter(char: string) {
+    const baseCharacter = Array.from(char)[0] || ''
+    return unicodeLetterOrNumber.test(baseCharacter) || vteWordCharExceptions.has(baseCharacter)
   }
 
   private wordSelectionAt(point: ThreadedTerminalSelectionPoint) {
@@ -2422,32 +2424,28 @@ export class ThreadedTerminalHost {
     const index = this.charIndexAtCell(point.y, point.x)
     const selectedChar = chars[index]
     if (selectedChar === undefined) return null
-    if (selectedChar === ' ') {
-      let start = index
-      let end = index + 1
-      while (start > 0 && chars[start - 1] === ' ') start -= 1
-      while (end < chars.length && chars[end] === ' ') end += 1
-      return { start: { x: this.cellXForCharIndex(point.y, start), y: point.y }, end: { x: this.cellXForCharIndex(point.y, end), y: point.y } }
-    }
     let start = index
     let end = index + 1
-    while (start > 0 && !this.isWordSeparator(chars[start - 1] || '')) start -= 1
-    while (end < chars.length && !this.isWordSeparator(chars[end] || '')) end += 1
+    if (!this.isWordCharacter(selectedChar)) {
+      return { start: { x: this.cellXForCharIndex(point.y, start), y: point.y }, end: { x: this.cellXForCharIndex(point.y, end), y: point.y } }
+    }
+    while (start > 0 && this.isWordCharacter(chars[start - 1] || '')) start -= 1
+    while (end < chars.length && this.isWordCharacter(chars[end] || '')) end += 1
     let startRow = point.y
     let endRow = point.y
     while (start === 0 && this.screenLineForBufferRow(startRow)?.wrapped) {
       const previousChars = this.lineCellEntriesForBufferRow(startRow - 1).map((entry) => entry.char)
-      if (!previousChars.length || this.isWordSeparator(previousChars[previousChars.length - 1] || '')) break
+      if (!previousChars.length || !this.isWordCharacter(previousChars[previousChars.length - 1] || '')) break
       startRow -= 1
       start = previousChars.length
-      while (start > 0 && !this.isWordSeparator(previousChars[start - 1] || '')) start -= 1
+      while (start > 0 && this.isWordCharacter(previousChars[start - 1] || '')) start -= 1
     }
     while (end === chars.length && this.screenLineForBufferRow(endRow + 1)?.wrapped) {
       const nextChars = this.lineCellEntriesForBufferRow(endRow + 1).map((entry) => entry.char)
-      if (!nextChars.length || this.isWordSeparator(nextChars[0] || '')) break
+      if (!nextChars.length || !this.isWordCharacter(nextChars[0] || '')) break
       endRow += 1
       end = 0
-      while (end < nextChars.length && !this.isWordSeparator(nextChars[end] || '')) end += 1
+      while (end < nextChars.length && this.isWordCharacter(nextChars[end] || '')) end += 1
     }
     return {
       start: { x: this.cellXForCharIndex(startRow, start), y: startRow },
