@@ -56,6 +56,7 @@ import {
   createWorkspaceShellController,
   type AssetManagementOpenRequest
 } from '@/services/workspace/workspaceShellController'
+import { createWorkspacePanelNavigationRuntime } from '@/services/workspace/workspacePanelNavigationRuntime'
 import {
   type MacroRecordingState,
   type QuickCommandSnippet,
@@ -1267,6 +1268,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   )
 
+  const panelNavigationRuntime = createWorkspacePanelNavigationRuntime({
+    mode,
+    activeModule,
+    activePanelId,
+    panels
+  })
+
   const {
     switchToTerminalPanelIndex,
     triggerShortcutAction,
@@ -1290,7 +1298,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice,
       openLocalTerminalPanel,
       toggleRight,
-      setActiveSettingsSection
+      setActiveSettingsSection,
+      openRecentPanels: panelNavigationRuntime.openRecentPanels,
+      navigatePanelBack: panelNavigationRuntime.navigatePanelBack,
+      navigatePanelForward: panelNavigationRuntime.navigatePanelForward
     }
   )
   setShellShortcutAction(triggerShortcutAction)
@@ -1722,6 +1733,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     installShortcutRuntime,
     uninstallShortcutRuntime,
     triggerShortcutAction,
+    ...panelNavigationRuntime,
     handleDeepLink,
     openTrustedDeviceRevoke,
     confirmTrustedDeviceRevoke,

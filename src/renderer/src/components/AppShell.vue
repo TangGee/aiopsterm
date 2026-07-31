@@ -90,6 +90,7 @@
       </div>
       <OnboardingSpotlight v-if="workspace.mode === 'terminal'" />
     </main>
+    <RecentWorkspacePanels />
     <div
       v-if="terminalMfaDialog.open && terminalMfaDialog.request"
       class="terminal-mfa-backdrop"
@@ -192,6 +193,7 @@ import AgentsSidebar from '@/components/AgentsSidebar.vue'
 import DatabaseWorkspace from '@/components/DatabaseWorkspace.vue'
 import UserPanel from '@/components/panels/UserPanel.vue'
 import OnboardingSpotlight from '@/components/onboarding/OnboardingSpotlight.vue'
+import RecentWorkspacePanels from '@/components/RecentWorkspacePanels.vue'
 import type { ProductSessionUiRequest, ProductSessionUiRequestInput } from '@/components/productSessionUiTypes'
 import { useAppShellRuntime } from '@/services/app/appShellRuntime'
 import { isTerminalWorkspaceSurfaceVisible } from '@/config/navigation'

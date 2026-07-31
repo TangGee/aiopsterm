@@ -405,8 +405,10 @@ describe('terminalWorkspaceShellRuntime', () => {
     await dashboard.runtime.handleShortcut(createKeyboardEvent({ ctrlKey: true, key: ',' }))
     expect(dashboard.calls.openTerminalDashboardSettings).toHaveBeenCalledTimes(1)
 
-    await dashboard.runtime.handleShortcut(createKeyboardEvent({ ctrlKey: true, key: 'e' }))
-    expect(dashboard.calls.toggleTerminalDashboardLayout).toHaveBeenCalledTimes(1)
+    const dashboardControlE = createKeyboardEvent({ ctrlKey: true, key: 'e' })
+    await dashboard.runtime.handleShortcut(dashboardControlE)
+    expect(dashboardControlE.preventDefault).not.toHaveBeenCalled()
+    expect(dashboard.calls.toggleTerminalDashboardLayout).not.toHaveBeenCalled()
 
     await dashboard.runtime.handleShortcut(createKeyboardEvent({ ctrlKey: true, shiftKey: true, key: 'k' }))
     expect(dashboard.calls.openTerminalDashboardInlineCommand).toHaveBeenCalledTimes(1)

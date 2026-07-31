@@ -4,6 +4,16 @@ import { toTraditionalChineseMessages } from '../traditionalChinese'
 
 export const zhTW = completeLocaleMessages({
   'module.workspace': '工作區',
+  'workspace.recentPanels.title': '最近開啟的面板',
+  'workspace.recentPanels.searchPlaceholder': '搜尋面板、路徑、主機或工作階段',
+  'workspace.recentPanels.empty': '沒有符合的已開啟面板',
+  'workspace.recentPanels.current': '目前',
+  'workspace.recentPanels.terminal': '終端機',
+  'workspace.recentPanels.ssh': 'SSH 終端機',
+  'workspace.recentPanels.knowledge': '知識庫',
+  'workspace.recentPanels.aiSession': 'AI 工作階段',
+  'workspace.recentPanels.projectFile': '專案檔案',
+  'workspace.recentPanels.localFile': '本機檔案',
   'module.aiSessions': 'AI 會話',
   'module.assets': '資產',
   'module.files': '檔案',

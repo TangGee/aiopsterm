@@ -81,7 +81,10 @@ describe('settings preferences backend boundary', () => {
       { id: 'newTerminal', action: '新建终端', shortcut: 'Ctrl+Shift+T' },
       { id: 'toggleAi', action: '显示/隐藏 AI 侧边栏', shortcut: 'Ctrl+Shift+A' },
       { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
-      { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' }
+      { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' },
+      { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+E' },
+      { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
+      { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' }
     ])
     expect(result.data.rules).toEqual([])
   })
@@ -122,7 +125,10 @@ describe('settings preferences backend boundary', () => {
       { id: 'newTerminal', action: '新建终端', shortcut: 'Ctrl+Shift+T' },
       { id: 'toggleAi', action: '显示/隐藏 AI 侧边栏', shortcut: 'Ctrl+Shift+A' },
       { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
-      { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' }
+      { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' },
+      { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+E' },
+      { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
+      { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' }
     ])
     expect(result.data?.rules).toEqual([])
   })
@@ -201,7 +207,10 @@ describe('settings preferences backend boundary', () => {
       { id: 'newTerminal', action: '新建终端', shortcut: 'Ctrl+Alt+T' },
       { id: 'toggleAi', action: '显示/隐藏 AI 侧边栏', shortcut: 'Ctrl+Alt+A' },
       { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
-      { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' }
+      { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' },
+      { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+E' },
+      { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
+      { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' }
     ])
     expect(result.data.rules).toEqual([
       { id: 'rule-custom-instructions', content: 'legacy global instruction', enabled: true },

@@ -32,6 +32,9 @@ type WorkspaceShellControllerDeps = {
   openLocalTerminalPanel: (options?: { cwd?: string }) => Promise<TerminalPanel | null>
   toggleRight: () => Promise<boolean> | boolean
   setActiveSettingsSection: (section: SettingSectionKey) => void
+  openRecentPanels: () => boolean
+  navigatePanelBack: () => boolean
+  navigatePanelForward: () => boolean
 }
 
 export const createWorkspaceShellController = (
@@ -50,7 +53,15 @@ export const createWorkspaceShellController = (
     onboardingGuideOpen,
     assetManagementOpenRequest
   } = state
-  const { setTopNotice, openLocalTerminalPanel, toggleRight, setActiveSettingsSection } = deps
+  const {
+    setTopNotice,
+    openLocalTerminalPanel,
+    toggleRight,
+    setActiveSettingsSection,
+    openRecentPanels,
+    navigatePanelBack,
+    navigatePanelForward
+  } = deps
 
   const switchToTerminalPanelIndex = (digit: number) => {
     const index = Math.max(1, Math.min(9, Math.floor(digit))) - 1
@@ -90,6 +101,9 @@ export const createWorkspaceShellController = (
       setTopNotice('已打开快捷命令')
       return true
     }
+    if (actionId === 'recentPanels') return openRecentPanels()
+    if (actionId === 'navigatePanelBack') return navigatePanelBack()
+    if (actionId === 'navigatePanelForward') return navigatePanelForward()
     return false
   }
 

@@ -167,7 +167,10 @@ export const createWorkspaceStoreState = () => {
     newTerminal: () => shellShortcutAction?.('newTerminal') ?? false,
     toggleAi: () => shellShortcutAction?.('toggleAi') ?? false,
     switchToSpecificTab: (payload) => shellShortcutAction?.('switchToSpecificTab', payload?.digit) ?? false,
-    quickCommand: () => shellShortcutAction?.('quickCommand') ?? false
+    quickCommand: () => shellShortcutAction?.('quickCommand') ?? false,
+    recentPanels: () => shellShortcutAction?.('recentPanels') ?? false,
+    navigatePanelBack: () => shellShortcutAction?.('navigatePanelBack') ?? false,
+    navigatePanelForward: () => shellShortcutAction?.('navigatePanelForward') ?? false
   }
 
   const selectedConversationId = ref('')

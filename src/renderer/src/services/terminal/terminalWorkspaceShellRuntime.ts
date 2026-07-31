@@ -836,11 +836,9 @@ export const createTerminalWorkspaceShellRuntime = (
           ? openTerminalDashboardAssets
           : !event.shiftKey && event.key === ','
             ? openTerminalDashboardSettings
-            : !event.shiftKey && key === 'e'
-              ? toggleTerminalDashboardLayout
-              : event.shiftKey && key === 'k'
-                ? openTerminalDashboardInlineCommand
-                : undefined
+            : event.shiftKey && key === 'k'
+              ? openTerminalDashboardInlineCommand
+              : undefined
       if (action) {
         event.preventDefault()
         event.stopPropagation()

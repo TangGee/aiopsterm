@@ -20,6 +20,7 @@ type ShortcutBinding = {
 
 const modifierTokens = new Set(['ctrl', 'control', 'shift', 'alt', 'option', 'cmd', 'command', 'meta'])
 const modifierEventKeys = new Set(['control', 'alt', 'shift', 'meta', 'command'])
+const workspacePanelNavigationActionIds = new Set(['recentPanels', 'navigatePanelBack', 'navigatePanelForward'])
 const specialKeyAliases: Record<string, string> = {
   ',': 'comma',
   '.': 'period',
@@ -32,6 +33,10 @@ const specialKeyAliases: Record<string, string> = {
   '`': 'backquote',
   '-': 'minus',
   '=': 'equal',
+  left: 'arrowleft',
+  right: 'arrowright',
+  up: 'arrowup',
+  down: 'arrowdown',
   tab: 'tab',
   return: 'enter',
   esc: 'escape',
@@ -83,6 +88,10 @@ const normalizedKey = (key: string) => specialKeyAliases[key.toLowerCase()] || k
 
 const isTerminalEventTarget = (event: KeyboardEvent) =>
   event.target instanceof Element && Boolean(event.target.closest('.xterm-host, .threaded-terminal-host'))
+
+const hasBlockingModal = () =>
+  Array.from(document.querySelectorAll('[role="dialog"][aria-modal="true"]'))
+    .some((element) => !element.classList.contains('recent-workspace-panels-dialog'))
 
 export const matchesShortcut = (event: KeyboardEvent, parsed: ParsedShortcut) => {
   if (event.ctrlKey !== parsed.ctrlKey || event.shiftKey !== parsed.shiftKey || event.altKey !== parsed.altKey || event.metaKey !== parsed.metaKey) {
@@ -154,9 +163,14 @@ export class ShortcutRuntime {
 
   private handleKeydown(event: KeyboardEvent) {
     if (this.recording) return
-    if (isTerminalEventTarget(event) && isPlainTerminalControlShortcut(event)) return
     const binding = this.bindings.find((item) => matchesShortcut(event, item.parsed))
     if (!binding) return
+    if (workspacePanelNavigationActionIds.has(binding.actionId) && hasBlockingModal()) return
+    if (
+      isTerminalEventTarget(event) &&
+      isPlainTerminalControlShortcut(event) &&
+      !workspacePanelNavigationActionIds.has(binding.actionId)
+    ) return
     event.preventDefault()
     event.stopPropagation()
     binding.handler(binding.digit ? { digit: binding.digit } : undefined)

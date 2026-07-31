@@ -284,7 +284,7 @@
             <span>{{ t('terminal.dashboard.inlineCommand') }}</span><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>K</kbd>
           </button>
           <button type="button" @click="toggleTerminalDashboardLayout">
-            <span>{{ t('terminal.dashboard.toggleLayout') }}</span><kbd>Ctrl</kbd><kbd>E</kbd>
+            <span>{{ t('terminal.dashboard.toggleLayout') }}</span>
           </button>
           <button type="button" @click="openKnowledgeBaseDocumentation">
             <span>{{ t('terminal.dashboard.knowledgeDocs') }}</span>
