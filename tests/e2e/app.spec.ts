@@ -2440,11 +2440,22 @@ test('terminal tab operations and visual baseline', async () => {
           })
           const activeTab = element.querySelector<HTMLElement>('.terminal-tab.active')
           const activeRect = activeTab?.getBoundingClientRect()
+          const activeIconRect = activeTab?.querySelector<HTMLElement>('.terminal-tab-icon')?.getBoundingClientRect()
+          const activeTitleRect = activeTab?.querySelector<HTMLElement>('.terminal-tab-title')?.getBoundingClientRect()
+          const activeCloseRect = activeTab?.querySelector<HTMLElement>('.terminal-tab-close')?.getBoundingClientRect()
           const activeVisible = Boolean(
             activeRect &&
               activeRect.right > stripRect.left + 2 &&
               activeRect.left < stripRect.right - 2 &&
-              activeRect.width >= 60
+              activeRect.width >= 112 &&
+              activeIconRect &&
+              activeIconRect.width >= 14 &&
+              activeTitleRect &&
+              activeTitleRect.width >= 38 &&
+              activeCloseRect &&
+              activeCloseRect.width >= 20 &&
+              activeIconRect.right <= activeTitleRect.left &&
+              activeTitleRect.right <= activeCloseRect.left
           )
           const visibleTitles = visibleTabs.filter((tab) => {
             const title = tab.querySelector<HTMLElement>('.terminal-tab-title')
