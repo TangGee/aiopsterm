@@ -21,6 +21,13 @@
     </div>
     <button
       class="workspace-button"
+      title="新建"
+      @click.stop="openBlankContextMenu"
+    >
+      <Plus />
+    </button>
+    <button
+      class="workspace-button"
       :title="showIpMode ? '显示主机名' : '显示 IP'"
       @click="toggleDisplayMode"
     >
@@ -145,6 +152,7 @@ import {
   Laptop,
   MoreHorizontal,
   Network,
+  Plus,
   PlugZap,
   RefreshCw,
   Repeat2,

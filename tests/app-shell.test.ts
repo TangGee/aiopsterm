@@ -4088,6 +4088,30 @@ describe('AppShell', () => {
     expect(wrapper.findAll('.workspace-host-row').some((row) => row.text().includes('127.0.0.1'))).toBe(false)
   })
 
+  it('opens the shared host and group creation menu from the Workspace toolbar', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mountWorkspacePanel({
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+
+    const createButton = wrapper.find('.workspace-button[title="新建"]')
+    expect(createButton.exists()).toBe(true)
+    await createButton.trigger('click', { clientX: 180, clientY: 120 })
+    expect(wrapper.find('.workspace-node-menu').text()).toContain('新建顶级分组')
+    expect(wrapper.find('.workspace-node-menu').text()).toContain('新建主机')
+
+    await findMenuButton(wrapper, '.workspace-node-menu', '新建顶级分组').trigger('click')
+    expect(wrapper.find('.workspace-folder-modal').text()).toContain('创建文件夹')
+    await wrapper.find('.workspace-folder-modal header button').trigger('click')
+
+    await createButton.trigger('click', { clientX: 180, clientY: 120 })
+    await findMenuButton(wrapper, '.workspace-node-menu', '新建主机').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.workspace-host-modal').text()).toContain('新建主机')
+  })
+
   it('does not rehydrate global layout mode when the Workspace panel mounts', async () => {
     await window.aiops.saveConfig({ defaultMode: 'agents' })
     vi.mocked(window.aiops.getConfig).mockClear()
@@ -5209,14 +5233,14 @@ describe('AppShell', () => {
     await flushPromises()
     expect(store.topNotice).toBe('资源树偏好保存失败')
     expect(store.workspacePreferences.showIpMode).toBe(false)
-    expect(wrapper.find('.workspace-button').attributes('title')).toBe('显示 IP')
+    expect(wrapper.find('.workspace-button[title="显示 IP"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('prod-bastion')
     expect(wrapper.text()).not.toContain('10.24.8.12')
 
     await wrapper.find('.workspace-button[title="显示 IP"]').trigger('click')
     await flushPromises()
     expect(store.workspacePreferences.showIpMode).toBe(true)
-    expect(wrapper.find('.workspace-button').attributes('title')).toBe('显示主机名')
+    expect(wrapper.find('.workspace-button[title="显示主机名"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('10.24.8.12')
 
     const filesPanel = mount(FilesPanel, {
