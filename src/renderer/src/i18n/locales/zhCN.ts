@@ -438,6 +438,8 @@ export const zhCN = {
   'settings.general.disabled': '关闭',
   'settings.general.onboarding': '入门引导',
   'settings.general.openOnboarding': '打开入门引导',
+  'settings.general.idleCleanup': '自动清理空闲窗口',
+  'settings.general.idleCleanupTimeout': '空闲时间（分钟）',
   'settings.general.editor': '编辑器设置',
   'settings.general.editorScope': '这些设置会应用到文件、知识库、SQL 和设置 JSON 等代码编辑器；终端字体请在“终端设置”中调整，AI 输入框不受影响。',
   'settings.general.fontSize': '字体大小',

@@ -23,7 +23,7 @@ import type { McpServerUserConfig, McpToolStatesUserConfig } from '@shared/contr
 import type { QuickCommandsUserConfig } from '@shared/contracts/quickCommands'
 import type { ShortcutUserConfig, UserRuleConfig } from '@shared/contracts/settingsPreferences'
 import type { SkillUserConfig } from '@shared/contracts/skills'
-import type { UserConfig } from '@shared/contracts/userConfig'
+import type { UserConfig, WorkspaceIdleCleanupUserConfig } from '@shared/contracts/userConfig'
 import { defaultModelSettingsData } from '@shared/modelSettingsDefaults'
 import { defaultWorkspacePreferencesData } from '@shared/workspacePreferencesDefaults'
 
@@ -95,6 +95,11 @@ export const defaultNotificationSettings: NotificationUserConfig = {
   customSoundName: ''
 }
 
+export const defaultWorkspaceIdleCleanup: WorkspaceIdleCleanupUserConfig = {
+  enabled: false,
+  timeoutMinutes: 20
+}
+
 const defaultWorkspacePreferencesUserConfig: WorkspaceUserConfig = defaultWorkspacePreferencesData()
 const defaultModelSettingsUserConfig: ModelSettingsUserConfig = defaultModelSettingsData()
 
@@ -134,6 +139,7 @@ export const defaultConfig: UserConfig = {
     rightMouseEvent: 'contextMenu'
   },
   workspacePreferences: defaultWorkspacePreferencesUserConfig,
+  workspaceIdleCleanup: defaultWorkspaceIdleCleanup,
   editorSettings: {
     fontSize: 14,
     lineHeight: 0,

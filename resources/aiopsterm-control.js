@@ -44,6 +44,7 @@ Commands:
   feed list|jump|push|permission-reply|question-reply|exit-plan-reply|mark-handled|clear-ended|clear [--yes]
   workspace snapshot|context
   workspace list|current
+  workspace close-idle
   workspace env [--workspace <id>|--surface <id>] [--mask]
   workspace set-auto-title <title> [--workspace <id>|--panel <id>] [--probe]
   workspace remote status|configure|reconnect|disconnect|pty-sessions
@@ -164,6 +165,9 @@ Short SSH:
   aiswitch <managed-host>
   aio host switch <managed-host>
   aiossh --complete <prefix>
+
+Short cleanup:
+  aioic
 `
 
 const readOption = (name) => {
@@ -690,6 +694,7 @@ const buildCompletionSpec = () => {
         context: completionLeaf([...surfaceSelectorOptions, ...terminalSelectorOptions, ...workspaceSelectorOptions, '--cwd', '--include-snapshot']),
         list: completionLeaf(),
         current: completionLeaf(),
+        'close-idle': completionLeaf(),
         action: completionLeaf(['--action', '--name', '--title', '--new-title', '--cwd', '--url', ...workspaceSelectorOptions, ...surfaceSelectorOptions, '--focus', '--no-focus']),
         env: completionLeaf([...workspaceSelectorOptions, ...surfaceSelectorOptions, '--mask']),
         'set-auto-title': completionLeaf([...workspaceSelectorOptions, ...surfaceSelectorOptions, '--title', '--name', '--probe', '--panel-only-if-multiple', '--failure', '--agent']),
@@ -1060,6 +1065,7 @@ const methodParams = () => {
     if (subcommand === 'context') return workspaceContextMethodParams()
     if (subcommand === 'list') return { method: 'workspace.list', params: {} }
     if (subcommand === 'current') return { method: 'workspace.current', params: {} }
+    if (subcommand === 'close-idle' || subcommand === 'close_idle') return { method: 'workspace.close_idle', params: {} }
     if (subcommand === 'action') return workspaceOrSurfaceActionMethodParams('workspace.action')
     if (subcommand === 'env') return workspaceEnvMethodParams()
     if (subcommand === 'set-auto-title' || subcommand === 'set_auto_title' || subcommand === 'auto-title') return workspaceAutoTitleMethodParams()
@@ -3448,6 +3454,14 @@ const printAgentSessionLine = (session, prefix = 'agent-session') => {
 }
 
 const printResponse = (response) => {
+  if (!outputJson && response.errorCode === 'WORKSPACE_IDLE_CLEANUP_PARTIAL') {
+    const data = response.data || {}
+    process.stdout.write(['idle-cleanup', data.scanned || 0, data.eligible || 0, data.closed || 0, data.failed || 0].join('\t') + '\n')
+    for (const panel of data.panels || []) {
+      if (!panel.closed) process.stderr.write(['failed', panel.panelId || '-', panel.title || '-'].join('\t') + '\n')
+    }
+    return
+  }
   if (
     !outputJson &&
     !response.ok &&
@@ -3472,6 +3486,10 @@ const printResponse = (response) => {
     return
   }
   const data = response.data || {}
+  if (data.idleCleanup) {
+    process.stdout.write(['idle-cleanup', data.scanned || 0, data.eligible || 0, data.closed || 0, data.failed || 0].join('\t') + '\n')
+    return
+  }
   if (Array.isArray(data.openedPaths) || Array.isArray(data.opened_paths)) {
     for (const filePath of data.openedPaths || data.opened_paths || []) {
       process.stdout.write(`opened\t${filePath}\n`)

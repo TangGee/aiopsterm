@@ -439,6 +439,8 @@ export const deDE = completeLocaleMessages({
   'settings.general.disabled': 'Aus',
   'settings.general.onboarding': 'Onboarding',
   'settings.general.openOnboarding': 'Onboarding öffnen',
+  'settings.general.idleCleanup': 'Inaktive Fenster automatisch schließen',
+  'settings.general.idleCleanupTimeout': 'Leerlaufzeit in Minuten',
   'settings.general.editor': 'Editor-Einstellungen',
   'settings.general.editorScope': 'Gilt für Datei-, Wissens-, SQL- und Einstellungen-JSON-Code-Editoren. Terminal-Schriften werden in den Terminal-Einstellungen gesteuert; die AI-Eingabe ist nicht betroffen.',
   'settings.general.fontSize': 'Schriftgröße',

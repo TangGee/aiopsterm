@@ -2,6 +2,7 @@ import { isLocaleSetting } from '@/i18n/runtime'
 import { legacyBackgroundPresetAliases, settingsBackgroundPresets } from '@/config/settings'
 import type { CustomBackgroundSaveResult } from '@shared/contracts/appRuntime'
 import type { UserConfig } from '@shared/contracts/userConfig'
+import type { WorkspaceIdleCleanupUserConfig } from '@shared/contracts/userConfig'
 import {
   backgroundModeValues,
   defaultAiPreferences,
@@ -12,6 +13,7 @@ import {
   defaultNotificationSettings,
   defaultQuickCommands,
   defaultTerminalSettings,
+  defaultWorkspaceIdleCleanup,
   defaultWorkspacePreferences,
   layoutWidthLimits,
   ONBOARDING_VERSION,
@@ -346,6 +348,10 @@ export const mergeUserConfig = (base: UserConfig, patch: Partial<UserConfig> = {
       expandedGroups: patch.workspacePreferences?.expandedGroups || base.workspacePreferences?.expandedGroups || defaultWorkspacePreferences.expandedGroups,
       recentAssetIds: patch.workspacePreferences?.recentAssetIds || base.workspacePreferences?.recentAssetIds || defaultWorkspacePreferences.recentAssetIds || []
     },
+    workspaceIdleCleanup: normalizeWorkspaceIdleCleanupConfig({
+      ...(base.workspaceIdleCleanup || defaultWorkspaceIdleCleanup),
+      ...(patch.workspaceIdleCleanup || {})
+    }).normalized,
     editorSettings: normalizeEditorSettingsConfig({
       ...(base.editorSettings || defaultEditorSettings),
       ...(patch.editorSettings || {})
@@ -404,6 +410,24 @@ export const mergeUserConfig = (base: UserConfig, patch: Partial<UserConfig> = {
             }
           }
         : undefined
+  }
+}
+
+export const normalizeWorkspaceIdleCleanupConfig = (source?: Partial<WorkspaceIdleCleanupUserConfig>) => {
+  const incoming = isRecord(source) ? source : {}
+  const rawTimeout = typeof incoming.timeoutMinutes === 'number' && Number.isFinite(incoming.timeoutMinutes)
+    ? Math.round(incoming.timeoutMinutes)
+    : defaultWorkspaceIdleCleanup.timeoutMinutes
+  const normalized: WorkspaceIdleCleanupUserConfig = {
+    enabled: typeof incoming.enabled === 'boolean' ? incoming.enabled : defaultWorkspaceIdleCleanup.enabled,
+    timeoutMinutes: Math.min(1440, Math.max(1, rawTimeout))
+  }
+  return {
+    normalized,
+    changed:
+      !isRecord(source) ||
+      incoming.enabled !== normalized.enabled ||
+      incoming.timeoutMinutes !== normalized.timeoutMinutes
   }
 }
 

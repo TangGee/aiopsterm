@@ -2,6 +2,11 @@
   <section
     class="terminal-workspace"
     data-ui-focus-scope="workspace-terminal"
+    @pointerdown.capture="handleWorkspaceActivity"
+    @keydown.capture="handleWorkspaceActivity"
+    @input.capture="handleWorkspaceActivity"
+    @scroll.capture="handleWorkspaceActivity"
+    @wheel.capture="handleWorkspaceActivity"
   >
     <div
       class="terminal-tabs-frame"
@@ -631,6 +636,7 @@ const {
   handleTerminalMouseDown,
   handleTerminalMouseUp,
   handleTerminalWheel,
+  handleWorkspaceActivity,
   hasAiSuggestion,
   increaseFontFromMenu,
   isTerminalMenuPanel,

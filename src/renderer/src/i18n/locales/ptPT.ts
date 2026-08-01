@@ -439,6 +439,8 @@ export const ptPT = completeLocaleMessages({
   'settings.general.disabled': 'Desligado',
   'settings.general.onboarding': 'Integração',
   'settings.general.openOnboarding': 'Abrir integração',
+  'settings.general.idleCleanup': 'Fechar automaticamente janelas inativas',
+  'settings.general.idleCleanupTimeout': 'Tempo de inatividade em minutos',
   'settings.general.editor': 'Definições do editor',
   'settings.general.editorScope': 'Aplica-se aos editores de código de ficheiros, conhecimento, SQL e JSON das definições. As fontes do terminal são controladas nas Definições do terminal; a entrada de IA não é afetada.',
   'settings.general.fontSize': 'Tamanho da letra',

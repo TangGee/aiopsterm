@@ -42,6 +42,7 @@ export type UserConfig = {
   }
   terminal?: TerminalUserConfig
   workspacePreferences?: WorkspaceUserConfig
+  workspaceIdleCleanup?: WorkspaceIdleCleanupUserConfig
   editorSettings?: EditorUserConfig
   sshProxyConfigs?: SshProxyConfig[]
   sshAgentKeys?: SshAgentKeyConfig[]
@@ -66,4 +67,9 @@ export type UserConfig = {
     guideTabAutoOpened: boolean
     completedModules: Record<string, boolean>
   }
+}
+
+export type WorkspaceIdleCleanupUserConfig = {
+  enabled: boolean
+  timeoutMinutes: number
 }

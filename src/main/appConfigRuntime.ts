@@ -22,7 +22,12 @@ import type {
 import type { McpConfigFile, McpServerUserConfig, McpToolStatesUserConfig } from '@shared/contracts/mcp'
 import type { ShortcutUserConfig, UserRuleConfig } from '@shared/contracts/settingsPreferences'
 import type { SkillUserConfig } from '@shared/contracts/skills'
-import type { UserConfig } from '@shared/contracts/userConfig'
+import type { UserConfig, WorkspaceIdleCleanupUserConfig } from '@shared/contracts/userConfig'
+
+const defaultWorkspaceIdleCleanup: WorkspaceIdleCleanupUserConfig = {
+  enabled: false,
+  timeoutMinutes: 20
+}
 
 export const defaultKeywordHighlightConfig: KeywordHighlightUserConfig = {
   'keyword-highlight': {
@@ -94,6 +99,7 @@ export const defaultConfig: UserConfig = {
     rightMouseEvent: 'contextMenu'
   },
   workspacePreferences: defaultWorkspacePreferencesUserConfig,
+  workspaceIdleCleanup: defaultWorkspaceIdleCleanup,
   editorSettings: {
     fontSize: 14,
     lineHeight: 0,
@@ -446,6 +452,19 @@ const normalizeModelName = (value: unknown) => {
 const normalizeLayoutWidth = (value: unknown, fallback: number) =>
   typeof value === 'number' && Number.isFinite(value) && value >= 220 && value <= 640 ? Math.round(value) : fallback
 
+const normalizeWorkspaceIdleCleanup = (
+  source: UserConfig['workspaceIdleCleanup'],
+  fallback: WorkspaceIdleCleanupUserConfig
+): WorkspaceIdleCleanupUserConfig => {
+  const timeoutMinutes = typeof source?.timeoutMinutes === 'number' && Number.isFinite(source.timeoutMinutes)
+    ? Math.min(1440, Math.max(1, Math.round(source.timeoutMinutes)))
+    : fallback.timeoutMinutes
+  return {
+    enabled: typeof source?.enabled === 'boolean' ? source.enabled : fallback.enabled,
+    timeoutMinutes
+  }
+}
+
 export const mergeConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): UserConfig => ({
   ...base,
   ...patch,
@@ -468,6 +487,10 @@ export const mergeConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): 
     expandedGroups: patch.workspacePreferences?.expandedGroups || base.workspacePreferences?.expandedGroups || [],
     recentAssetIds: patch.workspacePreferences?.recentAssetIds || base.workspacePreferences?.recentAssetIds || []
   },
+  workspaceIdleCleanup: normalizeWorkspaceIdleCleanup(
+    patch.workspaceIdleCleanup,
+    normalizeWorkspaceIdleCleanup(base.workspaceIdleCleanup, defaultWorkspaceIdleCleanup)
+  ),
   editorSettings: cloneEditorSettings(patch.editorSettings || base.editorSettings),
   sshProxyConfigs: cloneSshProxyConfigs(patch.sshProxyConfigs || base.sshProxyConfigs),
   sshAgentKeys: cloneSshAgentKeys(patch.sshAgentKeys || base.sshAgentKeys),

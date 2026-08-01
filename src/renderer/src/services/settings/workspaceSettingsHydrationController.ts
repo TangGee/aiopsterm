@@ -27,6 +27,7 @@ import {
   normalizeSshProxyConfigs,
   normalizeTerminalConfig,
   normalizeWorkspacePreferences,
+  normalizeWorkspaceIdleCleanupConfig,
   privacyRuntimeSettingsFromSnapshot,
   type AiPreferenceSettings,
   type EditorSettings,
@@ -188,6 +189,7 @@ export const createWorkspaceSettingsHydrationController = (
     const missingAgentsLeftOpen = typeof savedConfig.agentsLeftOpen !== 'boolean'
     const missingTerminalConfig = !isRecord(savedConfig.terminal)
     const missingWorkspacePreferences = !isRecord(savedConfig.workspacePreferences)
+    const missingWorkspaceIdleCleanup = !isRecord(savedConfig.workspaceIdleCleanup)
     const missingEditorSettings = !isRecord(savedConfig.editorSettings)
     const missingSshProxyConfigs = !Array.isArray(savedConfig.sshProxyConfigs)
     const missingSshAgentKeys = !Array.isArray(savedConfig.sshAgentKeys)
@@ -211,6 +213,9 @@ export const createWorkspaceSettingsHydrationController = (
     terminalSettings.value = normalizedTerminal
     const { normalized: normalizedWorkspacePreferences, changed: workspacePreferencesChanged } = normalizeWorkspacePreferences(config.value.workspacePreferences)
     workspacePreferences.value = normalizedWorkspacePreferences
+    const { normalized: normalizedWorkspaceIdleCleanup, changed: workspaceIdleCleanupChanged } = normalizeWorkspaceIdleCleanupConfig(
+      config.value.workspaceIdleCleanup
+    )
     const { normalized: normalizedEditorSettings, changed: editorSettingsChanged } = normalizeEditorSettingsConfig(savedConfig.editorSettings)
     editorSettings.value = normalizedEditorSettings
     applyCurrentEditorSettings()
@@ -294,6 +299,7 @@ export const createWorkspaceSettingsHydrationController = (
     config.value = mergeUserConfig(config.value, {
       terminal: normalizedTerminal,
       workspacePreferences: normalizedWorkspacePreferences,
+      workspaceIdleCleanup: normalizedWorkspaceIdleCleanup,
       editorSettings: normalizedEditorSettings,
       sshProxyConfigs: normalizedSshProxyConfigs,
       sshAgentKeys: normalizedSshAgentKeys,
@@ -321,6 +327,8 @@ export const createWorkspaceSettingsHydrationController = (
       missingTerminalConfig ||
       workspacePreferencesChanged ||
       missingWorkspacePreferences ||
+      workspaceIdleCleanupChanged ||
+      missingWorkspaceIdleCleanup ||
       editorSettingsChanged ||
       missingEditorSettings ||
       sshProxyConfigsChanged ||
@@ -354,6 +362,7 @@ export const createWorkspaceSettingsHydrationController = (
           agentsLeftOpen: config.value.agentsLeftOpen,
           terminal: normalizedTerminal,
           workspacePreferences: normalizedWorkspacePreferences,
+          workspaceIdleCleanup: normalizedWorkspaceIdleCleanup,
           editorSettings: normalizedEditorSettings,
           sshProxyConfigs: normalizedSshProxyConfigs,
           sshAgentKeys: normalizedSshAgentKeys,

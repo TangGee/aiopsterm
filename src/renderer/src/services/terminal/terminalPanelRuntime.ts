@@ -42,6 +42,7 @@ export type TerminalPanel = {
   output: string
   outputSegments: TerminalOutputSegment[]
   status: 'ready' | 'connecting' | 'running' | 'closed' | 'error'
+  lastActivityAt?: number
   kind?: 'terminal' | 'knowledge' | 'managed-ai-session' | 'project-file' | 'local-file'
   split?: PanelDirection
   splitSourceId?: string
@@ -195,6 +196,7 @@ export const createEmptyTerminalPanel = (
   output: '',
   outputSegments: [],
   status: sourcePanel?.sessionId ? 'connecting' : 'ready',
+  lastActivityAt: Date.now(),
   ...(split ? { split, splitSourceId, splitGroupId, splitOrder } : {}),
   ...(split && sourcePanel?.sshSession
     ? {
@@ -230,6 +232,7 @@ export const resetTerminalPanelToDefault = (panel: TerminalPanel) => {
   panel.cwd = '~'
   panel.kind = 'terminal'
   panel.status = 'ready'
+  panel.lastActivityAt = Date.now()
   clearTerminalPanelSplitState(panel)
   panel.sessionId = undefined
   panel.classicTarget = undefined
@@ -256,6 +259,7 @@ export const createForkSshTerminalPanel = (id: string, source: TerminalPanel): T
     output: '',
     outputSegments: [],
     status: 'ready',
+    lastActivityAt: Date.now(),
     split: source.split,
     sshSession: {
       host: sourceSession.host,

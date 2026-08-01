@@ -52,12 +52,31 @@ import type { AiContextOption } from '@shared/contracts/aiChat'
 import type { KnowledgeNode } from '@shared/contracts/knowledgeBase'
 import type { TerminalExitEvent, TerminalLifecycleEvent, TerminalSessionInfo } from '@shared/contracts/terminalSessions'
 import type { AiAgentSessionSource, ManagedAiSessionRecord } from '@shared/contracts/managedAiSessions'
+import type { UserConfig } from '@shared/contracts/userConfig'
+
+export type WorkspaceIdleCleanupPanelSummary = {
+  panelId: string
+  title: string
+  kind: NonNullable<TerminalPanel['kind']>
+  closed: boolean
+}
+
+export type WorkspaceIdleCleanupResult = {
+  ok: boolean
+  scanned: number
+  eligible: number
+  closed: number
+  failed: number
+  skippedActive: number
+  panels: WorkspaceIdleCleanupPanelSummary[]
+}
 
 type WorkspaceTerminalPanelsControllerState = {
   mode: Ref<'terminal' | 'agents'>
   activeModule: Ref<ModuleKey>
   activePanelId: Ref<string>
   panels: Ref<TerminalPanel[]>
+  config: Ref<UserConfig>
   managedAiSessions: Ref<ManagedAiSessionRecord[]>
   terminalSettings: Ref<TerminalSettings>
   extensionSettings: Ref<ExtensionSettings>
@@ -90,6 +109,7 @@ export const createWorkspaceTerminalPanelsController = (
     activeModule,
     activePanelId,
     panels,
+    config,
     managedAiSessions,
     terminalSettings,
     extensionSettings,
@@ -107,6 +127,21 @@ export const createWorkspaceTerminalPanelsController = (
     applyManagedAiTerminalExit,
     applyManagedAiTerminalPanelClosed
   } = deps
+
+  const touchPanelActivity = (panelIdOrSessionId: string, at = Date.now()) => {
+    const panel = findTerminalPanelByIdOrSession(panels.value, panelIdOrSessionId)
+    if (!panel) return null
+    panel.lastActivityAt = at
+    return panel
+  }
+
+  const touchActivePanelActivity = (at = Date.now()) => touchPanelActivity(activePanelId.value, at)
+
+  const initializePanelActivity = (at = Date.now()) => {
+    panels.value.forEach((panel) => {
+      panel.lastActivityAt = at
+    })
+  }
 
   const createPanel = (split?: PanelDirection) => {
     const panel = createTerminalPanelInCollection(panels.value, {
@@ -223,6 +258,56 @@ export const createWorkspaceTerminalPanelsController = (
       return closeOthers()
     }
     return closePanel(id)
+  }
+
+  let idleCleanupRun: Promise<WorkspaceIdleCleanupResult> | null = null
+  const closeIdlePanels = () => {
+    if (idleCleanupRun) return idleCleanupRun
+    idleCleanupRun = (async () => {
+      const startedAt = Date.now()
+      const configuredTimeout = config.value.workspaceIdleCleanup?.timeoutMinutes
+      const timeoutMinutes = typeof configuredTimeout === 'number' && Number.isFinite(configuredTimeout)
+        ? Math.min(1440, Math.max(1, Math.round(configuredTimeout)))
+        : 20
+      const cutoff = startedAt - timeoutMinutes * 60_000
+      const initialPanels = [...panels.value]
+      const candidates = initialPanels.filter(
+        (panel) => panel.id !== activePanelId.value && (panel.lastActivityAt ?? startedAt) <= cutoff
+      )
+      const result: WorkspaceIdleCleanupResult = {
+        ok: true,
+        scanned: initialPanels.length,
+        eligible: candidates.length,
+        closed: 0,
+        failed: 0,
+        skippedActive: initialPanels.some((panel) => panel.id === activePanelId.value) ? 1 : 0,
+        panels: []
+      }
+      for (const candidate of candidates) {
+        const current = panels.value.find((panel) => panel.id === candidate.id)
+        if (!current) continue
+        if (current.id === activePanelId.value || (current.lastActivityAt ?? startedAt) > cutoff) continue
+        const closeResult = await closePanel(current.id)
+        const closed = closeResult.closed
+        result.panels.push({
+          panelId: current.id,
+          title: current.title,
+          kind: current.kind || 'terminal',
+          closed
+        })
+        if (closed) {
+          result.closed += 1
+        } else {
+          result.failed += 1
+          touchPanelActivity(current.id, Date.now())
+        }
+      }
+      result.ok = result.failed === 0
+      return result
+    })().finally(() => {
+      idleCleanupRun = null
+    })
+    return idleCleanupRun
   }
 
   const renamePanel = (id: string, title: string, source: TerminalPanel['titleSource'] = 'user') => {
@@ -463,6 +548,7 @@ export const createWorkspaceTerminalPanelsController = (
       cwd: getKnowledgeParent(relPath) || '@knowledgebase',
       kind: 'knowledge',
       status: 'ready',
+      lastActivityAt: Date.now(),
       output: '',
       outputSegments: [],
       knowledge: {
@@ -499,6 +585,7 @@ export const createWorkspaceTerminalPanelsController = (
       cwd: session?.cwd || session?.canonicalCwd || '@ai-sessions',
       kind: 'managed-ai-session',
       status: 'ready',
+      lastActivityAt: Date.now(),
       output: '',
       outputSegments: [],
       managedAiSession: {
@@ -537,6 +624,7 @@ export const createWorkspaceTerminalPanelsController = (
       cwd: input.projectRoot,
       kind: 'project-file',
       status: 'ready',
+      lastActivityAt: Date.now(),
       output: '',
       outputSegments: [],
       projectFile: { ...input }
@@ -573,6 +661,7 @@ export const createWorkspaceTerminalPanelsController = (
       cwd: parentPath,
       kind: 'local-file',
       status: 'ready',
+      lastActivityAt: Date.now(),
       output: '',
       outputSegments: [],
       localFile: { filePath }
@@ -625,12 +714,14 @@ export const createWorkspaceTerminalPanelsController = (
     if (!panel) return
     trimTerminalPanelOutputHistory(panel, Math.max(200, (terminalSettings.value.scrollBack || 1000) + 200))
     touchManagedAiTerminalActivity(panel)
+    touchPanelActivity(panel.id)
   }
 
   const appendTerminalInput = (id: string, data: string) => {
     const panel = appendTerminalInputToPanelInCollection(panels.value, id, data)
     if (!panel) return
     recordMacroTerminalInput(panel.id, data)
+    touchPanelActivity(panel.id)
   }
 
   const replaceTerminalOutput = (id: string, data: string, scope: TerminalOutputScope = 'output') => {
@@ -647,6 +738,9 @@ export const createWorkspaceTerminalPanelsController = (
 
   return {
     createPanel,
+    touchPanelActivity,
+    touchActivePanelActivity,
+    initializePanelActivity,
     activateTerminalPanel,
     openTerminalForAiHostContext,
     openLocalTerminalPanel,
@@ -658,6 +752,7 @@ export const createWorkspaceTerminalPanelsController = (
     closeOthers,
     closeAllPanels,
     closePanels,
+    closeIdlePanels,
     renamePanel,
     setPanelAutoTitle,
     setPanelProgress,

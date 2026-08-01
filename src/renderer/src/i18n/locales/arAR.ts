@@ -439,6 +439,8 @@ export const arAR = completeLocaleMessages({
   'settings.general.disabled': 'معطّل',
   'settings.general.onboarding': 'الإرشاد',
   'settings.general.openOnboarding': 'فتح الإرشاد',
+  'settings.general.idleCleanup': 'إغلاق النوافذ الخاملة تلقائيا',
+  'settings.general.idleCleanupTimeout': 'مهلة الخمول بالدقائق',
   'settings.general.editor': 'إعدادات المحرر',
   'settings.general.editorScope': 'ينطبق على محررات كود الملفات والمعرفة وSQL وJSON الإعدادات. تضبط خطوط الطرفية من إعدادات الطرفية؛ ولا يتأثر إدخال AI.',
   'settings.general.fontSize': 'حجم الخط',

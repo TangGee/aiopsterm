@@ -440,6 +440,8 @@ export const enUS: LocaleMessages = {
   'settings.general.disabled': 'Off',
   'settings.general.onboarding': 'Onboarding',
   'settings.general.openOnboarding': 'Open onboarding',
+  'settings.general.idleCleanup': 'Automatically close idle windows',
+  'settings.general.idleCleanupTimeout': 'Idle timeout in minutes',
   'settings.general.editor': 'Editor Settings',
   'settings.general.editorScope': 'Applies to file, knowledge, SQL, and settings JSON code editors. Terminal fonts are controlled by Terminal Settings; the AI input is not affected.',
   'settings.general.fontSize': 'Font Size',

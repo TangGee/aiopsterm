@@ -174,7 +174,29 @@ export const createSettingsWorkspaceGeneralTerminalPages = (
                 },
                 t('settings.general.openOnboarding')
               )
-            ])
+            ]),
+            switchRow(
+              t('settings.general.idleCleanup'),
+              workspace.config.workspaceIdleCleanup?.enabled ?? false,
+              (enabled) => workspace.saveConfig({
+                workspaceIdleCleanup: {
+                  enabled,
+                  timeoutMinutes: workspace.config.workspaceIdleCleanup?.timeoutMinutes ?? 20
+                }
+              })
+            ),
+            numberRow(
+              t('settings.general.idleCleanupTimeout'),
+              workspace.config.workspaceIdleCleanup?.timeoutMinutes ?? 20,
+              1,
+              1440,
+              (timeoutMinutes) => workspace.saveConfig({
+                workspaceIdleCleanup: {
+                  enabled: workspace.config.workspaceIdleCleanup?.enabled ?? false,
+                  timeoutMinutes
+                }
+              })
+            )
           ]),
           h('h3', t('settings.general.editor')),
           h('p', { class: 'settings-description' }, t('settings.general.editorScope')),

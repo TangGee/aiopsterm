@@ -53,6 +53,7 @@ import {
   normalizeUserModelName,
   normalizeUserModelProvider,
   normalizeWorkspacePreferences,
+  normalizeWorkspaceIdleCleanupConfig,
   parseKeywordHighlightEditorContent,
   parseSecurityEditorContent,
   privacyRuntimeSettingsFromSnapshot,
@@ -68,6 +69,19 @@ import {
 import type { PrivacyRuntimeSnapshot } from '@shared/contracts/appRuntime'
 
 describe('workspaceConfigRuntime', () => {
+  it('normalizes workspace idle cleanup settings', () => {
+    expect(defaultConfig.workspaceIdleCleanup).toEqual({ enabled: false, timeoutMinutes: 20 })
+    expect(normalizeWorkspaceIdleCleanupConfig({ enabled: true, timeoutMinutes: 0 })).toEqual({
+      normalized: { enabled: true, timeoutMinutes: 1 },
+      changed: true
+    })
+    expect(normalizeWorkspaceIdleCleanupConfig({ enabled: false, timeoutMinutes: 2000 }).normalized.timeoutMinutes).toBe(1440)
+    expect(mergeUserConfig(defaultConfig, { workspaceIdleCleanup: { enabled: true, timeoutMinutes: 45 } }).workspaceIdleCleanup).toEqual({
+      enabled: true,
+      timeoutMinutes: 45
+    })
+  })
+
   it('normalizes terminal, editor, and workspace preference snapshots', () => {
     const terminal = normalizeTerminalConfig({
       terminalType: 'bad',

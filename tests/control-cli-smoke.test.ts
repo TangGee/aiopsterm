@@ -115,6 +115,33 @@ describe('aio CLI', () => {
     }
   })
 
+  it('routes workspace close-idle and prints a compact cleanup summary', async () => {
+    let received: Record<string, unknown> | null = null
+    const socketPath = await startControlServer((request) => {
+      received = request
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          idleCleanup: { ok: true },
+          scanned: 4,
+          eligible: 2,
+          closed: 2,
+          failed: 0,
+          skippedActive: 1
+        }
+      }
+    })
+
+    const result = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'workspace', 'close-idle'], {
+      cwd: process.cwd()
+    })
+
+    expect(received).toEqual(expect.objectContaining({ method: 'workspace.close_idle', params: {} }))
+    expect(result.stdout).toBe('idle-cleanup\t4\t2\t2\t0\n')
+    expect(result.stderr).toBe('')
+  })
+
   it('prints automation recipes without requiring a control socket', async () => {
     const all = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', 'recipes'], {
       cwd: process.cwd(),

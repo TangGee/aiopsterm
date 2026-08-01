@@ -246,6 +246,14 @@ export const createTerminalControlSurfacePaneHandlers = ({
     })
 
   const handlePaneManagementControlRequest = async (method: string, params: Record<string, unknown>): Promise<ControlResponse> => {
+    if (method === 'workspace.close_idle') {
+      const result = await workspace.closeIdlePanels()
+      const data = { idleCleanup: result, ...result }
+      if (!result.ok) {
+        return controlFail('WORKSPACE_IDLE_CLEANUP_PARTIAL', 'Some idle windows could not be closed.', data)
+      }
+      return controlOk(data)
+    }
     if (method === 'pane.list') {
       const panels = selectableControlPanels()
       return controlOk({

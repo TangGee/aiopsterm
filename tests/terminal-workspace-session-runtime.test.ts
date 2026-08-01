@@ -58,6 +58,7 @@ const createHarness = (panels: TerminalPanel[], options: { isMacroRecording?: bo
   const writeTerminal = vi.fn(async (id: string, data: string) => ({ ok: true, data: { id, bytes: new TextEncoder().encode(data).length } }))
   const killTerminal = vi.fn(async (id: string) => ({ ok: true, data: { id } }))
   const recordMacroTerminalInput = vi.fn()
+  const touchPanelActivity = vi.fn()
   const logs: Array<{ level: string; event: string; details?: Record<string, unknown> }> = []
   const workspace = reactive({
     panels,
@@ -67,6 +68,7 @@ const createHarness = (panels: TerminalPanel[], options: { isMacroRecording?: bo
       notices.push(message)
     },
     recordMacroTerminalInput,
+    touchPanelActivity,
     applyLocalTerminalSession: (panelId: string, terminalSession: TerminalSessionInfo) => {
       appliedLocal.push({ panelId, session: terminalSession })
       const panel = panels.find((item) => item.id === panelId)

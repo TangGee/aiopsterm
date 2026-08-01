@@ -79,6 +79,7 @@ const terminalIngressVisibleFlushMs = 16
 const terminalIngressBackgroundFlushMs = 64
 const terminalIngressMaxBatchBytes = 64 * 1024
 const terminalIngressFlushPanelsPerSlice = 8
+const workspaceIdleCleanupScanIntervalMs = 60_000
 
 const terminalTextEncoder = new TextEncoder()
 const terminalTextDecoder = new TextDecoder()
@@ -160,6 +161,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   let offExit: (() => void) | null = null
   let offControlRequest: (() => void) | null = null
   let terminalRuntimeMounted = false
+  let workspaceIdleCleanupTimer: number | null = null
   let uninstallTerminalStressHarness: (() => void) | null = null
   let unregisterTerminalFocusScope: (() => void) | null = null
   const terminalDataPerf = new Map<string, TerminalDataPerfSummary>()
@@ -783,6 +785,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   }
 
   const handleTerminalData = (event: TerminalDataEvent) => {
+    if (event.data) workspace.touchPanelActivity(event.id)
     const threaded = threadedDirectIngressForEvent(event)
     if (threaded) {
       // threaded 直通路径不经过下方的 ZMODEM sentry,必须在写入终端前用廉价的
@@ -848,9 +851,20 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     void handleShortcut(event)
   }
 
+  const handleWorkspaceActivity = () => {
+    workspace.touchActivePanelActivity()
+  }
+
+  const runAutomaticIdleCleanup = () => {
+    if (!workspace.config.workspaceIdleCleanup?.enabled) return
+    void workspace.closeIdlePanels()
+  }
+
   onMounted(() => {
     terminalRuntimeMounted = true
     activeTerminalWorkspaceRuntimeToken = runtimeToken
+    workspace.initializePanelActivity()
+    workspaceIdleCleanupTimer = window.setInterval(runAutomaticIdleCleanup, workspaceIdleCleanupScanIntervalMs)
     unregisterTerminalFocusScope = registerUiFocusScope({
       id: 'workspace-terminal',
       root: () => document.querySelector<HTMLElement>('.terminal-workspace'),
@@ -920,6 +934,8 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   })
 
   onUnmounted(() => {
+    if (workspaceIdleCleanupTimer !== null) window.clearInterval(workspaceIdleCleanupTimer)
+    workspaceIdleCleanupTimer = null
     setThreadedTerminalDataConsumedSink(null)
     terminalRuntimeMounted = false
     unregisterTerminalFocusScope?.()
@@ -1100,6 +1116,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   watch(
     () => workspace.activePanelId,
     (panelId, previousPanelId) => {
+      workspace.touchPanelActivity(panelId)
       const switchTrace = managedAiSessionTerminalSwitchTelemetry.activeTraceForPanel(panelId)
       const existingView = terminalViews.get(panelId)
       const existingThreadedInfo = existingView && isThreadedTerminalHost(existingView.terminal)
@@ -1153,6 +1170,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     activeTerminalContextBar,
     activatePanel,
     activatePanelFromPointer,
+    handleWorkspaceActivity,
     aiButtonPanelId,
     aiButtonPosition,
     aiSuggestLoading,

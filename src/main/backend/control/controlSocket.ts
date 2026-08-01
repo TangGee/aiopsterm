@@ -284,6 +284,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     method === 'workspace.create' ||
     method === 'workspace.rename' ||
     method === 'workspace.close' ||
+    method === 'workspace.close_idle' ||
     method === 'workspace.reorder' ||
     method === 'workspace.reorder_many' ||
     method === 'workspace.move_to_window' ||

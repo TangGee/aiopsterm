@@ -1721,6 +1721,52 @@ describe('workspace store', () => {
     expect(store.panels[0].outputSegments).toEqual([])
   })
 
+  it('closes idle workspace panels while keeping active or recently active panels', async () => {
+    vi.setSystemTime(2_000_000)
+    const store = useWorkspaceStore()
+    store.config.workspaceIdleCleanup = { enabled: false, timeoutMinutes: 20 }
+
+    const idleTerminal = store.panels[0]
+    idleTerminal.output = 'idle'
+    idleTerminal.lastActivityAt = 1
+    const recentKnowledge = store.createPanel()
+    recentKnowledge.kind = 'knowledge'
+    recentKnowledge.knowledge = { relPath: 'ops/runbook.md', isImage: false }
+    recentKnowledge.lastActivityAt = 1
+    store.appendTerminalOutput(recentKnowledge.id, 'updated')
+    const activeFile = store.createPanel()
+    activeFile.kind = 'local-file'
+    activeFile.localFile = { filePath: '/tmp/current.txt' }
+    activeFile.lastActivityAt = 1
+
+    const result = await store.closeIdlePanels()
+
+    expect(result).toMatchObject({ ok: true, scanned: 3, eligible: 1, closed: 1, failed: 0, skippedActive: 1 })
+    expect(store.panels.map((panel) => panel.id)).toEqual([recentKnowledge.id, activeFile.id])
+    expect(store.activePanelId).toBe(activeFile.id)
+  })
+
+  it('refreshes panel activity when shared close logic cannot close an idle terminal', async () => {
+    vi.setSystemTime(3_000_000)
+    const store = useWorkspaceStore()
+    store.config.workspaceIdleCleanup = { enabled: true, timeoutMinutes: 20 }
+    store.applyLocalTerminalSession('panel-main', {
+      id: 'idle-session',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/tmp'
+    })
+    store.panels[0].lastActivityAt = 1
+    store.createPanel()
+    vi.mocked(window.aiops.killTerminal).mockResolvedValueOnce({ ok: false, errorMessage: 'busy' } as any)
+
+    const result = await store.closeIdlePanels()
+
+    expect(result).toMatchObject({ ok: false, eligible: 1, closed: 0, failed: 1 })
+    expect(window.aiops.killTerminal).toHaveBeenCalledWith('idle-session')
+    expect(store.panels[0].lastActivityAt).toBe(3_000_000)
+  })
+
   it('prepares split panes from the selected live terminal metadata', () => {
     const store = useWorkspaceStore()
 

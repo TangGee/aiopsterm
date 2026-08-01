@@ -112,7 +112,8 @@ const controlCommandShims = [
   { name: 'aiopsterm-control', helperArgs: [] },
   { name: 'aiopen', helperArgs: ['aiopen'] },
   { name: 'aiossh', helperArgs: ['ssh'] },
-  { name: 'aiswitch', helperArgs: ['host', 'switch'] }
+  { name: 'aiswitch', helperArgs: ['host', 'switch'] },
+  { name: 'aioic', helperArgs: ['workspace', 'close-idle'] }
 ]
 
 const controlCommandShimDirectory = () => join(tmpdir(), `aiopsterm-control-bin-${process.pid}`)

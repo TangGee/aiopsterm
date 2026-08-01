@@ -439,6 +439,8 @@ export const ruRU = completeLocaleMessages({
   'settings.general.disabled': 'Выкл',
   'settings.general.onboarding': 'Обучение',
   'settings.general.openOnboarding': 'Открыть обучение',
+  'settings.general.idleCleanup': 'Автоматически закрывать неактивные окна',
+  'settings.general.idleCleanupTimeout': 'Время бездействия в минутах',
   'settings.general.editor': 'Настройки редактора',
   'settings.general.editorScope': 'Применяется к редакторам кода для файлов, базы знаний, SQL и JSON настроек. Шрифты терминала настраиваются в настройках терминала; поле ввода AI не затрагивается.',
   'settings.general.fontSize': 'Размер шрифта',

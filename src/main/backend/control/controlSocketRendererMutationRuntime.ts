@@ -67,6 +67,7 @@ const rendererMutationEventName = (method: string) => {
   if (method === 'surface.split') return 'pane.created'
   if (method === 'workspace.rename') return 'workspace.renamed'
   if (method === 'workspace.close') return 'workspace.closed'
+  if (method === 'workspace.close_idle') return 'workspace.idle_cleaned'
   if (method === 'surface.close') return 'pane.closed'
   if (method === 'workspace.select_layout') return 'workspace.layout_selected'
   if (method === 'agent-hibernation.on') return 'agent_hibernation.enabled'
@@ -131,6 +132,15 @@ export const publishRendererMutationEvent = (method: string, params: Record<stri
     surfaceId: cleanText(data.surfaceId || data.surface_id || surface?.panelId || pane?.panelId || createdSurface?.panelId || created_surface?.panelId || selectedPane?.panelId || createdPane?.panelId || closedPane?.panelId || renamedPane?.panelId || params.panelId || params.surfaceId || params.paneId),
     payload: {
       method,
+      ...(method === 'workspace.close_idle'
+        ? {
+            scanned: data.scanned,
+            eligible: data.eligible,
+            closed: data.closed,
+            failed: data.failed,
+            skipped_active: data.skippedActive
+          }
+        : {}),
       ...(group
         ? {
             group_id: group.id,

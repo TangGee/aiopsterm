@@ -86,6 +86,7 @@ export const createTerminalWorkspaceSessionRuntime = ({
         return
       }
       if (shouldRecordMacroInput) workspace.recordMacroTerminalInput(panel.id, data, inputTimestamp)
+      workspace.touchPanelActivity(panel.id, inputTimestamp)
       writeTerminalDebugLog('renderer.terminal-input.write-accepted', {
         panelId,
         sessionId,

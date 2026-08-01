@@ -439,6 +439,8 @@ export const frFR = completeLocaleMessages({
   'settings.general.disabled': 'Désactivé',
   'settings.general.onboarding': 'Accueil',
   'settings.general.openOnboarding': 'Ouvrir l’accueil',
+  'settings.general.idleCleanup': 'Fermer automatiquement les fenêtres inactives',
+  'settings.general.idleCleanupTimeout': 'Délai d’inactivité en minutes',
   'settings.general.editor': 'Paramètres de l’éditeur',
   'settings.general.editorScope': 'S’applique aux éditeurs de code pour les fichiers, la base de connaissances, SQL et le JSON des paramètres. Les polices du terminal se règlent dans Paramètres du terminal ; la saisie IA n’est pas affectée.',
   'settings.general.fontSize': 'Taille de police',

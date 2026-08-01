@@ -61,6 +61,7 @@ export const createTerminalControlSurfaceMobileHandlers = ({
     if (!panel.sessionId) return controlFail('TERMINAL_SESSION_NOT_FOUND', 'Selected terminal has no connected session id.', { panelId: panel.id, surface_id: panel.id })
     const ok = await writeControlTerminalText(panel.sessionId, text)
     if (!ok) return controlFail('TERMINAL_WRITE_FAILED', 'Terminal input could not be delivered.', { panelId: panel.id, sessionId: panel.sessionId })
+    workspace.touchPanelActivity(panel.id)
     return controlOk(terminalMobileTargetPayload(panel, { queued: false, bytes: new TextEncoder().encode(text).length, textLength: text.length, text_length: text.length }))
   }
 
@@ -75,6 +76,7 @@ export const createTerminalControlSurfaceMobileHandlers = ({
     const payload = `${terminalBracketedPasteText(text)}${submitKey}`
     const ok = await writeControlTerminalText(panel.sessionId, payload)
     if (!ok) return controlFail('TERMINAL_WRITE_FAILED', 'Terminal paste could not be delivered.', { panelId: panel.id, sessionId: panel.sessionId })
+    workspace.touchPanelActivity(panel.id)
     return controlOk(
       terminalMobileTargetPayload(panel, {
         queued: false,
@@ -135,6 +137,7 @@ export const createTerminalControlSurfaceMobileHandlers = ({
     if (!panel) return controlFail('TERMINAL_PANEL_NOT_FOUND', 'Terminal panel not found.')
     workspace.activeModule = 'workspace'
     workspace.activePanelId = panel.id
+    workspace.touchPanelActivity(panel.id)
     await nextTick()
     if (focusTerminalPanel) focusTerminalPanel(panel.id, 'external-request')
     else terminalViews.get(panel.id)?.terminal.focus()

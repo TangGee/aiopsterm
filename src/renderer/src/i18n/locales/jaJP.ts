@@ -439,6 +439,8 @@ export const jaJP = completeLocaleMessages({
   'settings.general.disabled': 'オフ',
   'settings.general.onboarding': 'オンボーディング',
   'settings.general.openOnboarding': 'オンボーディングを開く',
+  'settings.general.idleCleanup': 'アイドル状態のウィンドウを自動的に閉じる',
+  'settings.general.idleCleanupTimeout': 'アイドル時間（分）',
   'settings.general.editor': 'エディター設定',
   'settings.general.editorScope': 'ファイル、ナレッジ、SQL、設定 JSON などのコードエディターに適用されます。ターミナルのフォントは「ターミナル設定」で調整します。AI 入力欄には影響しません。',
   'settings.general.fontSize': 'フォントサイズ',

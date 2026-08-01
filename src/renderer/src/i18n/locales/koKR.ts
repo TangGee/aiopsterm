@@ -439,6 +439,8 @@ export const koKR = completeLocaleMessages({
   'settings.general.disabled': '꺼짐',
   'settings.general.onboarding': '온보딩',
   'settings.general.openOnboarding': '온보딩 열기',
+  'settings.general.idleCleanup': '유휴 창 자동 닫기',
+  'settings.general.idleCleanupTimeout': '유휴 시간(분)',
   'settings.general.editor': '편집기 설정',
   'settings.general.editorScope': '파일, 지식 베이스, SQL, 설정 JSON 등의 코드 편집기에 적용됩니다. 터미널 글꼴은 터미널 설정에서 조정하며 AI 입력창에는 영향을 주지 않습니다.',
   'settings.general.fontSize': '글꼴 크기',

@@ -57,6 +57,7 @@ const paneManagementMethods = [
   'surface.split',
   'workspace.rename',
   'workspace.close',
+  'workspace.close_idle',
   'surface.close',
   'workspace.has_session',
   'workspace.select_layout'

@@ -439,6 +439,8 @@ export const itIT = completeLocaleMessages({
   'settings.general.disabled': 'Disattivo',
   'settings.general.onboarding': 'Onboarding',
   'settings.general.openOnboarding': 'Apri onboarding',
+  'settings.general.idleCleanup': 'Chiudi automaticamente le finestre inattive',
+  'settings.general.idleCleanupTimeout': 'Timeout inattività in minuti',
   'settings.general.editor': 'Impostazioni editor',
   'settings.general.editorScope': 'Si applica agli editor di codice per file, conoscenza, SQL e JSON delle impostazioni. I caratteri del terminale si regolano nelle impostazioni terminale; l’input AI non è interessato.',
   'settings.general.fontSize': 'Dimensione carattere',

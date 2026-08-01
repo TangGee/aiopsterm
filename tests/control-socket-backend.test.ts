@@ -1498,6 +1498,9 @@ describe('control socket backend', () => {
       if (request.method === 'workspace.close' || request.method === 'surface.close') {
         return { ok: true, data: { closedPane: { panelId: params.panelId || params.paneId || 'panel-1', title: 'Closed' }, action: request.method } }
       }
+      if (request.method === 'workspace.close_idle') {
+        return { ok: true, data: { scanned: 3, eligible: 1, closed: 1, failed: 0, skippedActive: 1 } }
+      }
       return { ok: true, data: { createdPane: { panelId: 'panel-new', title: params.title || 'New' }, action: request.method } }
     })
     backend.configureControlSocketRuntime({ getWindows: () => [mockWindow] })
@@ -1512,6 +1515,9 @@ describe('control socket backend', () => {
     await expect(backend.__testing.handleControlRequest({ method: 'kill-pane', params: { paneId: 'panel-2' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
     await expect(backend.__testing.handleControlRequest({ method: 'has-session', params: { panelId: 'panel-1' } })).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ exists: true }) }))
     await expect(backend.__testing.handleControlRequest({ method: 'select-layout', params: { layout: 'main-vertical' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'workspace.close_idle', params: {} })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ closed: 1 }) })
+    )
 
     expect(mockWindow.requests).toEqual([
       expect.objectContaining({ method: 'workspace.list' }),
@@ -1523,7 +1529,8 @@ describe('control socket backend', () => {
       expect.objectContaining({ method: 'workspace.close' }),
       expect.objectContaining({ method: 'surface.close' }),
       expect.objectContaining({ method: 'workspace.has_session' }),
-      expect.objectContaining({ method: 'workspace.select_layout' })
+      expect.objectContaining({ method: 'workspace.select_layout' }),
+      expect.objectContaining({ method: 'workspace.close_idle' })
     ])
     const workspaceEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'workspace' } })
     expect(workspaceEvents.data?.events).toEqual(
@@ -1531,7 +1538,8 @@ describe('control socket backend', () => {
         expect.objectContaining({ name: 'workspace.created' }),
         expect.objectContaining({ name: 'workspace.renamed' }),
         expect.objectContaining({ name: 'workspace.closed' }),
-        expect.objectContaining({ name: 'workspace.layout_selected' })
+        expect.objectContaining({ name: 'workspace.layout_selected' }),
+        expect.objectContaining({ name: 'workspace.idle_cleaned', payload: expect.objectContaining({ closed: 1, failed: 0 }) })
       ])
     )
     const paneEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'pane' } })
