@@ -1727,6 +1727,11 @@ describe('AppShell', () => {
     expect(styles).not.toContain('grid-template-columns: repeat(3, 180px);')
   })
 
+  it('keeps the nested Workspace key form vertically scrollable', () => {
+    const styles = appStyles()
+    expect(styles).toContain('.workspace-key-form {\n  align-content: start;\n  overflow-x: hidden;\n  overflow-y: auto;\n}')
+  })
+
   it('hydrates secondary module catalogs only after entering their modules', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
