@@ -19,23 +19,28 @@
             <X />
           </button>
         </header>
+        <small class="key-form-required-note">
+          * 为必填项。公钥可选；仅当私钥受密码保护时填写 Passphrase。
+        </small>
         <label>
-          <span>名称</span>
+          <span>名称 *</span>
           <input
             :value="name"
+            required
             @input="$emit('update:name', ($event.target as HTMLInputElement).value)"
           />
         </label>
         <label>
-          <span>私钥</span>
+          <span>私钥 *</span>
           <textarea
             :value="privateKey"
+            required
             spellcheck="false"
             @input="$emit('update:privateKey', ($event.target as HTMLTextAreaElement).value)"
           />
         </label>
         <label>
-          <span>公钥</span>
+          <span>公钥（选填）</span>
           <textarea
             :value="publicKey"
             spellcheck="false"
@@ -43,7 +48,7 @@
           />
         </label>
         <label>
-          <span>Passphrase</span>
+          <span>Passphrase（选填）</span>
           <input
             :value="passphrase"
             type="password"

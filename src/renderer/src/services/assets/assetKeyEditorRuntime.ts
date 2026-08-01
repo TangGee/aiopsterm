@@ -189,7 +189,8 @@ export const createAssetKeyEditorRuntime = ({
     }
     try {
       const result = await showOpenDialog({
-        properties: ['openFile'],
+        defaultPath: '~/.ssh',
+        properties: ['openFile', 'showHiddenFiles'],
         filters: [
           { name: 'Key Files', extensions: ['pem', 'key', 'txt', 'pub', 'asc', 'crt', 'cer', 'der', 'p12', 'pfx', 'ssh', 'ppk', 'gpg'] },
           { name: 'All Files', extensions: ['*'] }

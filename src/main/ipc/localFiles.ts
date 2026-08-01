@@ -175,7 +175,10 @@ export const registerLocalFilesIpc = (ipcMain: IpcMain, input: RegisterLocalFile
   ipcMain.handle('dialog:open-file', async (event, options?: OpenDialogOptions) => {
     const fixture = await e2eOpenDialogFixture(input, options)
     if (fixture) return fixture
-    return input.showOpenDialog(event, options || {})
+    const normalizedOptions = options?.defaultPath
+      ? { ...options, defaultPath: expandHomeDirectory(options.defaultPath) }
+      : options || {}
+    return input.showOpenDialog(event, normalizedOptions)
   })
   ipcMain.handle('dialog:save-file', async (event, options?: SaveDialogOptions) => {
     if (input.shouldUseE2eDialogFixtures()) {

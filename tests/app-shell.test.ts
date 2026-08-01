@@ -3350,6 +3350,11 @@ describe('AppShell', () => {
     await keys.find('[data-testid="key-new-button"]').trigger('click')
     expect(keys.text()).toContain('新建密钥')
     expect(keys.find('[data-testid="asset-key-form-dialog"]').classes()).toContain('asset-host-form-modal')
+    expect(keys.find('[data-testid="asset-key-form-dialog"]').text()).toContain('* 为必填项')
+    expect(keys.find('[data-testid="asset-key-form-dialog"]').text()).toContain('公钥（选填）')
+    expect(keys.find('[data-testid="asset-key-form-dialog"]').text()).toContain('Passphrase（选填）')
+    expect(keys.find('.key-form-panel input').attributes('required')).toBeDefined()
+    expect(keys.find('.key-form-panel textarea').attributes('required')).toBeDefined()
     await keys.find('.key-form-panel input').setValue('unit-key')
     await keySubmitButton(keys).trigger('click')
     expect(keys.text()).toContain('请输入私钥')
@@ -3391,7 +3396,8 @@ describe('AppShell', () => {
       await flushPromises()
       expect(window.aiops.showOpenDialog).toHaveBeenCalledWith(
         expect.objectContaining({
-          properties: ['openFile'],
+          defaultPath: '~/.ssh',
+          properties: ['openFile', 'showHiddenFiles'],
           filters: expect.arrayContaining([expect.objectContaining({ name: 'Key Files' })])
         })
       )

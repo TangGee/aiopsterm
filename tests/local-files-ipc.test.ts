@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IpcMain } from 'electron'
 import { mkdtemp, rm, writeFile } from 'fs/promises'
-import { tmpdir } from 'os'
+import { homedir, tmpdir } from 'os'
 import { basename, join, normalize } from 'path'
 
 const backendMocks = vi.hoisted(() => ({
@@ -201,6 +201,13 @@ describe('local files IPC registrar', () => {
     const openOptions = { properties: ['openFile'], filters: [{ name: 'Text', extensions: ['md'] }] }
     await expect(handlers.get('dialog:open-file')?.(event, openOptions)).resolves.toEqual({ canceled: false, filePaths: ['/tmp/from-open-dialog.md'] })
     expect(input.showOpenDialog).toHaveBeenCalledWith(event, openOptions)
+
+    const sshKeyOptions = { defaultPath: '~/.ssh', properties: ['openFile', 'showHiddenFiles'] }
+    await handlers.get('dialog:open-file')?.(event, sshKeyOptions)
+    expect(input.showOpenDialog).toHaveBeenLastCalledWith(event, {
+      ...sshKeyOptions,
+      defaultPath: join(homedir(), '.ssh')
+    })
 
     const saveOptions = { defaultPath: '/tmp/reports/query.sql', filters: [{ name: 'SQL', extensions: ['sql'] }] }
     await expect(handlers.get('dialog:save-file')?.(event, saveOptions)).resolves.toEqual({ canceled: false, filePath: '/tmp/from-save-dialog.md' })
