@@ -4,18 +4,12 @@ import type {
   AiopsAssetAuthType,
   AiopsAssetInput,
   AiopsAssetType,
-  AiopsKeychainInput,
-  AiopsKeychainRecord,
-  AiopsKeychainType
+  AiopsKeychainRecord
 } from '@shared/contracts/assets'
 import type { useWorkspaceStore } from '@/stores/workspace'
 import { assetsClient } from '@/services/assets/assetsClient'
-import { localFilesClient } from '@/services/app/localFilesClient'
-import {
-  isAiopsAssetConnectionTestInfo,
-  isAiopsKeychainRecord,
-  malformedAssetBackendResultMessage
-} from '@/services/assets/assetBackendGuards'
+import { isAiopsAssetConnectionTestInfo, malformedAssetBackendResultMessage } from '@/services/assets/assetBackendGuards'
+import { createAssetKeyEditorRuntime } from '@/services/assets/assetKeyEditorRuntime'
 import {
   ungroupedGroupName,
   type WorkspacePanelAsset,
@@ -86,15 +80,9 @@ export const createWorkspacePanelHostRuntime = ({
   const hostPasswordVisible = ref(false)
   const hostJumpPasswordVisible = ref(false)
   let hostSecretRequestId = 0
-  const hostChildModal = ref<'' | 'proxy' | 'key' | 'jumpHost'>('')
+  const hostChildModal = ref<'' | 'proxy' | 'jumpHost'>('')
   const hostChildFormError = ref('')
-  const hostKeyForm = reactive({
-    name: '',
-    privateKey: '',
-    publicKey: '',
-    passphrase: ''
-  })
-  const hostKeyDragOver = ref(false)
+  const hostKeyServiceNotice = ref('')
   const hostJumpForm = reactive({
     title: 'jump-host',
     host: '',
@@ -105,6 +93,15 @@ export const createWorkspacePanelHostRuntime = ({
     password: '',
     keychainId: '',
     comment: '跳板机'
+  })
+  const hostKeyEditorRuntime = createAssetKeyEditorRuntime({
+    keychains: keychainOptions,
+    serviceNotice: hostKeyServiceNotice,
+    refreshKeychains: loadKeychainOptions,
+    onSaved: (saved) => {
+      hostForm.authType = 'keyBased'
+      hostForm.keychainId = saved.id
+    }
   })
 
   const jumpHostOptions = computed(() =>
@@ -123,89 +120,9 @@ export const createWorkspacePanelHostRuntime = ({
     hostTestOk.value = false
   }
 
-  const detectHostKeyType = (privateKey = '', publicKey = ''): AiopsKeychainType => {
-    const publicAlgorithm = publicKey.trim().split(/\s+/)[0]?.toLowerCase()
-    if (publicAlgorithm === 'ssh-ed25519') return 'ed25519'
-    if (publicAlgorithm === 'ssh-rsa') return 'rsa'
-    if (publicAlgorithm?.startsWith('ecdsa-')) return 'ecdsa'
-    if (privateKey.includes('ssh-ed25519')) return 'ed25519'
-    if (privateKey.includes('BEGIN EC PRIVATE KEY') || privateKey.includes('ecdsa-sha2')) return 'ecdsa'
-    return 'rsa'
-  }
-
-  const localFileName = (filePath: string) => filePath.split(/[/\\]/).filter(Boolean).at(-1) || filePath
-
-  const readLocalTextFile = async (filePath: string, unavailableMessage: string) => {
-    const readLocalFile = localFilesClient.readLocalFile()
-    if (!readLocalFile) throw new Error(unavailableMessage)
-    const result = await readLocalFile(filePath)
-    return result.content
-  }
-
-  const applyImportedHostKeyFile = (fileName: string, content: string) => {
-    const text = content.trim()
-    if (!text) {
-      hostChildFormError.value = '密钥文件为空'
-      return
-    }
-    hostKeyForm.privateKey = text
-    hostChildFormError.value = `已导入 ${fileName}，识别为 ${detectHostKeyType(hostKeyForm.privateKey, hostKeyForm.publicKey).toUpperCase()}`
-  }
-
-  const importHostKeyFileFromPath = async (filePath: string) => {
-    if (!filePath) {
-      hostChildFormError.value = '没有选择密钥文件'
-      return
-    }
-    try {
-      const content = await readLocalTextFile(filePath, '密钥文件读取服务不可用')
-      applyImportedHostKeyFile(localFileName(filePath), content)
-    } catch (error) {
-      hostChildFormError.value = error instanceof Error ? error.message : '密钥文件读取失败'
-    }
-  }
-
-  const openHostKeyImportDialog = async () => {
-    const showOpenDialog = localFilesClient.showOpenDialog()
-    if (!showOpenDialog) {
-      hostChildFormError.value = '密钥文件选择服务不可用'
-      return
-    }
-    try {
-      const result = await showOpenDialog({
-        properties: ['openFile'],
-        filters: [
-          { name: 'Key Files', extensions: ['pem', 'key', 'txt', 'pub', 'asc', 'crt', 'cer', 'der', 'p12', 'pfx', 'ssh', 'ppk', 'gpg'] },
-          { name: 'All Files', extensions: ['*'] }
-        ]
-      })
-      if (result?.canceled) return
-      await importHostKeyFileFromPath(result?.filePaths?.[0] || '')
-    } catch {
-      hostChildFormError.value = '密钥文件选择失败'
-    }
-  }
-
-  const handleHostKeyDrop = async (event: DragEvent) => {
-    hostKeyDragOver.value = false
-    const file = event.dataTransfer?.files?.[0]
-    if (!file) {
-      hostChildFormError.value = '没有检测到可导入的密钥文件'
-      return
-    }
-    const getPathForFile = localFilesClient.getPathForFile()
-    const filePath = (getPathForFile ? getPathForFile(file) : '') || String((file as File & { path?: string }).path || '').trim()
-    if (!filePath) {
-      hostChildFormError.value = '拖拽导入需要本地文件路径'
-      return
-    }
-    await importHostKeyFileFromPath(filePath)
-  }
-
   const closeHostChildModal = () => {
     hostChildModal.value = ''
     hostChildFormError.value = ''
-    hostKeyDragOver.value = false
   }
 
   const saveHostProxyForm = async () => {
@@ -221,44 +138,6 @@ export const createWorkspacePanelHostRuntime = ({
       closeHostChildModal()
     } catch (error) {
       hostChildFormError.value = error instanceof Error ? error.message : '代理保存失败'
-    }
-  }
-
-  const saveHostKeyForm = async () => {
-    hostChildFormError.value = ''
-    const name = hostKeyForm.name.trim()
-    const privateKey = hostKeyForm.privateKey.trim()
-    if (!name || !privateKey) {
-      hostChildFormError.value = '请填写名称和私钥'
-      return
-    }
-    const duplicate = keychainOptions.value.some((keychain) => keychain.name === name)
-    if (duplicate) {
-      hostChildFormError.value = `密钥 ${name} 已存在`
-      return
-    }
-    const saveKeychain = assetsClient.saveKeychain()
-    if (typeof saveKeychain !== 'function') {
-      hostChildFormError.value = '密钥保存服务不可用'
-      return
-    }
-    const input: AiopsKeychainInput = {
-      name,
-      type: detectHostKeyType(privateKey, hostKeyForm.publicKey),
-      privateKey,
-      publicKey: hostKeyForm.publicKey.trim(),
-      passphrase: hostKeyForm.passphrase
-    }
-    try {
-      const result = await saveKeychain(input)
-      if (!result?.ok) throw new Error(result?.errorMessage || '密钥保存失败')
-      if (!isAiopsKeychainRecord(result.data)) throw new Error(malformedAssetBackendResultMessage)
-      await loadKeychainOptions()
-      hostForm.authType = 'keyBased'
-      hostForm.keychainId = result.data.id
-      closeHostChildModal()
-    } catch (error) {
-      hostChildFormError.value = error instanceof Error ? error.message : '密钥保存失败'
     }
   }
 
@@ -356,6 +235,7 @@ export const createWorkspacePanelHostRuntime = ({
     hostForm.jumpserverOrgId = ''
     hostFormError.value = ''
     closeHostChildModal()
+    hostKeyEditorRuntime.closeKeyEditor()
     resetHostConnectionTest()
   }
 
@@ -408,9 +288,7 @@ export const createWorkspacePanelHostRuntime = ({
   }
 
   const openKeyManagementFromHostForm = () => {
-    hostChildModal.value = 'key'
-    hostChildFormError.value = ''
-    Object.assign(hostKeyForm, { name: '', privateKey: '', publicKey: '', passphrase: '' })
+    hostKeyEditorRuntime.openNewKeyPanel()
   }
 
   const openProxyManagementFromHostForm = () => {
@@ -616,15 +494,11 @@ export const createWorkspacePanelHostRuntime = ({
     hostJumpPasswordVisible,
     hostChildModal,
     hostChildFormError,
-    hostKeyForm,
-    hostKeyDragOver,
+    hostKeyEditorRuntime,
     hostJumpForm,
     jumpHostOptions,
     hostModalTitle,
-    openHostKeyImportDialog,
-    handleHostKeyDrop,
     saveHostProxyForm,
-    saveHostKeyForm,
     saveHostJumpHostForm,
     openCreateHost,
     closeHostModal,

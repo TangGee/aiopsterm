@@ -96,80 +96,26 @@
       </div>
     </div>
 
-    <div
-      v-if="keyEditorOpen"
-      class="asset-host-modal file-modal"
-    >
-      <aside class="asset-form-panel key-form-panel asset-host-form-modal">
-        <header>
-          <strong>{{ keyEditMode ? '编辑密钥' : '新建密钥' }}</strong>
-          <button
-            title="关闭"
-            @click="keyEditorOpen = false"
-          >
-            <X />
-          </button>
-        </header>
-        <label>
-          <span>名称</span>
-          <input v-model="keyForm.name" />
-        </label>
-        <label>
-          <span>私钥</span>
-          <textarea
-            v-model="keyForm.privateKey"
-            spellcheck="false"
-          />
-        </label>
-        <label>
-          <span>公钥</span>
-          <textarea
-            v-model="keyForm.publicKey"
-            spellcheck="false"
-          />
-        </label>
-        <label>
-          <span>Passphrase</span>
-          <input
-            v-model="keyForm.passphrase"
-            type="password"
-          />
-        </label>
-        <div
-          class="key-drop-area"
-          :class="{ 'drag-over': keyDragOver }"
-          @dragover.prevent
-          @dragenter.prevent="keyDragOver = true"
-          @dragleave.prevent="keyDragOver = false"
-          @drop.prevent="handleKeyDrop"
-          @click="openKeyImportDialog"
-        >
-          <Upload />
-          <span>拖拽或点击导入密钥文件</span>
-        </div>
-        <small
-          v-if="keyFormError"
-          class="key-form-error"
-        >
-          {{ keyFormError }}
-        </small>
-        <small v-if="keyImportNotice">{{ keyImportNotice }}</small>
-        <div class="asset-form-actions">
-          <button
-            class="asset-submit-button secondary"
-            @click="keyEditorOpen = false"
-          >
-            取消
-          </button>
-          <button
-            class="asset-submit-button"
-            @click="submitKeyForm"
-          >
-            {{ keyEditMode ? '保存密钥' : '创建密钥' }}
-          </button>
-        </div>
-      </aside>
-    </div>
+    <AssetKeyFormDialog
+      :visible="keyEditorOpen"
+      :edit-mode="keyEditMode"
+      :name="keyForm.name"
+      :private-key="keyForm.privateKey"
+      :public-key="keyForm.publicKey"
+      :passphrase="keyForm.passphrase"
+      :drag-over="keyDragOver"
+      :error="keyFormError"
+      :import-notice="keyImportNotice"
+      @close="closeKeyEditor"
+      @submit="submitKeyForm"
+      @import="openKeyImportDialog"
+      @drop="handleKeyDrop"
+      @update:name="keyForm.name = $event"
+      @update:private-key="keyForm.privateKey = $event"
+      @update:public-key="keyForm.publicKey = $event"
+      @update:passphrase="keyForm.passphrase = $event"
+      @update:drag-over="keyDragOver = $event"
+    />
   </div>
 </template>
 
@@ -179,9 +125,9 @@ import {
   Pencil,
   Search,
   Trash2,
-  Upload,
   X
 } from 'lucide-vue-next'
+import AssetKeyFormDialog from '@/components/assets/AssetKeyFormDialog.vue'
 import { useAssetsPanelRuntimeContext } from '@/services/assets/assetsPanelContext'
 
 const {
@@ -197,6 +143,7 @@ const {
   keyFormError,
   keyForm,
   filteredKeychains,
+  closeKeyEditor,
   openNewKeyPanel,
   editKey,
   submitKeyForm,

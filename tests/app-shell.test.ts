@@ -1727,11 +1727,6 @@ describe('AppShell', () => {
     expect(styles).not.toContain('grid-template-columns: repeat(3, 180px);')
   })
 
-  it('keeps the nested Workspace key form vertically scrollable', () => {
-    const styles = appStyles()
-    expect(styles).toContain('.workspace-key-form {\n  align-content: start;\n  overflow-x: hidden;\n  overflow-y: auto;\n}')
-  })
-
   it('hydrates secondary module catalogs only after entering their modules', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -3354,6 +3349,7 @@ describe('AppShell', () => {
     expect(keys.text()).toContain('prod-ed25519')
     await keys.find('[data-testid="key-new-button"]').trigger('click')
     expect(keys.text()).toContain('新建密钥')
+    expect(keys.find('[data-testid="asset-key-form-dialog"]').classes()).toContain('asset-host-form-modal')
     await keys.find('.key-form-panel input').setValue('unit-key')
     await keySubmitButton(keys).trigger('click')
     expect(keys.text()).toContain('请输入私钥')
@@ -4833,7 +4829,9 @@ describe('AppShell', () => {
     await flushPromises()
     await wrapper.findAll('.workspace-field-heading button').find((button) => button.text().includes('新建密钥'))!.trigger('click')
     await flushPromises()
-    expect(wrapper.find('.workspace-key-child-modal .key-drop-area').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="asset-key-form-dialog"] .key-drop-area').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="asset-key-form-dialog"]').classes()).toContain('asset-host-form-modal')
+    await wrapper.find('[data-testid="asset-key-form-dialog"] input').setValue('workspace-shared-key')
     vi.mocked(window.aiops.readLocalFile).mockClear()
     const droppedWorkspaceKey = new File(['key'], 'workspace.key') as File & { path?: string }
     Object.defineProperty(droppedWorkspaceKey, 'path', { configurable: true, value: '/tmp/workspace.key' })
@@ -4842,16 +4840,20 @@ describe('AppShell', () => {
       mtimeMs: Date.now(),
       size: 72
     })
-    await wrapper.find('.workspace-key-child-modal .key-drop-area').trigger('drop', {
+    await wrapper.find('[data-testid="asset-key-form-dialog"] .key-drop-area').trigger('drop', {
       dataTransfer: {
         files: [droppedWorkspaceKey]
       }
     })
     await flushPromises()
     expect(window.aiops.readLocalFile).toHaveBeenCalledWith('/tmp/workspace.key')
-    expect((wrapper.find('.workspace-key-child-modal textarea').element as HTMLTextAreaElement).value).toContain('OPENSSH PRIVATE KEY')
-    await wrapper.find('.workspace-key-child-modal header button').trigger('click')
+    expect((wrapper.find('[data-testid="asset-key-form-dialog"] textarea').element as HTMLTextAreaElement).value).toContain('OPENSSH PRIVATE KEY')
+    vi.mocked(window.aiops.saveKeychain).mockClear()
+    await keySubmitButton(wrapper).trigger('click')
     await flushPromises()
+    expect(window.aiops.saveKeychain).toHaveBeenCalledWith(expect.objectContaining({ name: 'workspace-shared-key', type: 'ed25519' }))
+    expect(wrapper.find('[data-testid="asset-key-form-dialog"]').exists()).toBe(false)
+    expect((wrapper.findAll('.workspace-host-form select').at(2)!.element as HTMLSelectElement).value).toMatch(/^key-test-/)
 
     await wrapper.findAll('.workspace-host-form input').at(0)!.setValue('tree-linked-host')
     await wrapper.findAll('.workspace-host-form input').at(1)!.setValue('10.55.0.9')

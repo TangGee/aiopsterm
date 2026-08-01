@@ -437,6 +437,7 @@ export const useAssetsPanelRuntime = (props: AssetsPanelRuntimeProps) => {
     closeImportPreview: importExportRuntime.closeImportPreview,
     confirmImportAssets: importExportRuntime.confirmImportAssets,
     openNewKeyPanel: keychainRuntime.openNewKeyPanel,
+    closeKeyEditor: keychainRuntime.closeKeyEditor,
     editKey: keychainRuntime.editKey,
     submitKeyForm: keychainRuntime.submitKeyForm,
     removeKey: keychainRuntime.removeKey,
