@@ -11,6 +11,8 @@ aiopsterm 创建的本地终端会自动把这些命令加入 `PATH`：
 - `aiopsterm-control`：长兼容别名。
 - `aiopen`：在 aiopsterm 主工作区文件编辑器中打开本地文本文件。
 - `aiossh`：快速连接已管理主机，等价于 `aio ssh <host>`。
+- `aioic`：按工作区空闲清理设置关闭符合条件的面板。
+- `aiobc`：立即关闭后台面板，只保留当前面板。
 
 普通用户和脚本优先写 `aio`：
 
@@ -20,6 +22,7 @@ aio surface list
 aio terminal list
 aio settings open --target ai-notifications
 aiossh prod-bastion
+aiobc
 ```
 
 底层 helper 文件仍然是 `resources/aiopsterm-control.js`，但不需要手动输入 Electron runtime 启动串。`aio` 包装命令会在内部使用 aiopsterm 自带的 JavaScript runtime，不依赖系统 `node`。
@@ -123,6 +126,22 @@ aio capture-pane --panel <panel-id> --scrollback --lines 500
 ```
 
 `terminal send` 等价于用户在终端里输入文本。它是原始输入能力，不会经过 AI 命令审批流程；只在明确知道目标终端和要发送内容时使用。
+
+## Workspace Cleanup
+
+立即关闭所有后台面板并保留当前面板：
+
+```bash
+aiobc
+```
+
+该短命令等价于：
+
+```bash
+aio workspace action close_others
+```
+
+成功时输出 `background-cleanup`、已关闭数量和跳过数量。需要按空闲时长与工作区清理设置筛选时使用 `aioic`；它不会执行同样的立即全量后台清理。
 
 ## Local File Editing
 

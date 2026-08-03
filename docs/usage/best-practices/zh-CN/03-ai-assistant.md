@@ -36,7 +36,7 @@ Classic 对话有三种模式，权限逐级放开：
 
 ![Agents 模式](../images/agents-mode.png)
 
-**① 模块导航栏最上方的 Agents 图标**（或 `Ctrl+E`）进入 Agents 模式。**② 搜索框** 按标题、载体、绑定、项目过滤；**③ 会话行** 单击恢复到 **④ AI 侧栏**。
+**① 模块导航栏最上方的 Agents 图标**进入 Agents 模式。**② 搜索框** 按标题、载体、绑定、项目过滤；**③ 会话行** 单击恢复到 **④ AI 侧栏**。
 
 ![新建会话菜单](../images/agents-new-menu.png)
 

@@ -50,7 +50,8 @@ With a terminal focused, plain `Ctrl+letter` goes to the shell (readline/TUI key
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste |
 | `Ctrl+Alt+F` / `G` / `H` / `J` | Search / next / previous / clear highlight |
 | `Ctrl+Shift+K` | AI command |
-| `Ctrl+Shift+T` / `W` | New / close terminal |
+| `Ctrl+Shift+T` / `W` | New terminal / close current panel |
+| `Ctrl+Tab` | Open recent panels |
 | `Ctrl+Shift+Y` | Fork the current SSH channel (incl. jump/relay sessions) |
 | `Ctrl+Shift+L` | Clear terminal |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Font zoom in / out / reset (selected pane only) |

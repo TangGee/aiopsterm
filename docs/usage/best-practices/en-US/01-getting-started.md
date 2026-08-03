@@ -21,7 +21,7 @@ Local terminals created by aiopsterm expose `aio`, `aictl`, `aiopsterm-control`,
 | ⑤ | Agents entry | Enters Agents mode, the catalog of all AI Product Sessions |
 | ⑥ | Settings button | Opens the settings workspace (`Ctrl+,`) |
 
-The welcome dashboard lists the everyday shortcuts: assets list `Ctrl+B`, settings `Ctrl+,`, inline AI command `Ctrl+Shift+K`, Terminal/Agents layout toggle `Ctrl+E`.
+The welcome dashboard lists the everyday shortcuts: assets list `Ctrl+B`, settings `Ctrl+,`, inline AI command `Ctrl+Shift+K`, and recent panels `Ctrl+Tab`.
 
 ## Your First Connection
 

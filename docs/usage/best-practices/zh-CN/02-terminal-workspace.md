@@ -50,7 +50,8 @@
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | 复制 / 粘贴 |
 | `Ctrl+Alt+F` / `G` / `H` / `J` | 搜索 / 下一个 / 上一个 / 清除高亮 |
 | `Ctrl+Shift+K` | AI 命令生成 |
-| `Ctrl+Shift+T` / `W` | 新建 / 关闭终端 |
+| `Ctrl+Shift+T` / `W` | 新建终端 / 关闭当前面板 |
+| `Ctrl+Tab` | 打开最近面板 |
 | `Ctrl+Shift+Y` | Fork 当前 SSH 通道（含跳板机会话） |
 | `Ctrl+Shift+L` | 清屏 |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | 字体放大 / 缩小 / 复位（仅作用于选中窗格） |

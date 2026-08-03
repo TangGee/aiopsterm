@@ -21,7 +21,7 @@ aiopsterm 桌面安装包自带 Electron 运行时、原生终端模块和内置
 | ⑤ | Agents 入口 | 进入 Agents 模式，集中管理全部 AI 产品会话 |
 | ⑥ | 设置按钮 | 打开设置工作区（快捷键 `Ctrl+,`） |
 
-欢迎页上直接列出常用快捷键：资产列表 `Ctrl+B`、打开设置 `Ctrl+,`、内联命令生成 `Ctrl+Shift+K`、切换 Terminal/Agents 布局 `Ctrl+E`。
+欢迎页上直接列出常用快捷键：资产列表 `Ctrl+B`、打开设置 `Ctrl+,`、内联命令生成 `Ctrl+Shift+K`、打开最近面板 `Ctrl+Tab`。
 
 ## 第一次连接主机
 

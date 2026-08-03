@@ -36,7 +36,7 @@ Context rules that matter:
 
 ![Agents mode](../images/agents-mode.png)
 
-Enter via the **① Agents icon** at the top of the SideRail (or `Ctrl+E`). The **② search box** filters by title, surface, binding, and project; clicking a **③ session row** restores it into the **④ AI panel**.
+Enter via the **① Agents icon** at the top of the SideRail. The **② search box** filters by title, surface, binding, and project; clicking a **③ session row** restores it into the **④ AI panel**.
 
 ![New session menu](../images/agents-new-menu.png)
 
