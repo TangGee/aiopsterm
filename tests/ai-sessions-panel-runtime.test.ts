@@ -243,6 +243,10 @@ describe('managed AI session terminal switch telemetry', () => {
 
       runtime.resumeOrFocusSession(session)
       expect(workspace.activePanelId).toBe(secondaryPanel.id)
+      expect(workspace.panelFocusRequest).toEqual(expect.objectContaining({
+        panelId: secondaryPanel.id,
+        cause: 'pointer'
+      }))
       const trace = telemetry.activeTraceForPanel(secondaryPanel.id)
       expect(trace).toBeTruthy()
       telemetry.terminalFrameReady(trace!, { terminalRenderer: 'threaded', frameSeq: 1 })

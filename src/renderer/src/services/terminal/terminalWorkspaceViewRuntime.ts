@@ -974,17 +974,20 @@ export const createTerminalWorkspaceViewRuntime = ({
       .forEach((panel) => scheduleTerminalFit(panel.id, options))
   }
 
+  const tryFocusPanel = (panelId: string, reason: TerminalFocusReason = 'topology') => {
+    if (!canApplyTerminalFocus(panelId, reason)) return false
+    const view = terminalViews.get(panelId)
+    const element = terminalElements.get(panelId)
+    if (!view || !element?.isConnected || !isTerminalPanelRenderable(panelId)) return false
+    view.terminal.focus()
+    return true
+  }
+
   const scheduleTerminalFocus = (panelId: string, reason: TerminalFocusReason, intent: number, frames = 6) => {
     const run = (remaining: number) => {
       nextTick(() => {
         if (intent !== terminalFocusIntent) return
-        if (!canApplyTerminalFocus(panelId, reason)) return
-        const view = terminalViews.get(panelId)
-        const element = terminalElements.get(panelId)
-        if (view && element?.isConnected && isTerminalPanelRenderable(panelId)) {
-          view.terminal.focus()
-          return
-        }
+        if (tryFocusPanel(panelId, reason)) return
         if (remaining <= 1) return
         const retry = () => run(remaining - 1)
         if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(retry)
@@ -1391,6 +1394,7 @@ export const createTerminalWorkspaceViewRuntime = ({
     terminalViews,
     terminalFontSizeForPanel,
     terminalOutputMirrorText,
+    tryFocusPanel,
     updateFontSize,
     writeLiveTerminalData,
     updateSelectionButtonPosition,

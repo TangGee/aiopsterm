@@ -4,6 +4,7 @@ import type { ModuleKey } from '@/config/navigation'
 import type { SettingSectionKey } from '@/config/settings'
 import type { UserConfig } from '@shared/contracts/userConfig'
 import { isTerminalWorkspacePanel, type TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
+import type { WorkspacePanelActivationOptions } from '@/services/workspace/workspacePanelNavigationRuntime'
 
 export type AssetManagementViewRequest = 'assetConfig' | 'assetManagement' | 'keyManagement' | 'proxyManagement'
 export type AssetManagementOpenAction = 'none' | 'create-key' | 'create-proxy'
@@ -33,6 +34,7 @@ type WorkspaceShellControllerDeps = {
   closePanel: (panelId: string) => Promise<unknown>
   toggleRight: () => Promise<boolean> | boolean
   setActiveSettingsSection: (section: SettingSectionKey) => void
+  activatePanelSurface: (panelId: string, options?: WorkspacePanelActivationOptions) => boolean
   openRecentPanels: () => boolean
   navigatePanelBack: () => boolean
   navigatePanelForward: () => boolean
@@ -60,6 +62,7 @@ export const createWorkspaceShellController = (
     closePanel,
     toggleRight,
     setActiveSettingsSection,
+    activatePanelSurface,
     openRecentPanels,
     navigatePanelBack,
     navigatePanelForward
@@ -70,10 +73,7 @@ export const createWorkspaceShellController = (
     const terminalPanels = panels.value.filter((panel) => isTerminalWorkspacePanel(panel))
     const target = terminalPanels[index]
     if (!target) return false
-    mode.value = 'terminal'
-    activeModule.value = 'workspace'
-    activePanelId.value = target.id
-    return true
+    return activatePanelSurface(target.id, { cause: 'keyboard' })
   }
 
   const triggerShortcutAction = (actionId: string, digit?: number) => {

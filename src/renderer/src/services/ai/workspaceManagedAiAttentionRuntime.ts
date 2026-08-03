@@ -5,6 +5,7 @@ import { playAiNotificationSound } from '@/services/ai/notificationSoundRuntime'
 import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import type { ControlNotificationFocusRequest, ControlNotificationRecord } from '@shared/contracts/control'
 import type { ManagedAiSessionFocusRequest } from '@shared/contracts/managedAiSessions'
+import type { WorkspacePanelActivationOptions } from '@/services/workspace/workspacePanelNavigationRuntime'
 import type {
   AiAttentionInput,
   AiAttentionItem,
@@ -53,9 +54,10 @@ export const createWorkspaceManagedAiAttentionRuntime = (input: {
     'mode' | 'activeModule' | 'activePanelId' | 'panels' | 'notificationSettings' | 'aiAttentionItems' | 'controlNotifications'
   >
   setTopNotice: (message: string) => void
+  activatePanelSurface: (panelId: string, options?: WorkspacePanelActivationOptions) => boolean
   focusManagedAiSession?: (request: ManagedAiSessionFocusRequest) => boolean
 }) => {
-  const { state, setTopNotice } = input
+  const { state, setTopNotice, activatePanelSurface } = input
   const { mode, activeModule, activePanelId, panels, notificationSettings, aiAttentionItems, controlNotifications } = state
 
   const pendingAiAttentionItems = computed(() =>
@@ -181,9 +183,7 @@ export const createWorkspaceManagedAiAttentionRuntime = (input: {
       setTopNotice(`通知已打开：${notification.title}`)
       return false
     }
-    mode.value = 'terminal'
-    activeModule.value = 'workspace'
-    activePanelId.value = target.id
+    activatePanelSurface(target.id, { cause: 'external' })
     markAiAttentionHandled(controlNotificationAttentionId(notification))
     setTopNotice(`已定位通知：${notification.title}`)
     return true

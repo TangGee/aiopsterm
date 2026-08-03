@@ -31,7 +31,7 @@ export const createWorkspaceManagedAiController = (
     agentsLeftOpen,
     aiAttentionFocusRequest
   } = state
-  const { setTopNotice, i18nText, runTerminalCommand } = deps
+  const { setTopNotice, i18nText, activatePanelSurface, runTerminalCommand } = deps
   let openLocalTerminalPanel = deps.openLocalTerminalPanel
   let focusManagedAiSessionFromNotification = (_request: ManagedAiSessionFocusRequest) => false
 
@@ -69,6 +69,7 @@ export const createWorkspaceManagedAiController = (
       controlNotifications: state.controlNotifications
     },
     setTopNotice,
+    activatePanelSurface,
     focusManagedAiSession: (request) => focusManagedAiSessionFromNotification(request)
   })
 
@@ -88,7 +89,8 @@ export const createWorkspaceManagedAiController = (
     },
     attention: attentionRuntime,
     setTopNotice,
-    i18nText
+    i18nText,
+    activatePanelSurface
   })
 
   const hibernationRuntime = createWorkspaceManagedAiHibernationRuntime({

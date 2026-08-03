@@ -248,6 +248,20 @@ watch(
   { immediate: true, flush: 'post' }
 )
 
+watch(
+  () => workspace.panelFocusRequest?.sequence || 0,
+  () => {
+    const request = workspace.panelFocusRequest
+    if (!request || request.panelId !== workspace.activePanelId) return
+    requestUiFocus({
+      scopeId: 'workspace-terminal',
+      policy: 'target-primary',
+      cause: request.cause
+    })
+  },
+  { flush: 'post' }
+)
+
 const handleProductSessionRequest = async (request: ProductSessionUiRequestInput) => {
   if (request.surface === 'database') {
     workspace.mode = 'terminal'

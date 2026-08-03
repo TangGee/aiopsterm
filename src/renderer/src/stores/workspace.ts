@@ -401,6 +401,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     userLoginCodeSending
   } = createWorkspaceStoreState()
 
+  const panelNavigationRuntime = createWorkspacePanelNavigationRuntime({
+    mode,
+    activeModule,
+    activePanelId,
+    panels
+  })
+
   const rightAssistantSurfaceByTerminal = ref<Record<string, RightAssistantSurface>>({})
   const normalizedRightAssistantTerminalId = (terminalSessionId: string) => terminalSessionId.trim()
   const rightAssistantSurfaceForTerminal = (terminalSessionId: string): RightAssistantSurface => {
@@ -560,6 +567,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     {
       setTopNotice,
       i18nText,
+      activatePanelSurface: panelNavigationRuntime.activatePanelSurface,
       runTerminalCommand: (...args) => runTerminalCommand(...args)
     }
   )
@@ -1273,13 +1281,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   )
 
-  const panelNavigationRuntime = createWorkspacePanelNavigationRuntime({
-    mode,
-    activeModule,
-    activePanelId,
-    panels
-  })
-
   const {
     switchToTerminalPanelIndex,
     triggerShortcutAction,
@@ -1305,6 +1306,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       closePanel,
       toggleRight,
       setActiveSettingsSection,
+      activatePanelSurface: panelNavigationRuntime.activatePanelSurface,
       openRecentPanels: panelNavigationRuntime.openRecentPanels,
       navigatePanelBack: panelNavigationRuntime.navigatePanelBack,
       navigatePanelForward: panelNavigationRuntime.navigatePanelForward

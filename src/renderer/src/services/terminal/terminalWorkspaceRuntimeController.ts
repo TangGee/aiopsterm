@@ -534,6 +534,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     terminalOutputMirrorText,
     syncThreadedKeywordHighlight,
     syncThreadedTerminalPriorities,
+    tryFocusPanel,
     updateFontSize,
     writeLiveTerminalData,
     updateSelectionButtonPosition,
@@ -872,8 +873,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
       focusPrimary: () => {
         const panel = workspace.panels.find((item) => item.id === workspace.activePanelId)
         if (panel && isTerminalWorkspacePanel(panel)) {
-          focusPanel(panel.id, 'navigation')
-          return true
+          return tryFocusPanel(panel.id, 'navigation')
         }
         const activePane = document.querySelector<HTMLElement>('.terminal-workspace .terminal-pane.active')
         const editable = activePane?.querySelector<HTMLElement>(
@@ -889,6 +889,11 @@ export const useTerminalWorkspaceContainerRuntime = () => {
           return true
         }
         return false
+      },
+      isPrimaryFocused: () => {
+        const activePane = document.querySelector<HTMLElement>('.terminal-workspace .terminal-pane.active')
+        const activeElement = document.activeElement
+        return Boolean(activePane && activeElement && activePane.contains(activeElement))
       }
     })
     offData = terminalClient.onTerminalData()?.(handleTerminalData) || null

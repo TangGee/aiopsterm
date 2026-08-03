@@ -3,6 +3,7 @@ import type { ModuleKey } from '@/config/navigation'
 import type { I18nKey } from '@/i18n/messages'
 import type { TerminalCommandExecutionOptions, TerminalSecurityDecision } from '@/services/terminal/terminalExecutionRuntime'
 import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
+import type { WorkspacePanelActivationOptions } from '@/services/workspace/workspacePanelNavigationRuntime'
 import type { NotificationUserConfig } from '@shared/contracts/appRuntime'
 import type { AgentHookInstallerSource, AgentHookInstallerStatus } from '@shared/contracts/agentHooks'
 import type { ExportMcpBridgeStatus, ExportMcpClientStatus } from '@shared/contracts/exportMcp'
@@ -80,6 +81,7 @@ export type WorkspaceManagedAiControllerState = {
 export type WorkspaceManagedAiControllerDeps = {
   setTopNotice: (message: string) => void
   i18nText: (key: I18nKey, params?: Record<string, string | number>) => string
+  activatePanelSurface: (panelId: string, options?: WorkspacePanelActivationOptions) => boolean
   runTerminalCommand: (
     panelId: string,
     command: string,

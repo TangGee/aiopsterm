@@ -51,6 +51,64 @@ describe('uiFocusCoordinator', () => {
     unregister()
   })
 
+  it('targets the current primary element instead of restoring an older focus in the same scope', async () => {
+    const root = document.createElement('section')
+    root.setAttribute('data-ui-focus-scope', 'workspace-terminal')
+    const previous = document.createElement('textarea')
+    const target = document.createElement('textarea')
+    root.append(previous, target)
+    document.body.appendChild(root)
+    previous.focus()
+
+    registerUiFocusScope({
+      id: 'workspace-terminal',
+      root: () => root,
+      focusPrimary: () => {
+        target.focus()
+        return document.activeElement === target
+      },
+      isPrimaryFocused: () => document.activeElement === target
+    })
+    requestUiFocus({
+      scopeId: 'workspace-terminal',
+      policy: 'target-primary',
+      cause: 'navigation'
+    })
+    await flushFocusFrames()
+
+    expect(document.activeElement).toBe(target)
+  })
+
+  it('retries a primary focus request until the target is ready', async () => {
+    const root = document.createElement('section')
+    root.setAttribute('data-ui-focus-scope', 'workspace-terminal')
+    document.body.appendChild(root)
+    const target = document.createElement('textarea')
+    let attempts = 0
+
+    registerUiFocusScope({
+      id: 'workspace-terminal',
+      root: () => root,
+      focusPrimary: () => {
+        attempts += 1
+        if (attempts < 2) return false
+        root.appendChild(target)
+        target.focus()
+        return document.activeElement === target
+      },
+      isPrimaryFocused: () => document.activeElement === target
+    })
+    requestUiFocus({
+      scopeId: 'workspace-terminal',
+      policy: 'target-primary',
+      cause: 'navigation'
+    })
+    await flushFocusFrames()
+
+    expect(attempts).toBe(2)
+    expect(document.activeElement).toBe(target)
+  })
+
   it('does not let an old navigation request steal a newer user interaction', async () => {
     const chrome = document.createElement('button')
     chrome.setAttribute('data-ui-focus-chrome', '')

@@ -1,11 +1,24 @@
 import { computed, ref, watch, type Ref } from 'vue'
 import type { ModuleKey } from '@/config/navigation'
+import type { UiFocusCause } from '@/services/app/uiFocusCoordinator'
 import {
   isWelcomeTerminalPanelPlaceholder,
   type TerminalPanel
 } from '@/services/terminal/terminalPanelRuntime'
 
 const maxPanelNavigationEntries = 50
+
+export type WorkspacePanelActivationOptions = {
+  cause?: UiFocusCause
+  focusPolicy?: 'target-primary' | 'preserve'
+  modulePolicy?: 'workspace' | 'preserve'
+}
+
+export type WorkspacePanelFocusRequest = {
+  sequence: number
+  panelId: string
+  cause: UiFocusCause
+}
 
 type WorkspacePanelNavigationState = {
   mode: Ref<'terminal' | 'agents'>
@@ -52,6 +65,8 @@ export const createWorkspacePanelNavigationRuntime = (state: WorkspacePanelNavig
   const recentPanelIds = ref<string[]>([])
   const panelNavigationHistory = ref<string[]>([])
   const panelNavigationIndex = ref(-1)
+  const panelFocusRequest = ref<WorkspacePanelFocusRequest | null>(null)
+  let panelFocusRequestSequence = 0
   let historyTraversalPanelId = ''
 
   const currentEligiblePanels = () => eligiblePanels(state.panels.value)
@@ -104,16 +119,27 @@ export const createWorkspacePanelNavigationRuntime = (state: WorkspacePanelNavig
     })
   })
 
-  const activatePanelSurface = (panelId: string) => {
+  const requestPanelFocus = (panelId: string, cause: UiFocusCause = 'navigation') => {
+    if (!currentEligiblePanels().some((panel) => panel.id === panelId)) return false
+    panelFocusRequest.value = {
+      sequence: ++panelFocusRequestSequence,
+      panelId,
+      cause
+    }
+    return true
+  }
+
+  const activatePanelSurface = (panelId: string, options: WorkspacePanelActivationOptions = {}) => {
     const panel = currentEligiblePanels().find((item) => item.id === panelId)
     if (!panel) return false
     state.mode.value = 'terminal'
-    state.activeModule.value = 'workspace'
+    if (options.modulePolicy !== 'preserve') state.activeModule.value = 'workspace'
     if (state.activePanelId.value === panelId) {
       touchRecentPanel(panelId)
     } else {
       state.activePanelId.value = panelId
     }
+    if (options.focusPolicy !== 'preserve') requestPanelFocus(panelId, options.cause)
     return true
   }
 
@@ -129,8 +155,8 @@ export const createWorkspacePanelNavigationRuntime = (state: WorkspacePanelNavig
     recentPanelsOpen.value = false
   }
 
-  const activateRecentPanel = (panelId: string) => {
-    const activated = activatePanelSurface(panelId)
+  const activateRecentPanel = (panelId: string, cause: UiFocusCause = 'navigation') => {
+    const activated = activatePanelSurface(panelId, { cause })
     if (activated) closeRecentPanels('activate')
     return activated
   }
@@ -143,7 +169,7 @@ export const createWorkspacePanelNavigationRuntime = (state: WorkspacePanelNavig
     historyTraversalPanelId = targetPanelId
     panelNavigationIndex.value = targetIndex
     closeRecentPanels('activate')
-    if (activatePanelSurface(targetPanelId)) return true
+    if (activatePanelSurface(targetPanelId, { cause: 'keyboard' })) return true
     historyTraversalPanelId = ''
     return false
   }
@@ -184,10 +210,13 @@ export const createWorkspacePanelNavigationRuntime = (state: WorkspacePanelNavig
     recentWorkspacePanels,
     panelNavigationHistory,
     panelNavigationIndex,
+    panelFocusRequest,
     canNavigatePanelBack,
     canNavigatePanelForward,
     openRecentPanels,
     closeRecentPanels,
+    requestPanelFocus,
+    activatePanelSurface,
     activateRecentPanel,
     navigatePanelBack,
     navigatePanelForward

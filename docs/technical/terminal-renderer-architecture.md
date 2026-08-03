@@ -35,6 +35,12 @@ The core pool is intentionally small instead of one worker per terminal:
 
 Terminals are assigned by session/panel hash with light load balancing. Active panes are `active`, visible inactive panes are `visible`, and hidden/background panes are `background`.
 
+## Focus Ownership
+
+Explicit workspace navigation uses one panel activation boundary. The boundary updates the active panel and emits a sequenced focus request; application-shell focus coordination then targets the primary control in the active terminal pane. History shortcuts, recent-panel selection, terminal tabs, numbered panel shortcuts, notifications, and managed AI session location all use this boundary instead of assigning the active panel independently.
+
+The focus coordinator treats focus as complete only after the active pane confirms that it contains the document focus. If the terminal host or hidden input has not mounted yet, the coordinator retries on later animation frames. A newer pointer or keyboard interaction supersedes an older pending request so delayed work cannot steal focus back from the user. Background state synchronization can use the preserve policy, and pointer interaction with an input, editor, menu control, or other focus guard preserves that control rather than redirecting focus to the terminal.
+
 ## Painting And Scrolling
 
 The worker renderer follows VTE's correctness model before applying aggressive canvas reuse:

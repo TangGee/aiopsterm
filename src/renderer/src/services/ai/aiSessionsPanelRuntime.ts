@@ -48,6 +48,7 @@ import {
 import type { ManagedAiSession, ManagedAiSessionState } from '@/services/ai/workspaceManagedAiTypes'
 import type { AiAgentSessionEventName, AiAgentSessionSource } from '@shared/contracts/managedAiSessions'
 import type { AgentHookInstallerSource, AgentHookInstallerStatus } from '@shared/contracts/agentHooks'
+import type { UiFocusCause } from '@/services/app/uiFocusCoordinator'
 
 const aiSessionsPanelStateStorageKey = 'aiopsterm.aiSessionsPanelState'
 
@@ -450,11 +451,15 @@ export const useAiSessionsPanelRuntime = (options: AiSessionsPanelRuntimeOptions
     restorable: session.restorable
   })
 
+  const focusCauseForTerminalSwitch = (trigger: ManagedAiSessionTerminalSwitchTrigger): UiFocusCause =>
+    trigger === 'runtime-locate' ? 'external' : 'pointer'
+
   const activateLinkedPanel = (
     session: Pick<ManagedAiSession, 'source' | 'id'>,
     linkedPanel: NonNullable<ReturnType<typeof liveLinkedPanelForSession>>,
     trace: ManagedAiSessionTerminalSwitchTrace,
-    outcome: 'activated-existing' | 'already-active' | 'resumed'
+    outcome: 'activated-existing' | 'already-active' | 'resumed',
+    trigger: ManagedAiSessionTerminalSwitchTrigger
   ) => {
     const samePanel = workspace.activePanelId === linkedPanel.id
     if (!terminalSwitchTelemetry.targetResolved(trace, {
@@ -463,8 +468,10 @@ export const useAiSessionsPanelRuntime = (options: AiSessionsPanelRuntimeOptions
       targetStatus: linkedPanel.status,
       samePanel
     })) return false
-    workspace.mode = 'terminal'
-    workspace.activePanelId = linkedPanel.id
+    workspace.activatePanelSurface(linkedPanel.id, {
+      cause: focusCauseForTerminalSwitch(trigger),
+      modulePolicy: 'preserve'
+    })
     workspace.selectedManagedAiSessionKey = sessionKey(session)
     if (!terminalSwitchTelemetry.panelActivated(trace, {
       activePanelId: workspace.activePanelId,
@@ -485,7 +492,8 @@ export const useAiSessionsPanelRuntime = (options: AiSessionsPanelRuntimeOptions
   const focusLinkedPanel = (
     session: Pick<ManagedAiSession, 'source' | 'id' | 'panelId' | 'terminalSessionId'>,
     trace: ManagedAiSessionTerminalSwitchTrace,
-    outcome: 'activated-existing' | 'resumed' = 'activated-existing'
+    outcome: 'activated-existing' | 'resumed' = 'activated-existing',
+    trigger: ManagedAiSessionTerminalSwitchTrigger = 'runtime-locate'
   ) => {
     const linkedPanel = liveLinkedPanelForSession(session)
     if (!linkedPanel) return false
@@ -493,7 +501,8 @@ export const useAiSessionsPanelRuntime = (options: AiSessionsPanelRuntimeOptions
       session,
       linkedPanel,
       trace,
-      outcome === 'resumed' ? 'resumed' : workspace.activePanelId === linkedPanel.id ? 'already-active' : 'activated-existing'
+      outcome === 'resumed' ? 'resumed' : workspace.activePanelId === linkedPanel.id ? 'already-active' : 'activated-existing',
+      trigger
     )
   }
 
@@ -508,9 +517,9 @@ export const useAiSessionsPanelRuntime = (options: AiSessionsPanelRuntimeOptions
     trigger: ManagedAiSessionTerminalSwitchTrigger = 'runtime-locate'
   ) => {
     const trace = requestTerminalSwitch(session, trigger)
-    if (focusLinkedPanel(session, trace)) return
+    if (focusLinkedPanel(session, trace, 'activated-existing', trigger)) return
     workspace.focusManagedAiSession(session.id)
-    if (!focusLinkedPanel(session, trace)) {
+    if (!focusLinkedPanel(session, trace, 'activated-existing', trigger)) {
       terminalSwitchTelemetry.unavailable(trace, { outcome: 'target-unavailable' })
     }
     workspace.selectedManagedAiSessionKey = sessionKey(session)
@@ -554,12 +563,18 @@ export const useAiSessionsPanelRuntime = (options: AiSessionsPanelRuntimeOptions
     trigger: ManagedAiSessionTerminalSwitchTrigger = 'row-double-click'
   ) => {
     const trace = requestTerminalSwitch(session, trigger)
-    if (focusLinkedPanel(session, trace)) return
+    if (focusLinkedPanel(session, trace, 'activated-existing', trigger)) return
     if (canResumeSession(session)) {
       terminalSwitchTelemetry.resumeRequested(trace)
       void workspace.resumeManagedAiSession(session.source, session.id)
         .then((resumed) => {
           const linkedPanel = liveLinkedPanelForSession(session)
+          if (resumed && linkedPanel) {
+            workspace.activatePanelSurface(linkedPanel.id, {
+              cause: focusCauseForTerminalSwitch(trigger),
+              modulePolicy: 'preserve'
+            })
+          }
           terminalSwitchTelemetry.resumeFinished(trace, {
             targetPanelId: linkedPanel?.id,
             targetTerminalSessionId: linkedPanel?.sessionId,

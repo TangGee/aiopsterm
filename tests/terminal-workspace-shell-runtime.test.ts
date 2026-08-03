@@ -55,6 +55,11 @@ const createWorkspace = (panel = createPanel()) => {
   const panels = [panel]
   const workspace = {
     activePanelId: panel.id,
+    activatePanelSurface: vi.fn((panelId: string) => {
+      if (!panels.some((item) => item.id === panelId)) return false
+      workspace.activePanelId = panelId
+      return true
+    }),
     canForkSshPanel: vi.fn(() => false),
     closeAllPanels: vi.fn(),
     closeOthers: vi.fn(),
@@ -217,12 +222,13 @@ describe('terminalWorkspaceShellRuntime', () => {
     runtime.activatePanelFromPointer(createMouseEvent({ target: input, currentTarget: pane }), workspace.panels[0])
     expect(workspace.activePanelId).toBe('panel-1')
     expect(calls.focusPanel).not.toHaveBeenCalled()
+    expect(workspace.activatePanelSurface).toHaveBeenLastCalledWith('panel-1', { cause: 'pointer', focusPolicy: 'preserve' })
 
     const terminalHost = document.createElement('div')
     terminalHost.className = 'xterm-host'
     pane.appendChild(terminalHost)
     runtime.activatePanelFromPointer(createMouseEvent({ target: terminalHost, currentTarget: pane }), workspace.panels[0])
-    expect(calls.focusPanel).toHaveBeenCalledWith('panel-1', 'pointer')
+    expect(workspace.activatePanelSurface).toHaveBeenLastCalledWith('panel-1', { cause: 'pointer', focusPolicy: 'target-primary' })
   })
 
   it('owns terminal copy, paste, clear, font, and selection-to-AI shell actions', async () => {

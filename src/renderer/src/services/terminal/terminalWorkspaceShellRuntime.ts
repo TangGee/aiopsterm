@@ -4,6 +4,7 @@ import { windowControlsClient } from '@/services/app/windowControlsClient'
 import type { TerminalPanel, useWorkspaceStore } from '@/stores/workspace'
 import { isTerminalWorkspacePanel, type PanelDirection } from '@/services/terminal/terminalPanelRuntime'
 import type { TerminalFocusReason, TerminalView } from '@/services/terminal/terminalWorkspaceViewRuntime'
+import type { UiFocusCause } from '@/services/app/uiFocusCoordinator'
 import { isThreadedTerminalHost } from '@/services/terminal/threadedTerminalRuntime'
 import { managedAssetDisplayName, managedAssetEndpoint } from '@shared/assetDisplayRuntime'
 import {
@@ -246,23 +247,20 @@ export const createTerminalWorkspaceShellRuntime = (
     termMenu.visible = false
   }
 
-  const activatePanel = (panelId: string) => {
-    workspace.activePanelId = panelId
-    focusPanel(panelId, 'keyboard-navigation')
-  }
+  const activatePanel = (panelId: string, cause: UiFocusCause = 'keyboard') =>
+    workspace.activatePanelSurface(panelId, { cause })
 
   const activatePanelFromPointer = (event: MouseEvent, panel: TerminalPanel) => {
-    workspace.activePanelId = panel.id
-    if (!isTerminalWorkspacePanel(panel)) return
     const target = event.target instanceof Element ? event.target : null
-    if (
+    const preserveFocus = Boolean(
       target?.closest(
         '[data-terminal-focus-guard], input, textarea, select, button, a[href], [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"], .monaco-editor'
       )
-    ) {
-      return
-    }
-    focusPanel(panel.id, 'pointer')
+    )
+    workspace.activatePanelSurface(panel.id, {
+      cause: 'pointer',
+      focusPolicy: preserveFocus ? 'preserve' : 'target-primary'
+    })
   }
 
   const openMenu = (event: MouseEvent, panelId: string) => {

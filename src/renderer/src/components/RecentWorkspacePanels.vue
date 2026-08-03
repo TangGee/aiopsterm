@@ -41,7 +41,7 @@
           :data-panel-id="panel.id"
           role="option"
           @mouseenter="selectedIndex = index"
-          @click="activate(panel.id)"
+          @click="activate(panel.id, 'pointer')"
         >
           <span class="recent-workspace-panels-icon" aria-hidden="true">
             <FileCode2 v-if="panel.kind === 'project-file' || panel.kind === 'local-file'" />
@@ -73,7 +73,7 @@ import { BookOpenText, Bot, FileCode2, Search, Server, Terminal, X } from 'lucid
 import { useI18n } from '@/i18n'
 import { useWorkspaceStore, type TerminalPanel } from '@/stores/workspace'
 import { matchesWorkspacePanelQuery } from '@/services/workspace/workspacePanelNavigationRuntime'
-import { captureUiFocus, requestUiFocus, restoreUiFocus } from '@/services/app/uiFocusCoordinator'
+import { captureUiFocus, restoreUiFocus, type UiFocusCause } from '@/services/app/uiFocusCoordinator'
 
 const workspace = useWorkspaceStore()
 const { t } = useI18n()
@@ -101,15 +101,7 @@ const focusSearch = () => {
 
 const close = () => workspace.closeRecentPanels()
 
-const activate = async (panelId: string) => {
-  if (!workspace.activateRecentPanel(panelId)) return
-  await nextTick()
-  requestUiFocus({
-    scopeId: 'workspace-terminal',
-    policy: 'target-primary',
-    cause: 'navigation'
-  })
-}
+const activate = (panelId: string, cause: UiFocusCause) => workspace.activateRecentPanel(panelId, cause)
 
 const moveSelection = (offset: number) => {
   const count = filteredPanels.value.length
@@ -152,7 +144,7 @@ const handleDialogKeydown = (event: KeyboardEvent) => {
     const panel = filteredPanels.value[selectedIndex.value]
     if (!panel) return
     event.preventDefault()
-    void activate(panel.id)
+    activate(panel.id, 'keyboard')
   }
 }
 
@@ -204,13 +196,6 @@ watch(
     }
     if (workspace.recentPanelsCloseReason === 'activate') {
       focusSnapshot = null
-      nextTick(() => {
-        requestUiFocus({
-          scopeId: 'workspace-terminal',
-          policy: 'target-primary',
-          cause: 'navigation'
-        })
-      })
       return
     }
     const snapshot = focusSnapshot

@@ -11,7 +11,8 @@ export type UiFocusScope = {
   id: string
   root: () => HTMLElement | null
   isActive?: () => boolean
-  focusPrimary?: () => boolean | void
+  focusPrimary?: () => boolean
+  isPrimaryFocused?: () => boolean
 }
 
 export type UiFocusRequest = {
@@ -238,8 +239,22 @@ export const requestUiFocus = ({ scopeId, policy, frames = 8 }: UiFocusRequest) 
     const modal = activeModal()
     const scope = scopes.get(scopeId)
     const root = scopeRootForId(scopeId)
-    if (modal && !root?.contains(modal)) return
+    if (modal && !root?.contains(modal)) {
+      if (remaining > 1) requestFrame(() => run(remaining - 1))
+      return
+    }
     if (!root || (scope && !scopeIsActive(scope)) || !isElementVisible(root)) {
+      if (remaining > 1) requestFrame(() => run(remaining - 1))
+      return
+    }
+    if (policy === 'target-primary') {
+      if (scope?.isPrimaryFocused?.()) return
+      if (scope?.focusPrimary) {
+        const focused = scope.focusPrimary()
+        if (scope.isPrimaryFocused?.() || (focused && root.contains(document.activeElement))) return
+      } else if (focusPrimaryInRoot(root)) {
+        return
+      }
       if (remaining > 1) requestFrame(() => run(remaining - 1))
       return
     }

@@ -27,6 +27,7 @@ import type {
   WorkspaceManagedAiControllerState
 } from '@/services/ai/workspaceManagedAiTypes'
 import type { WorkspaceManagedAiAttentionRuntime } from '@/services/ai/workspaceManagedAiAttentionRuntime'
+import type { WorkspacePanelActivationOptions } from '@/services/workspace/workspacePanelNavigationRuntime'
 
 export type WorkspaceManagedAiSessionRuntime = ReturnType<typeof createWorkspaceManagedAiSessionRuntime>
 
@@ -112,8 +113,9 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
   attention: Pick<WorkspaceManagedAiAttentionRuntime, 'upsertAiAttentionItem' | 'removeAiAttentionItem' | 'markAiAttentionHandled'>
   setTopNotice: (message: string) => void
   i18nText: (key: I18nKey, params?: Record<string, string | number>) => string
+  activatePanelSurface: (panelId: string, options?: WorkspacePanelActivationOptions) => boolean
 }) => {
-  const { state, attention, setTopNotice, i18nText } = input
+  const { state, attention, setTopNotice, i18nText, activatePanelSurface } = input
   const {
     mode,
     activeModule,
@@ -571,7 +573,7 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
   const activateTerminalPanelForManagedAiSession = (panelIdOrSessionId: string) => {
     const target = panels.value.find((panel) => panel.id === panelIdOrSessionId || panel.sessionId === panelIdOrSessionId)
     if (!target || !isTerminalWorkspacePanel(target)) return null
-    activePanelId.value = target.id
+    activatePanelSurface(target.id, { cause: 'external', modulePolicy: 'preserve' })
     return target
   }
 

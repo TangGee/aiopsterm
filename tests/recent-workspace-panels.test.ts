@@ -53,6 +53,10 @@ describe('RecentWorkspacePanels', () => {
     await flushPromises()
     expect(workspace.activePanelId).toBe(projectFile.id)
     expect(workspace.recentPanelsOpen).toBe(false)
+    expect(workspace.panelFocusRequest).toEqual(expect.objectContaining({
+      panelId: projectFile.id,
+      cause: 'keyboard'
+    }))
   })
 
   it('supports keyboard selection and restores focus when cancelled', async () => {
@@ -98,7 +102,33 @@ describe('RecentWorkspacePanels', () => {
     expect(workspace.activePanelId).toBe(first.id)
     expect(workspace.mode).toBe('terminal')
     expect(workspace.activeModule).toBe('workspace')
+    expect(workspace.panelFocusRequest).toEqual(expect.objectContaining({
+      panelId: first.id,
+      cause: 'keyboard'
+    }))
     expect(workspace.triggerShortcutAction('navigatePanelForward')).toBe(true)
     expect(workspace.activePanelId).toBe(second.id)
+    expect(workspace.panelFocusRequest).toEqual(expect.objectContaining({
+      panelId: second.id,
+      cause: 'keyboard'
+    }))
+  })
+
+  it('emits a new focus request when explicitly activating the current panel', () => {
+    const workspace = useWorkspaceStore()
+    const panel = terminalPanel('terminal-a', 'First')
+    workspace.panels = [panel]
+    workspace.activePanelId = panel.id
+
+    expect(workspace.activatePanelSurface(panel.id, { cause: 'pointer' })).toBe(true)
+    const firstSequence = workspace.panelFocusRequest?.sequence || 0
+    expect(workspace.panelFocusRequest).toEqual(expect.objectContaining({
+      panelId: panel.id,
+      cause: 'pointer'
+    }))
+
+    expect(workspace.activatePanelSurface(panel.id, { cause: 'keyboard' })).toBe(true)
+    expect(workspace.panelFocusRequest?.sequence).toBe(firstSequence + 1)
+    expect(workspace.panelFocusRequest?.cause).toBe('keyboard')
   })
 })
