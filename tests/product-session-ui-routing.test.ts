@@ -19,6 +19,9 @@ const makeRuntime = () => {
     isLeftVisible: false,
     isRightVisible: false,
     mode: 'agents',
+    setWorkspaceMode: vi.fn((mode: 'terminal' | 'agents') => {
+      workspace.mode = mode
+    }),
     setActiveModule: vi.fn((module: string) => {
       workspace.activeModule = module
     })

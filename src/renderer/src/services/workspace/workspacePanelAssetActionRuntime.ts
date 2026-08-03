@@ -97,7 +97,7 @@ export const createWorkspacePanelAssetActionRuntime = ({
     try {
       await deleteAssetRecord(asset.id)
       if (asset.asset_type === 'organization') await removeExpandedGroup(asset.uuid)
-      workspace.selectedContexts = workspace.selectedContexts.filter((context) => context.id !== asset.id)
+      workspace.setSelectedContexts(workspace.selectedContexts.filter((context) => context.id !== asset.id))
       selectedAssetId.value = selectedAssetId.value === asset.id ? null : selectedAssetId.value
       notice.value = `已删除主机 ${asset.name}`
       closeDeleteAssetModal()

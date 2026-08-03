@@ -34,7 +34,7 @@ export type KubernetesKubectlRuntimeState = {
 export type KubernetesKubectlRuntimeOptions = {
   state: () => KubernetesKubectlRuntimeState
   shouldUseSeedData: () => boolean
-  developmentSeedClusterIds: Set<string>
+  developmentSeedClusterIds: ReadonlySet<string>
   expandHomePath: (value: string) => string
   loadAgentProxyConfig: () => KubernetesAgentProxyConfig
 }

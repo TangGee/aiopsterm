@@ -129,6 +129,16 @@ export const createWorkspacePanelNavigationRuntime = (state: WorkspacePanelNavig
     return true
   }
 
+  const commitPanelSelection = (panelId: string) => {
+    if (!state.panels.value.some((panel) => panel.id === panelId)) return false
+    state.activePanelId.value = panelId
+    return true
+  }
+
+  const selectPanelForLifecycle = (panelId: string) => commitPanelSelection(panelId)
+  const restorePanelSelection = (panelId: string) => commitPanelSelection(panelId)
+  const adoptFocusedPanel = (panelId: string) => commitPanelSelection(panelId)
+
   const activatePanelSurface = (panelId: string, options: WorkspacePanelActivationOptions = {}) => {
     const panel = currentEligiblePanels().find((item) => item.id === panelId)
     if (!panel) return false
@@ -137,7 +147,7 @@ export const createWorkspacePanelNavigationRuntime = (state: WorkspacePanelNavig
     if (state.activePanelId.value === panelId) {
       touchRecentPanel(panelId)
     } else {
-      state.activePanelId.value = panelId
+      commitPanelSelection(panelId)
     }
     if (options.focusPolicy !== 'preserve') requestPanelFocus(panelId, options.cause)
     return true
@@ -216,6 +226,9 @@ export const createWorkspacePanelNavigationRuntime = (state: WorkspacePanelNavig
     openRecentPanels,
     closeRecentPanels,
     requestPanelFocus,
+    selectPanelForLifecycle,
+    restorePanelSelection,
+    adoptFocusedPanel,
     activatePanelSurface,
     activateRecentPanel,
     navigatePanelBack,

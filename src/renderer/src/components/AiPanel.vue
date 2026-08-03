@@ -183,12 +183,12 @@ const confirmResourceSelection = async () => {
       if (!panel) return
       const created = await runtime.createNewCodexConversation(codexTargetContextFromPanel(panel))
       if (created === false) return
-      runtime.workspace.activateTerminalPanel(panel.id)
+      runtime.workspace.selectPanelForLifecycle(panel.id)
     } else {
       const contexts = panels
         .map((panel) => classicHostContextFromTerminalPanel(panel))
         .filter((context): context is NonNullable<typeof context> => Boolean(context))
-      if (originalPanelId) runtime.workspace.activateTerminalPanel(originalPanelId)
+      if (originalPanelId) runtime.workspace.selectPanelForLifecycle(originalPanelId)
       const created = await runtime.createNewAiConversation(contexts)
       if (created === false) return
     }

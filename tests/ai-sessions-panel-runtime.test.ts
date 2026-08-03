@@ -223,7 +223,7 @@ describe('managed AI session terminal switch telemetry', () => {
       receivedAt: 100
     })
     const session = workspace.managedAiSessions.find((item) => item.id === 'gemini-session-1')!
-    workspace.activePanelId = 'panel-main'
+    workspace.selectPanelForLifecycle('panel-main')
 
     const entries: Array<{ event: string; fields: Record<string, unknown> }> = []
     const telemetry = createManagedAiSessionTerminalSwitchTelemetry({

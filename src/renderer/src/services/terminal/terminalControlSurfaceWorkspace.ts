@@ -225,10 +225,10 @@ export const createTerminalControlSurfaceWorkspaceHandlers = ({
     const requestedTarget = controlText(params.target || params.section || params.page || 'general') || 'general'
     const section = resolveControlSettingsSection(requestedTarget)
     if (!section) return controlFail('SETTINGS_TARGET_INVALID', 'Unknown settings target.', { target: requestedTarget })
-    workspace.mode = 'terminal'
-    workspace.activeModule = 'settings'
-    workspace.leftPanelOpen = true
-    workspace.rightPanelOpen = false
+    workspace.setWorkspaceMode('terminal')
+    workspace.setActiveModule('settings')
+    workspace.setLeftPanelOpen(true)
+    workspace.setRightPanelOpen(false)
     workspace.setActiveSettingsSection(section)
     await nextTick()
     return controlOk({

@@ -51,7 +51,7 @@ const fail = (errorCode: string, errorMessage: string, data?: Record<string, unk
   ...(target ? { target } : {})
 })
 
-export const externalCodexMcpManagedAiMethods = new Set([
+export const externalCodexMcpManagedAiMethods: ReadonlySet<string> = new Set([
   'list_ai_sessions',
   'get_ai_session',
   'list_ai_approvals',

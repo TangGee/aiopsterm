@@ -11,17 +11,8 @@ import { resolveSshProxyConfigForAsset, type SshProxySocket } from './sshProxy'
 import { diagnoseSshConnectionError } from '../terminal/terminal'
 import {
   authenticatedTargetPoolKey,
-  getPooledClient,
-  getPooledClientByKeys,
-  isPooledClientByKeys,
-  jumpForwardUnsupportedKeys,
   jumpPoolKey,
-  pooledJumpClients,
-  pooledTargetClients,
-  rememberPooledClient,
-  rememberPooledClientAliases,
-  removePooledClient,
-  removePooledClientAliases,
+  sshConnectionPoolRegistry,
   targetPoolKey
 } from './sshTerminalConnectionPool'
 import { createBackendDoubleSession } from './sshTerminalBackendDouble'
@@ -565,7 +556,7 @@ export const createSshTerminalSession = (
     staleTargetClients.add(authClient)
     detachActiveTargetClientEvents?.()
     detachActiveTargetClientEvents = null
-    removePooledClientAliases(pooledTargetClients, authClient)
+    sshConnectionPoolRegistry.target.removeAliases(authClient)
     try {
       authClient.end()
     } catch {}
@@ -601,8 +592,7 @@ export const createSshTerminalSession = (
     authRuntime.commitRememberedPassword('target')
     if (targetClientPoolable) {
       const disposeProxySocket = targetConnectionTransport === 'proxy' && proxySocket ? proxySocket : null
-      rememberPooledClientAliases(
-        pooledTargetClients,
+      sshConnectionPoolRegistry.target.rememberAliases(
         [targetClientPoolKey, targetClientAuthenticatedPoolKey],
         authClient,
         disposeProxySocket ? () => disposeProxySocket.destroy() : undefined
@@ -661,8 +651,7 @@ export const createSshTerminalSession = (
         channel.stderr.on('data', (chunk: Buffer | string) => sink.data(chunk))
         channel.on('close', (code?: number | null) =>
           finish(Number.isFinite(code) ? Number(code) : 0, 'process', {
-            message: isPooledClientByKeys(
-              pooledTargetClients,
+            message: sshConnectionPoolRegistry.target.isByKeys(
               [targetClientPoolKey, targetClientAuthenticatedPoolKey],
               authClient
             )
@@ -714,10 +703,10 @@ export const createSshTerminalSession = (
 
   const openJumpHostTunnel = async (jumpTarget: SshTerminalTarget): Promise<SshTerminalChannel> => {
     const poolKey = jumpPoolKey(jumpTarget)
-    if (jumpForwardUnsupportedKeys.has(poolKey)) {
+    if (sshConnectionPoolRegistry.jump.isForwardUnsupported(poolKey)) {
       throw new SshJumpForwardError('SSH jump host TCP forwarding is disabled for this relay in the current app session.')
     }
-    const pooledJump = getPooledClient(pooledJumpClients, poolKey)
+    const pooledJump = sshConnectionPoolRegistry.jump.get(poolKey)
     if (pooledJump) {
       jumpClient = pooledJump
       jumpClientIsPooled = true
@@ -737,15 +726,15 @@ export const createSshTerminalSession = (
       })
       return new Promise<SshTerminalChannel>((resolve, reject) => {
         if (typeof pooledJump.forwardOut !== 'function') {
-          jumpForwardUnsupportedKeys.add(poolKey)
-          removePooledClient(pooledJumpClients, poolKey, pooledJump)
+          sshConnectionPoolRegistry.jump.markForwardUnsupported(poolKey)
+          sshConnectionPoolRegistry.jump.remove(poolKey, pooledJump)
           reject(new SshJumpForwardError('SSH jump host runtime does not support forwardOut.'))
           return
         }
         pooledJump.forwardOut('127.0.0.1', 0, target.host, target.port, (error, channel) => {
           if (error) {
-            jumpForwardUnsupportedKeys.add(poolKey)
-            removePooledClient(pooledJumpClients, poolKey, pooledJump)
+            sshConnectionPoolRegistry.jump.markForwardUnsupported(poolKey)
+            sshConnectionPoolRegistry.jump.remove(poolKey, pooledJump)
             try {
               pooledJump.end()
             } catch {}
@@ -819,7 +808,7 @@ export const createSshTerminalSession = (
           authRuntime.sendActiveKeyboardResult('jump', { status: 'success' })
           authRuntime.commitRememberedPassword('jump')
           if (typeof jump.forwardOut !== 'function') {
-            jumpForwardUnsupportedKeys.add(poolKey)
+            sshConnectionPoolRegistry.jump.markForwardUnsupported(poolKey)
             rejectOnce(new SshJumpForwardError('SSH jump host runtime does not support forwardOut.'))
             return
           }
@@ -839,7 +828,7 @@ export const createSshTerminalSession = (
           })
           jump.forwardOut('127.0.0.1', 0, target.host, target.port, (error, channel) => {
             if (error) {
-              jumpForwardUnsupportedKeys.add(poolKey)
+              sshConnectionPoolRegistry.jump.markForwardUnsupported(poolKey)
               rejectOnce(new SshJumpForwardError(`SSH jump host forward failed: ${error.message}`))
               return
             }
@@ -850,7 +839,7 @@ export const createSshTerminalSession = (
               return
             }
             settled = true
-            rememberPooledClient(pooledJumpClients, poolKey, jump)
+            sshConnectionPoolRegistry.jump.remember(poolKey, jump)
             jumpClient = jump
             jumpClientIsPooled = true
             jumpStream = channel
@@ -1036,7 +1025,7 @@ export const createSshTerminalSession = (
         targetClientPoolable = true
         targetClientPoolKey = targetPoolKey('proxy', target, { proxy: proxyConfigForPool })
         targetClientAuthenticatedPoolKey = authenticatedTargetPoolKey('proxy', target, { proxy: proxyConfigForPool })
-        const pooledTarget = getPooledClientByKeys(pooledTargetClients, [targetClientPoolKey, targetClientAuthenticatedPoolKey])
+        const pooledTarget = sshConnectionPoolRegistry.target.getByKeys([targetClientPoolKey, targetClientAuthenticatedPoolKey])
         if (pooledTarget) {
           targetConnectionReuse = 'reused'
           targetClientIsPooled = true
@@ -1065,7 +1054,7 @@ export const createSshTerminalSession = (
       targetClientPoolable = true
       targetClientPoolKey = targetPoolKey('jump', target, { jump: jumpTarget })
       targetClientAuthenticatedPoolKey = authenticatedTargetPoolKey('jump', target, { jump: jumpTarget })
-      const pooledTarget = getPooledClientByKeys(pooledTargetClients, [targetClientPoolKey, targetClientAuthenticatedPoolKey])
+      const pooledTarget = sshConnectionPoolRegistry.target.getByKeys([targetClientPoolKey, targetClientAuthenticatedPoolKey])
       if (pooledTarget) {
         targetConnectionReuse = 'reused'
         targetClientIsPooled = true
@@ -1144,7 +1133,7 @@ export const createSshTerminalSession = (
     targetClientPoolKey = targetClientPoolable ? targetPoolKey(targetPoolTransport, target, { proxy: proxyConfigForPool, jump: jumpTarget }) : ''
     targetClientAuthenticatedPoolKey = targetClientPoolable ? authenticatedTargetPoolKey(targetPoolTransport, target, { proxy: proxyConfigForPool, jump: jumpTarget }) : ''
     if (targetClientPoolable) {
-      const pooledTarget = getPooledClientByKeys(pooledTargetClients, [targetClientPoolKey, targetClientAuthenticatedPoolKey])
+      const pooledTarget = sshConnectionPoolRegistry.target.getByKeys([targetClientPoolKey, targetClientAuthenticatedPoolKey])
       if (pooledTarget) {
         targetConnectionReuse = 'reused'
         targetClientIsPooled = true
@@ -1242,7 +1231,7 @@ export const createSshTerminalSession = (
     detachActiveTargetClientEvents?.()
     const handleError = (error: Error) => {
       if (closed || staleTargetClients.has(authClient) || authClient !== client) return
-      if (targetClientPoolable) removePooledClientAliases(pooledTargetClients, authClient)
+      if (targetClientPoolable) sshConnectionPoolRegistry.target.removeAliases(authClient)
       const diagnosticEvent = sshConnectionErrorEvent(error)
       if (stream) {
         fail(error, 'SSH connection lost.', 1, diagnosticEvent)
@@ -1260,7 +1249,7 @@ export const createSshTerminalSession = (
     }
     const handleTransportClose = () => {
       if (closed || staleTargetClients.has(authClient) || authClient !== client) return
-      if (targetClientPoolable) removePooledClientAliases(pooledTargetClients, authClient)
+      if (targetClientPoolable) sshConnectionPoolRegistry.target.removeAliases(authClient)
       if (stream) {
         finish(null, 'network', {
           isNetworkDisconnect: true,

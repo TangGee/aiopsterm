@@ -201,7 +201,16 @@ export const createSettingsWorkspaceGeneralTerminalPages = (
           h('h3', t('settings.general.editor')),
           h('p', { class: 'settings-description' }, t('settings.general.editorScope')),
           h('div', { class: 'settings-form-card' }, [
-            numberRow(t('settings.general.fontSize'), workspace.editorSettings.fontSize, 8, 32, (value) => workspace.updateEditorSettings({ fontSize: value })),
+            numberRow(
+              t('settings.general.fontSize'),
+              workspace.editorSettings.fontSize,
+              8,
+              32,
+              (value) => workspace.updateEditorSettings({ fontSize: value }),
+              1,
+              false,
+              'editor.fontSize'
+            ),
             numberRow(t('settings.general.lineHeight'), workspace.editorSettings.lineHeight, 0, 48, (value) => workspace.updateEditorSettings({ lineHeight: value })),
             h('div', { class: 'settings-form-row' }, [
               h('label', t('settings.general.font')),

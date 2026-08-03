@@ -113,7 +113,7 @@ export const createAssetsPanelAssetInteractionRuntime = (deps: AssetsPanelAssetI
     if (!connected) return
     const displayName = managedAssetDisplayName(asset)
     const endpoint = managedAssetEndpoint(asset)
-    deps.workspace.selectedContexts = [
+    deps.workspace.setSelectedContexts([
       ...deps.workspace.selectedContexts.filter((item) => item.id !== asset.id),
       {
         id: asset.id,
@@ -126,7 +126,7 @@ export const createAssetsPanelAssetInteractionRuntime = (deps: AssetsPanelAssetI
         username: asset.username || 'root',
         assetName: displayName
       }
-    ]
+    ])
     deps.editorOpen.value = false
     deps.editMode.value = false
     if (deps.workspace.onboardingActiveTour === 'addAndConnectHost') {

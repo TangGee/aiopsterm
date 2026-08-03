@@ -9,7 +9,8 @@
     </header>
 
     <KnowledgePanelToolbar
-      v-model:search-query="workspace.kbSearchQuery"
+      :search-query="workspace.kbSearchQuery"
+      @update:search-query="workspace.setKnowledgeBrowserState({ searchQuery: $event })"
       v-model:add-menu-open="addMenuOpen"
       @upload="uploadFile()"
       @create-file="createInline('file')"

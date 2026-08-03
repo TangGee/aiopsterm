@@ -44,7 +44,7 @@ const supportedEvents = new Set<AiAgentSessionEventName>([
   'session_end'
 ])
 
-export const decisionKinds = new Set<ManagedAiSessionDecisionKind>(['allow', 'always', 'bypass', 'deny', 'reply', 'handled'])
+export const decisionKinds: ReadonlySet<ManagedAiSessionDecisionKind> = new Set(['allow', 'always', 'bypass', 'deny', 'reply', 'handled'])
 
 export const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 

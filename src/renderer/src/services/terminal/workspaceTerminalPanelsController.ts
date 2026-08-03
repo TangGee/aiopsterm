@@ -71,6 +71,16 @@ export type WorkspaceIdleCleanupResult = {
   panels: WorkspaceIdleCleanupPanelSummary[]
 }
 
+export type WorkspaceCreatePanelOptions = {
+  split?: PanelDirection
+  anchorPanelId?: string
+  activation?: 'activate' | 'preserve'
+}
+
+type WorkspacePanelMutationOptions = {
+  activation?: 'activate' | 'preserve'
+}
+
 type WorkspaceTerminalPanelsControllerState = {
   mode: Ref<'terminal' | 'agents'>
   activeModule: Ref<ModuleKey>
@@ -94,6 +104,8 @@ type WorkspaceTerminalPanelsControllerDeps = {
   applyManagedAiTerminalLifecycle: (panel: Pick<TerminalPanel, 'id'> | null, event: TerminalLifecycleEvent) => void
   applyManagedAiTerminalExit: (panel: Pick<TerminalPanel, 'id'> | null, event: TerminalExitEvent) => void
   applyManagedAiTerminalPanelClosed: (closedPanels: Array<Pick<TerminalPanel, 'id' | 'sessionId'>>) => void
+  selectPanelForLifecycle: (panelId: string) => boolean
+  activatePanelSurface: (panelId: string, options?: { modulePolicy?: 'workspace' | 'preserve'; focusPolicy?: 'target-primary' | 'preserve' }) => boolean
 }
 
 export const createInitialWorkspaceTerminalPanels = () => [
@@ -125,7 +137,9 @@ export const createWorkspaceTerminalPanelsController = (
     touchManagedAiTerminalActivity,
     applyManagedAiTerminalLifecycle,
     applyManagedAiTerminalExit,
-    applyManagedAiTerminalPanelClosed
+    applyManagedAiTerminalPanelClosed,
+    selectPanelForLifecycle,
+    activatePanelSurface
   } = deps
 
   const touchPanelActivity = (panelIdOrSessionId: string, at = Date.now()) => {
@@ -143,38 +157,79 @@ export const createWorkspaceTerminalPanelsController = (
     })
   }
 
-  const createPanel = (split?: PanelDirection) => {
+  const createPanel = (input?: PanelDirection | WorkspaceCreatePanelOptions) => {
+    const options = typeof input === 'string' ? { split: input } : input || {}
     const panel = createTerminalPanelInCollection(panels.value, {
       id: createRendererLocalId('panel'),
-      activePanelId: activePanelId.value,
-      split,
-      splitOrder: split ? Date.now() + panels.value.length : undefined
+      activePanelId: options.anchorPanelId || activePanelId.value,
+      split: options.split,
+      splitOrder: options.split ? Date.now() + panels.value.length : undefined
     })
-    activePanelId.value = panel.id
+    if (options.activation !== 'preserve') selectPanelForLifecycle(panel.id)
     return panel
+  }
+
+  const reorderPanel = (panelId: string, targetIndex: number) => {
+    const currentIndex = panels.value.findIndex((panel) => panel.id === panelId)
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= panels.value.length || currentIndex === targetIndex) return false
+    const [panel] = panels.value.splice(currentIndex, 1)
+    panels.value.splice(targetIndex, 0, panel)
+    selectPanelForLifecycle(panel.id)
+    return true
+  }
+
+  const swapPanelPositions = (firstPanelId: string, secondPanelId: string) => {
+    const firstIndex = panels.value.findIndex((panel) => panel.id === firstPanelId)
+    const secondIndex = panels.value.findIndex((panel) => panel.id === secondPanelId)
+    if (firstIndex < 0 || secondIndex < 0 || firstIndex === secondIndex) return false
+    const firstPanel = panels.value[firstIndex]
+    panels.value[firstIndex] = panels.value[secondIndex]
+    panels.value[secondIndex] = firstPanel
+    return true
+  }
+
+  const reorderPanelCollection = (orderedPanelIds: string[]) => {
+    const order = new Map(orderedPanelIds.map((panelId, index) => [panelId, index]))
+    if (order.size !== orderedPanelIds.length) return false
+    const known = panels.value.filter((panel) => order.has(panel.id))
+    if (known.length !== orderedPanelIds.length) return false
+    const untouched = panels.value.filter((panel) => !order.has(panel.id))
+    panels.value = [...known.sort((first, second) => order.get(first.id)! - order.get(second.id)!), ...untouched]
+    return true
+  }
+
+  const restorePanelCollection = (nextPanels: TerminalPanel[], selectedPanelId: string) => {
+    if (!nextPanels.length || !nextPanels.some((panel) => panel.id === selectedPanelId)) return false
+    panels.value = nextPanels
+    selectPanelForLifecycle(selectedPanelId)
+    return true
   }
 
   const activateTerminalPanel = (panelIdOrSessionId: string) => {
     const target = panels.value.find((panel) => panel.id === panelIdOrSessionId || panel.sessionId === panelIdOrSessionId)
     if (!target || !isTerminalWorkspacePanel(target)) return null
-    activeModule.value = 'workspace'
-    activePanelId.value = target.id
+    activatePanelSurface(target.id)
     return target
   }
 
   const hasSplitState = (panelId: string) => hasTerminalPanelSplitState(panels.value, panelId)
 
-  const unsplitPanel = (panelId = activePanelId.value) => {
+  const unsplitPanel = (panelId = activePanelId.value, options: WorkspacePanelMutationOptions = {}) => {
     const changed = detachTerminalPanelFromSplit(panels.value, panelId)
     if (!changed) return false
-    activePanelId.value = panelId
+    if (options.activation !== 'preserve') selectPanelForLifecycle(panelId)
     return true
   }
 
-  const attachPanelToSplit = (panelId: string, targetPanelId: string, direction: PanelDirection = 'right') => {
+  const attachPanelToSplit = (
+    panelId: string,
+    targetPanelId: string,
+    direction: PanelDirection = 'right',
+    options: WorkspacePanelMutationOptions = {}
+  ) => {
     const changed = attachTerminalPanelToSplit(panels.value, panelId, targetPanelId, direction, Date.now() + panels.value.length)
     if (!changed) return false
-    activePanelId.value = panelId
+    if (options.activation !== 'preserve') selectPanelForLifecycle(panelId)
     return true
   }
 
@@ -183,7 +238,7 @@ export const createWorkspaceTerminalPanelsController = (
 
   const removeClosedPanel = (panel: Pick<TerminalPanel, 'id' | 'sessionId'>, terminalStatus: 'none' | 'killed' | 'missing') => {
     const stillOpen = panels.value.some((item) => item.id === panel.id)
-    if (stillOpen) activePanelId.value = closeTerminalPanelInCollection(panels.value, panel.id, activePanelId.value)
+    if (stillOpen) selectPanelForLifecycle(closeTerminalPanelInCollection(panels.value, panel.id, activePanelId.value))
     if (panel.sessionId && terminalStatus !== 'none') applyManagedAiTerminalPanelClosed([panel])
     return {
       closed: stillOpen,
@@ -231,19 +286,19 @@ export const createWorkspaceTerminalPanelsController = (
 
   const discardPendingTerminalPanel = (id: string, preferredActiveId?: string) => {
     const result = discardPendingTerminalPanelInCollection(panels.value, id, activePanelId.value, preferredActiveId)
-    activePanelId.value = result.activePanelId
+    selectPanelForLifecycle(result.activePanelId)
     return result.discarded
   }
 
-  const closeOthers = () => {
-    const closing = closedPanelDescriptors(panels.value.filter((panel) => panel.id !== activePanelId.value))
+  const closeOthers = (keepPanelId = activePanelId.value) => {
+    const closing = closedPanelDescriptors(panels.value.filter((panel) => panel.id !== keepPanelId))
     return Promise.all(closing.map((panel) => closePanel(panel.id)))
   }
 
   const closeAllPanels = () => {
     const closing = closedPanelDescriptors(panels.value)
     if (!closing.length) {
-      activePanelId.value = resetTerminalPanelCollectionToDefault(panels.value)
+      selectPanelForLifecycle(resetTerminalPanelCollectionToDefault(panels.value))
       return Promise.resolve([])
     }
     return Promise.all(closing.map((panel) => closePanel(panel.id)))
@@ -254,8 +309,7 @@ export const createWorkspaceTerminalPanelsController = (
       return closeAllPanels()
     }
     if (closeMode === 'others') {
-      activePanelId.value = id
-      return closeOthers()
+      return closeOthers(id)
     }
     return closePanel(id)
   }
@@ -325,7 +379,7 @@ export const createWorkspaceTerminalPanelsController = (
   const forkSshPanel = (panelId: string) => {
     const forkPanel = createForkSshTerminalPanelInCollection(panels.value, panelId, createRendererLocalId('panel'))
     if (!forkPanel) return null
-    activePanelId.value = forkPanel.id
+    selectPanelForLifecycle(forkPanel.id)
     return forkPanel
   }
 
@@ -417,8 +471,7 @@ export const createWorkspaceTerminalPanelsController = (
           return null
         }
         renamePanel(panelId, label, 'auto')
-        activeModule.value = 'workspace'
-        activePanelId.value = panelId
+        activatePanelSurface(panelId)
         return connected
       } catch (error) {
         discardPendingPanel()
@@ -450,8 +503,7 @@ export const createWorkspaceTerminalPanelsController = (
         notifyFailure('SSH 终端启动失败')
         return null
       }
-      activeModule.value = 'workspace'
-      activePanelId.value = panelId
+      activatePanelSurface(panelId)
       const connectedPanel = panels.value.find((item) => item.id === panelId) || null
       if (connectedPanel?.sessionId && options.cwd && connectedPanel.cwd !== options.cwd) {
         const writeTerminal = terminalClient.writeTerminal()
@@ -499,8 +551,9 @@ export const createWorkspaceTerminalPanelsController = (
         return null
       }
       renamePanel(panelId, label, 'auto')
-      if (!options.preserveActiveModule) activeModule.value = 'workspace'
-      activePanelId.value = panelId
+      activatePanelSurface(panelId, {
+        modulePolicy: options.preserveActiveModule ? 'preserve' : 'workspace'
+      })
       return connected
     } catch (error) {
       discardPendingPanel()
@@ -528,7 +581,11 @@ export const createWorkspaceTerminalPanelsController = (
     }
   }
 
-  const openKnowledgeFile = (relPath: string, range?: { startLine?: number; endLine?: number }) => {
+  const openKnowledgeFile = (
+    relPath: string,
+    range?: { startLine?: number; endLine?: number },
+    options: WorkspacePanelMutationOptions = {}
+  ) => {
     const node = findKnowledgeNode(relPath)
     if (!node || node.type !== 'file') return null
     const existing = panels.value.find((panel) => panel.kind === 'knowledge' && panel.knowledge?.relPath === relPath)
@@ -538,7 +595,7 @@ export const createWorkspaceTerminalPanelsController = (
         isImage: isKnowledgeImagePath(relPath),
         ...createKnowledgeJumpState(range)
       }
-      activePanelId.value = existing.id
+      if (options.activation !== 'preserve') activatePanelSurface(existing.id)
       kbSelectedKeys.value = [relPath]
       return existing
     }
@@ -558,7 +615,7 @@ export const createWorkspaceTerminalPanelsController = (
       }
     }
     panels.value.push(panel)
-    activePanelId.value = panel.id
+    if (options.activation !== 'preserve') activatePanelSurface(panel.id)
     kbSelectedKeys.value = [relPath]
     return panel
   }
@@ -574,7 +631,7 @@ export const createWorkspaceTerminalPanelsController = (
     )
     if (existing) {
       revealManagedAiSessionContentPanel()
-      activePanelId.value = existing.id
+      activatePanelSurface(existing.id, { modulePolicy: 'preserve' })
       return existing
     }
     const session = managedAiSessions.value.find((item) => item.source === source && item.id === normalizedSessionId)
@@ -595,7 +652,7 @@ export const createWorkspaceTerminalPanelsController = (
     }
     panels.value.push(panel)
     revealManagedAiSessionContentPanel()
-    activePanelId.value = panel.id
+    activatePanelSurface(panel.id, { modulePolicy: 'preserve' })
     return panel
   }
 
@@ -604,7 +661,7 @@ export const createWorkspaceTerminalPanelsController = (
     sessionId: string
     projectRoot: string
     relativePath: string
-  }) => {
+  }, options: WorkspacePanelMutationOptions = {}) => {
     const existing = panels.value.find(
       (panel) =>
         panel.kind === 'project-file' &&
@@ -612,9 +669,7 @@ export const createWorkspaceTerminalPanelsController = (
         panel.projectFile.relativePath === input.relativePath
     )
     if (existing) {
-      mode.value = 'terminal'
-      activeModule.value = 'workspace'
-      activePanelId.value = existing.id
+      if (options.activation !== 'preserve') activatePanelSurface(existing.id)
       return existing
     }
     const title = input.relativePath.split('/').filter(Boolean).at(-1) || input.relativePath
@@ -630,22 +685,18 @@ export const createWorkspaceTerminalPanelsController = (
       projectFile: { ...input }
     }
     panels.value.push(panel)
-    mode.value = 'terminal'
-    activeModule.value = 'workspace'
-    activePanelId.value = panel.id
+    if (options.activation !== 'preserve') activatePanelSurface(panel.id)
     return panel
   }
 
-  const openLocalFile = (filePathInput: string) => {
+  const openLocalFile = (filePathInput: string, options: WorkspacePanelMutationOptions = {}) => {
     const filePath = filePathInput.trim()
     if (!filePath) return null
     const existing = panels.value.find(
       (panel) => panel.kind === 'local-file' && panel.localFile?.filePath === filePath
     )
     if (existing) {
-      mode.value = 'terminal'
-      activeModule.value = 'workspace'
-      activePanelId.value = existing.id
+      if (options.activation !== 'preserve') activatePanelSurface(existing.id)
       return existing
     }
     const normalized = filePath.replace(/\\/g, '/')
@@ -667,9 +718,7 @@ export const createWorkspaceTerminalPanelsController = (
       localFile: { filePath }
     }
     panels.value.push(panel)
-    mode.value = 'terminal'
-    activeModule.value = 'workspace'
-    activePanelId.value = panel.id
+    if (options.activation !== 'preserve') activatePanelSurface(panel.id)
     return panel
   }
 
@@ -688,7 +737,7 @@ export const createWorkspaceTerminalPanelsController = (
         isImage: isKnowledgeImagePath(nextRelPath)
       }
       if (activePanelId.value === oldPanelId) {
-        activePanelId.value = panel.id
+        selectPanelForLifecycle(panel.id)
       }
     })
   }
@@ -705,7 +754,7 @@ export const createWorkspaceTerminalPanelsController = (
       return
     }
     if (!panels.value.some((panel) => panel.id === activePanelId.value)) {
-      activePanelId.value = panels.value[0].id
+      selectPanelForLifecycle(panels.value[0].id)
     }
   }
 
@@ -738,6 +787,10 @@ export const createWorkspaceTerminalPanelsController = (
 
   return {
     createPanel,
+    reorderPanel,
+    reorderPanelCollection,
+    swapPanelPositions,
+    restorePanelCollection,
     touchPanelActivity,
     touchActivePanelActivity,
     initializePanelActivity,

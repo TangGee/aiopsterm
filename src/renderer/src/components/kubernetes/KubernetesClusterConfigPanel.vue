@@ -5,13 +5,13 @@
         <div class="k8s-tab-bar">
           <button
             :class="{ active: workspace.k8sConfigTab === 'local' }"
-            @click="workspace.k8sConfigTab = 'local'"
+            @click="workspace.updateK8sUiState({ configTab: 'local' })"
           >
             本地集群
           </button>
           <button
             :class="{ active: workspace.k8sConfigTab === 'jumpserver' }"
-            @click="workspace.k8sConfigTab = 'jumpserver'"
+            @click="workspace.updateK8sUiState({ configTab: 'jumpserver' })"
           >
             堡垒机资源
           </button>
@@ -20,7 +20,8 @@
         <div class="k8s-search-header">
           <label class="k8s-search">
             <input
-              v-model="workspace.k8sSearchQuery"
+              :value="workspace.k8sSearchQuery"
+              @input="workspace.updateK8sUiState({ searchQuery: ($event.target as HTMLInputElement).value })"
               placeholder="搜索"
               @keydown.esc="workspace.clearK8sSearch"
             />
@@ -37,7 +38,7 @@
           <button
             v-if="workspace.k8sConfigTab === 'local'"
             class="k8s-action-button"
-            @click="workspace.k8sAddModalOpen = true"
+            @click="workspace.updateK8sUiState({ addModalOpen: true })"
           >
             <Plus />
             添加集群

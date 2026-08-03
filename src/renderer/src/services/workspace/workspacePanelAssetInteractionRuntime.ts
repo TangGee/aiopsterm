@@ -82,10 +82,10 @@ export const createWorkspacePanelAssetInteractionRuntime = (deps: WorkspacePanel
           username: asset.username || 'root',
           assetName: displayName
         }
-    deps.workspace.selectedContexts = [
+    deps.workspace.setSelectedContexts([
       ...deps.workspace.selectedContexts.filter((item) => item.id !== asset.id),
       context
-    ]
+    ])
     if (!asset.isLocalShell) {
       await deps.workspace.updateWorkspacePreferences({
         recentAssetIds: [asset.id, ...deps.recentAssetIds.value.filter((id) => id !== asset.id)].slice(0, 10)

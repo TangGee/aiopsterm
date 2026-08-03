@@ -287,7 +287,7 @@ export const createTerminalWorkspaceCommandRuntime = ({
   const openCommandLine = async (panelId = workspace.activePanelId) => {
     const panel = panelById(panelId)
     if (!panel || !isTerminalWorkspacePanel(panel)) return
-    workspace.activePanelId = panel.id
+    workspace.selectPanelForLifecycle(panel.id)
     commandLinePanelId.value = panel.id
     command.value = ''
     hideSuggestions()
@@ -369,7 +369,7 @@ export const createTerminalWorkspaceCommandRuntime = ({
   const openCommandDialog = async (panelId = workspace.activePanelId) => {
     const panel = workspace.panels.find((item) => item.id === panelId)
     if (!panel || !isTerminalWorkspacePanel(panel)) return
-    workspace.activePanelId = panelId
+    workspace.selectPanelForLifecycle(panelId)
     commandDialog.visible = true
     commandDialog.panelId = panelId
     commandDialog.modelName = commandDialog.modelName || workspace.terminalCommandModelOptions[0] || ''
@@ -461,7 +461,7 @@ export const createTerminalWorkspaceCommandRuntime = ({
   }
 
   const openSearchOverlay = async (panelId = workspace.activePanelId) => {
-    workspace.activePanelId = panelId
+    workspace.selectPanelForLifecycle(panelId)
     searchOverlayPanelId.value = panelId
     termMenu.visible = false
     aiButtonPanelId.value = ''

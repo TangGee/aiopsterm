@@ -66,7 +66,7 @@ const selectManagedSession = (sessionId: string, cwd: string) => {
     cwd,
     receivedAt: Date.now()
   })
-  workspace.activePanelId = panel.id
+  workspace.selectPanelForLifecycle(panel.id)
 }
 
 describe('RightAssistantPanel', () => {
@@ -188,7 +188,7 @@ describe('RightAssistantPanel', () => {
     expect(wrapper.find('[data-testid="project-files-toggle"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="project-files-drawer"]').exists()).toBe(false)
 
-    workspace.activePanelId = firstPanelId
+    workspace.selectPanelForLifecycle(firstPanelId)
     await flushPromises()
     expect(wrapper.find('[data-testid="project-files-drawer"]').exists()).toBe(true)
   })

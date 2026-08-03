@@ -42,6 +42,9 @@ describe('workspacePanelAssetInteractionRuntime', () => {
       activePanelId: 'panel-1',
       terminalSettings: { terminalType: 'xterm' },
       selectedContexts: [] as Array<{ id: string; kind: string; label: string; detail: string }>,
+      setSelectedContexts(contexts: any[]) {
+        this.selectedContexts = contexts
+      },
       createPanel: vi.fn(function (this: any) {
         this.activePanelId = 'panel-2'
       }),
@@ -96,6 +99,9 @@ describe('workspacePanelAssetInteractionRuntime', () => {
       activePanelId: 'panel-1',
       terminalSettings: { terminalType: 'xterm' },
       selectedContexts: [] as Array<{ id: string; kind: string; label: string; detail: string }>,
+      setSelectedContexts(contexts: any[]) {
+        this.selectedContexts = contexts
+      },
       createPanel: vi.fn(function (this: any) {
         this.activePanelId = 'panel-2'
       }),

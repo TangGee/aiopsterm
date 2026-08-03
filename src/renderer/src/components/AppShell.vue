@@ -264,11 +264,11 @@ watch(
 
 const handleProductSessionRequest = async (request: ProductSessionUiRequestInput) => {
   if (request.surface === 'database') {
-    workspace.mode = 'terminal'
+    workspace.setWorkspaceMode('terminal')
     workspace.setActiveModule('database')
   } else {
     workspace.setActiveModule('workspace')
-    workspace.mode = 'agents'
+    workspace.setWorkspaceMode('agents')
   }
   await nextTick()
   const sessionRequest: ProductSessionUiRequest = {

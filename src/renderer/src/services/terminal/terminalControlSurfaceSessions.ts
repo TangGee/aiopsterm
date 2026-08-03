@@ -269,10 +269,10 @@ export const createTerminalControlSurfaceSessionHandlers = ({
     if (!snapshot) return controlFail('SESSION_SNAPSHOT_INVALID', 'Session restore snapshot is invalid.')
     await closeCurrentTerminalSessionsForRestore()
     const panels = snapshot.panels.map(panelFromSessionSnapshot)
-    workspace.panels = panels.length ? panels : [panelFromSessionSnapshot({ id: 'panel-main', title: 'Terminal', cwd: '~', kind: 'terminal', status: 'ready', terminalKind: 'unknown' })]
-    workspace.activePanelId = snapshot.activePanelId
-    workspace.mode = snapshot.mode === 'agents' ? 'agents' : 'terminal'
-    workspace.activeModule = snapshot.activeModule === 'workspace' ? 'workspace' : workspace.activeModule
+    const restoredPanels = panels.length ? panels : [panelFromSessionSnapshot({ id: 'panel-main', title: 'Terminal', cwd: '~', kind: 'terminal', status: 'ready', terminalKind: 'unknown' })]
+    workspace.restorePanelCollection(restoredPanels, snapshot.activePanelId)
+    workspace.setWorkspaceMode(snapshot.mode === 'agents' ? 'agents' : 'terminal')
+    if (snapshot.activeModule === 'workspace') workspace.setActiveModule('workspace')
     controlWorkspaceGroups.value = snapshot.workspaceGroups.map((group, index) => ({ ...group, index }))
     controlSurfaceResumeBindings.value = Object.fromEntries(
       snapshot.panels

@@ -92,7 +92,7 @@ export const defaultKubernetesClusters: KubernetesClusterRecord[] = [
   }
 ]
 
-export const developmentKubernetesSeedClusterIds = new Set(defaultKubernetesClusters.map((cluster) => cluster.id))
+export const developmentKubernetesSeedClusterIds: ReadonlySet<string> = new Set(defaultKubernetesClusters.map((cluster) => cluster.id))
 
 export const defaultKubernetesNamespaces: KubernetesNamespaceInfo[] = [
   { id: 'k8s-ns-prod-default', clusterId: 'k8s-1', name: 'default', status: 'Active', age: '92d' },

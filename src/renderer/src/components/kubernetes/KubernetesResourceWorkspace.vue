@@ -62,7 +62,8 @@
         @submit.prevent="runAgentCommand"
       >
         <input
-          v-model="workspace.k8sAgentCommandDraft"
+          :value="workspace.k8sAgentCommandDraft"
+          @input="workspace.updateK8sUiState({ agentCommandDraft: ($event.target as HTMLInputElement).value })"
           placeholder="输入 kubectl 命令"
         />
         <button type="submit">执行</button>
@@ -77,7 +78,7 @@
       <button
         v-for="history in workspace.k8sAgentCommandHistory.slice(0, 5)"
         :key="history"
-        @click="workspace.k8sAgentCommandDraft = history"
+        @click="workspace.updateK8sUiState({ agentCommandDraft: history })"
       >
         {{ history }}
       </button>
@@ -116,7 +117,8 @@
 
       <label class="k8s-search k8s-resource-search">
         <input
-          v-model="workspace.k8sResourceQuery"
+          :value="workspace.k8sResourceQuery"
+          @input="workspace.updateK8sUiState({ resourceQuery: ($event.target as HTMLInputElement).value })"
           placeholder="搜索资源"
         />
         <Search />

@@ -158,10 +158,8 @@ export const createTerminalControlSurfaceAgentHandlers = ({
     const focus = controlBool(params.focus, true)
     const members: ControlAgentTeamLaunchMember[] = []
     const panelIds: string[] = []
-    const previousActivePanelId = workspace.activePanelId
-
     for (let index = 1; index <= count; index += 1) {
-      const panel = workspace.createPanel()
+      const panel = workspace.createPanel({ activation: 'preserve' })
       const title = `${source === 'claude-code' ? 'Claude Code' : source === 'codex' ? 'Codex' : 'Agent'} ${index}`
       workspace.renamePanel(panel.id, title)
       panelIds.push(panel.id)
@@ -191,9 +189,7 @@ export const createTerminalControlSurfaceAgentHandlers = ({
     }
 
     const group = createAgentTeamGroup(params, panelIds, source, cwd)
-    workspace.activeModule = 'workspace'
-    if (focus && panelIds[0]) workspace.activePanelId = panelIds[0]
-    if (!focus && workspace.panels.some((panel) => panel.id === previousActivePanelId)) workspace.activePanelId = previousActivePanelId
+    if (focus && panelIds[0]) workspace.activatePanelSurface(panelIds[0], { cause: 'external' })
     const team: ControlAgentTeamLaunchResult = {
       source,
       ...(cwd ? { cwd } : {}),

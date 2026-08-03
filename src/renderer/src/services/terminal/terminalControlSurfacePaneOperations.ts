@@ -120,7 +120,7 @@ export const createTerminalControlSurfaceOperationHandlers = ({
       if (result.closed) closedSurfaces.push(snapshot)
       else skipped += 1
     }
-    workspace.activePanelId = panel.id
+    workspace.selectPanelForLifecycle(panel.id)
     await nextTick()
     return { closed: closedSurfaces.length, skipped, closedSurfaces }
   }
@@ -160,16 +160,13 @@ export const createTerminalControlSurfaceOperationHandlers = ({
       })
     }
     if (action === 'new_terminal_right' || action === 'new_terminal_to_right' || action === 'new_terminal_tab_to_right') {
-      const previousActivePanelId = workspace.activePanelId
-      workspace.activePanelId = panel.id
-      const created = workspace.createPanel()
+      const focus = controlBool(params.focus, true)
+      const created = workspace.createPanel({ anchorPanelId: panel.id, activation: 'preserve' })
       const title = controlText(params.title || params.newTitle || params.new_title)
       if (title) workspace.renamePanel(created.id, title)
       const cwd = controlText(params.cwd || params.workingDirectory || params.working_directory) || panel.cwd
       if (cwd) created.cwd = cwd
-      if (!controlBool(params.focus, true) && workspace.panels.some((item) => item.id === previousActivePanelId)) {
-        workspace.activePanelId = previousActivePanelId
-      }
+      if (focus) workspace.activatePanelSurface(created.id, { cause: 'external' })
       await nextTick()
       return surfaceOperationPayload(panel, 'surface.action', {
         action,
@@ -387,8 +384,10 @@ export const createTerminalControlSurfaceOperationHandlers = ({
       const panel = resolveControlSourceSurfacePanel(params)
       if (!panel) return controlFail('SURFACE_NOT_FOUND', 'Surface not found.')
       triggerControlFlash(panel)
-      workspace.activeModule = 'workspace'
-      workspace.activePanelId = panel.id
+      workspace.activatePanelSurface(panel.id, {
+        cause: 'external',
+        focusPolicy: controlBool(params.focus, false) ? 'target-primary' : 'preserve'
+      })
       await nextTick()
       if (controlBool(params.focus, false) && isTerminalWorkspacePanel(panel)) requestExternalTerminalFocus(panel.id)
       return surfaceOperationPayload(panel, 'surface.trigger_flash', { flashed: true })
@@ -397,13 +396,17 @@ export const createTerminalControlSurfaceOperationHandlers = ({
     if (method === 'surface.reorder' || method === 'surface.move') {
       const panel = resolveControlSourceSurfacePanel(params)
       if (!panel) return controlFail('SURFACE_NOT_FOUND', 'Surface not found.')
-      const previousActivePanelId = workspace.activePanelId
       const targetPane = method === 'surface.move' ? resolveControlPanePanel(params) : null
       let changed = false
       let fromIndex = workspace.panels.findIndex((item) => item.id === panel.id)
       let toIndex = fromIndex
       if (targetPane && targetPane.id !== panel.id) {
-        changed = workspace.attachPanelToSplit(panel.id, targetPane.id, normalizePaneLayoutDirection(params.direction || params.split))
+        changed = workspace.attachPanelToSplit(
+          panel.id,
+          targetPane.id,
+          normalizePaneLayoutDirection(params.direction || params.split),
+          { activation: 'preserve' }
+        )
         toIndex = workspace.panels.findIndex((item) => item.id === panel.id)
       } else {
         const moved = movePanelInControlOrder(panel, params)
@@ -412,9 +415,7 @@ export const createTerminalControlSurfaceOperationHandlers = ({
         toIndex = moved.toIndex
       }
       if (controlBool(params.focus, false)) {
-        workspace.activePanelId = panel.id
-      } else if (workspace.panels.some((item) => item.id === previousActivePanelId)) {
-        workspace.activePanelId = previousActivePanelId
+        workspace.activatePanelSurface(panel.id, { cause: 'external' })
       }
       await nextTick()
       if (controlBool(params.focus, false) && isTerminalWorkspacePanel(panel)) requestExternalTerminalFocus(panel.id)
@@ -434,12 +435,9 @@ export const createTerminalControlSurfaceOperationHandlers = ({
     if (method === 'surface.split_off') {
       const panel = resolveControlSourceSurfacePanel(params)
       if (!panel) return controlFail('SURFACE_NOT_FOUND', 'Surface not found.')
-      const previousActivePanelId = workspace.activePanelId
-      const changed = workspace.unsplitPanel(panel.id)
+      const changed = workspace.unsplitPanel(panel.id, { activation: 'preserve' })
       if (controlBool(params.focus, false)) {
-        workspace.activePanelId = panel.id
-      } else if (workspace.panels.some((item) => item.id === previousActivePanelId)) {
-        workspace.activePanelId = previousActivePanelId
+        workspace.activatePanelSurface(panel.id, { cause: 'external' })
       }
       await nextTick()
       if (controlBool(params.focus, false) && isTerminalWorkspacePanel(panel)) requestExternalTerminalFocus(panel.id)
@@ -471,7 +469,7 @@ export const createTerminalControlSurfaceOperationHandlers = ({
         const untouched = current.filter((panel) => !desiredSet.has(panel.id))
         const fromOrder = current.map((panel) => panel.id)
         const dryRun = controlBool(params.dryRun ?? params.dry_run, false)
-        if (!dryRun) workspace.panels = [...known.sort((a, b) => desired.indexOf(a.id) - desired.indexOf(b.id)), ...untouched]
+        if (!dryRun) workspace.reorderPanelCollection(desired)
         const toOrder = (dryRun ? current : workspace.panels).map((panel) => panel.id)
         return controlOk({
           workspaceId: 'main',

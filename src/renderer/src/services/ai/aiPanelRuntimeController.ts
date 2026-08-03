@@ -424,7 +424,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     contextById,
     selectedContexts: () => workspace.selectedContexts,
     setSelectedContexts: (contexts) => {
-      workspace.selectedContexts = contexts
+      workspace.setSelectedContexts(contexts)
     },
     removeContext: (id) => workspace.removeContext(id),
     clearSelectedCommand: () => workspace.selectCommandPreset(null),

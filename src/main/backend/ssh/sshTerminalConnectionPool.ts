@@ -11,9 +11,9 @@ export type PooledSshClient = {
   dispose?: () => void
 }
 
-export const pooledTargetClients = new Map<string, PooledSshClient>()
-export const pooledJumpClients = new Map<string, PooledSshClient>()
-export const jumpForwardUnsupportedKeys = new Set<string>()
+const pooledTargetClients = new Map<string, PooledSshClient>()
+const pooledJumpClients = new Map<string, PooledSshClient>()
+const jumpForwardUnsupportedKeys = new Set<string>()
 
 const clearPool = (pool: Map<string, PooledSshClient>) => {
   for (const entry of new Set(pool.values())) {
@@ -239,3 +239,21 @@ export const getPooledClientByKeys = (pool: Map<string, PooledSshClient>, keys: 
 export const isPooledClient = (pool: Map<string, PooledSshClient>, key: string, client: SshTerminalClient) => pool.get(key)?.client === client
 
 export const isPooledClientByKeys = (pool: Map<string, PooledSshClient>, keys: string[], client: SshTerminalClient) => keys.some((key) => isPooledClient(pool, key, client))
+
+export const sshConnectionPoolRegistry = {
+  target: {
+    getByKeys: (keys: string[]) => getPooledClientByKeys(pooledTargetClients, keys),
+    isByKeys: (keys: string[], client: SshTerminalClient) => isPooledClientByKeys(pooledTargetClients, keys, client),
+    rememberAliases: (keys: string[], client: SshTerminalClient, dispose?: () => void) =>
+      rememberPooledClientAliases(pooledTargetClients, keys, client, dispose),
+    removeAliases: (client: SshTerminalClient) => removePooledClientAliases(pooledTargetClients, client)
+  },
+  jump: {
+    get: (key: string) => getPooledClient(pooledJumpClients, key),
+    remember: (key: string, client: SshTerminalClient, dispose?: () => void) =>
+      rememberPooledClient(pooledJumpClients, key, client, dispose),
+    remove: (key: string, client?: SshTerminalClient) => removePooledClient(pooledJumpClients, key, client),
+    isForwardUnsupported: (key: string) => jumpForwardUnsupportedKeys.has(key),
+    markForwardUnsupported: (key: string) => jumpForwardUnsupportedKeys.add(key)
+  }
+}

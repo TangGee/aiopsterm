@@ -35,7 +35,17 @@ const createController = () => {
     touchManagedAiTerminalActivity: vi.fn(),
     applyManagedAiTerminalLifecycle: vi.fn(),
     applyManagedAiTerminalExit: vi.fn(),
-    applyManagedAiTerminalPanelClosed: vi.fn()
+    applyManagedAiTerminalPanelClosed: vi.fn(),
+    selectPanelForLifecycle: (panelId) => {
+      if (!panels.value.some((panel) => panel.id === panelId)) return false
+      state.activePanelId.value = panelId
+      return true
+    },
+    activatePanelSurface: (panelId) => {
+      if (!panels.value.some((panel) => panel.id === panelId)) return false
+      state.activePanelId.value = panelId
+      return true
+    }
   })
   return { controller, state }
 }

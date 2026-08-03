@@ -84,6 +84,14 @@ npm run audit:i18n
 
 This checks that tracked renderer UI text is covered by explicit i18n keys or the static legacy text catalog.
 
+For store ownership, panel lifecycle, or main/shared registry changes, run:
+
+```bash
+npm run audit:state-ownership
+```
+
+The audit rejects direct writes to protected workspace fields, direct `v-model` bindings to those fields, `activePanelId` writes outside its navigation owner, and exported mutable bindings or containers in main/shared code. It runs automatically before `npm test` and `npm run build`.
+
 For plugin manifest, runtime, contribution, or packaging changes, run:
 
 ```bash

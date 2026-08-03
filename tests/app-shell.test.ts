@@ -553,7 +553,7 @@ const exposeOpenedClassicHosts = async (store: ReturnType<typeof useWorkspaceSto
       assetName: 'prod-bastion'
     }
   })
-  store.activePanelId = 'panel-context-prod'
+  store.selectPanelForLifecycle('panel-context-prod')
   await flushPromises()
 }
 
@@ -1379,13 +1379,13 @@ describe('AppShell', () => {
       expect(rowFor('Approve release').find('.ai-session-handle').attributes('title')).toBe('标记已处理')
       expect(rowFor('Reading files').find('.ai-session-handle').exists()).toBe(false)
 
-      store.activePanelId = 'panel-main'
+      store.selectPanelForLifecycle('panel-main')
       await rowFor('Reading files').trigger('dblclick')
       await flushPromises()
       expect(store.activePanelId).toBe(secondaryPanel.id)
       expect(wrapper.find('.ai-sessions-section-header').text()).toContain('会话库')
 
-      store.activePanelId = secondaryPanel.id
+      store.selectPanelForLifecycle(secondaryPanel.id)
       await rowFor('Round finished').trigger('click')
       await flushPromises()
       expect(store.selectedManagedAiSessionKey).toBe('codex:codex-idle-1')
@@ -1987,7 +1987,7 @@ describe('AppShell', () => {
       port: 2222,
       username: 'deploy'
     })
-    store.activePanelId = second.id
+    store.selectPanelForLifecycle(second.id)
     await flushPromises()
     await wrapper.vm.$nextTick()
 
@@ -2074,7 +2074,7 @@ describe('AppShell', () => {
       port: 2222,
       username: 'deploy'
     })
-    store.activePanelId = firstPanel.id
+    store.selectPanelForLifecycle(firstPanel.id)
 
     const wrapper = mount(AiPanel, {
       attachTo: document.body,
@@ -2097,7 +2097,7 @@ describe('AppShell', () => {
     vi.mocked(window.aiops.closeProductSession).mockClear()
     vi.mocked(window.aiops.killCodexSession).mockClear()
 
-    store.activePanelId = secondPanel.id
+    store.selectPanelForLifecycle(secondPanel.id)
     await wrapper.find('[data-testid="ai-codex-target-change"]').trigger('click')
     await flushPromises()
     await wrapper.vm.$nextTick()
@@ -2105,7 +2105,7 @@ describe('AppShell', () => {
     await flushPromises()
     await wrapper.vm.$nextTick()
 
-    store.activePanelId = firstPanel.id
+    store.selectPanelForLifecycle(firstPanel.id)
     await wrapper.find('[data-testid="ai-codex-target-change"]').trigger('click')
     await flushPromises()
     await wrapper.vm.$nextTick()
@@ -6469,7 +6469,7 @@ describe('AppShell', () => {
     expect(store.settingsSkills[0].name).toMatch(/rollback.+skill|ai-message-skill/)
     expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('已创建技能')
 
-    store.activePanelId = 'panel-main'
+    store.selectPanelForLifecycle('panel-main')
     await assistantMessage!.find('[data-testid="ai-message-retry"]').trigger('click')
     await flushPromises()
     await wrapper.vm.$nextTick()
@@ -9273,7 +9273,7 @@ describe('AppShell', () => {
     const logsPanel = store.createPanel()
     logsPanel.title = 'Logs Shell'
     const logsPanelId = logsPanel.id
-    store.activePanelId = firstPanelId
+    store.selectPanelForLifecycle(firstPanelId)
     await wrapper.vm.$nextTick()
 
     const nextResponse = await invokeControlHandler({ id: 'next-window', method: 'workspace.next', params: {} })
@@ -10134,7 +10134,7 @@ describe('AppShell', () => {
         cwd: '/work/visible'
       })
       store.renamePanel('panel-main', 'Visible Agent')
-      store.activePanelId = 'panel-main'
+      store.selectPanelForLifecycle('panel-main')
 
       const backgroundOld = store.createPanel()
       store.applyLocalTerminalSession(backgroundOld.id, {
@@ -10157,7 +10157,7 @@ describe('AppShell', () => {
         shell: '/bin/bash',
         cwd: '/work/busy'
       })
-      store.activePanelId = 'panel-main'
+      store.selectPanelForLifecycle('panel-main')
 
       store.upsertManagedAiSession({
         source: 'codex',
@@ -11583,7 +11583,7 @@ describe('AppShell', () => {
     expect(secondTerminal.emitKeyEvent(new KeyboardEvent('keydown', { key: 'PageUp', ctrlKey: true, bubbles: true, cancelable: true }))).toBe(false)
     expect(store.activePanelId).toBe(firstPanelId)
 
-    store.activePanelId = secondPanelId
+    store.selectPanelForLifecycle(secondPanelId)
     expect(secondTerminal.emitKeyEvent(new KeyboardEvent('keydown', { key: 'PageUp', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }))).toBe(false)
     expect(store.panels[0].id).toBe(secondPanelId)
     expect(secondTerminal.emitKeyEvent(new KeyboardEvent('keydown', { key: 'PageDown', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }))).toBe(false)
@@ -17283,7 +17283,7 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('Minimap')
     expect(workspace.text()).toContain('Mouse Wheel Zoom')
     vi.mocked(window.aiops.saveConfig).mockClear()
-    await workspace.findAll('input.settings-number')[0].setValue('18')
+    await workspace.get('[data-setting-key="editor.fontSize"]').setValue('18')
     await flushPromises()
     expect(store.editorSettings.fontSize).toBe(18)
     expect(document.documentElement.style.getPropertyValue('--editor-font-size')).toBe('18px')

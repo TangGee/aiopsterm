@@ -113,7 +113,7 @@ export const createWorkspaceAiChatController = (
     resolveActiveWritableTerminalPanel,
     resolveClassicHostTerminalPanel,
     openTerminalForAiHostContext,
-    activateTerminalPanel,
+    restoreTerminalPanelSelection,
     findKnowledgeNode,
     backendKnowledgeEntryOrNotice,
     uniqueKnowledgeFileName,
@@ -550,7 +550,7 @@ export const createWorkspaceAiChatController = (
         targets.push({ ...canonicalTarget })
       }
     } finally {
-      if (originalPanel?.id) activateTerminalPanel(originalPanel.id)
+      if (originalPanel?.id) restoreTerminalPanelSelection(originalPanel.id)
     }
     return targets
   }
@@ -601,7 +601,7 @@ export const createWorkspaceAiChatController = (
         restoredHosts.push(context)
         if (context.terminalSessionId) restoredTerminalSessionIds.add(context.terminalSessionId)
       }
-      if (originalPanel?.id) activateTerminalPanel(originalPanel.id)
+      if (originalPanel?.id) restoreTerminalPanelSelection(originalPanel.id)
       const restoredNonHosts = restoreClassicSessionContexts(
         projection.contexts.filter((context) => context.kind !== 'hosts'),
         catalog

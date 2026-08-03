@@ -275,7 +275,7 @@ export const createTerminalWorkspaceShellRuntime = (
 
   const openTerminalMenu = (event: MouseEvent, panelId: string) => {
     const position = clampFloatingMenuPosition(event, 214, 560)
-    workspace.activePanelId = panelId
+    workspace.selectPanelForLifecycle(panelId)
     hideSuggestions()
     termMenu.visible = true
     termMenu.x = position.x
@@ -286,7 +286,7 @@ export const createTerminalWorkspaceShellRuntime = (
   }
 
   const handleTerminalContextMenu = async (panelId: string, event: MouseEvent) => {
-    workspace.activePanelId = panelId
+    workspace.selectPanelForLifecycle(panelId)
     switch (workspace.terminalSettings.rightMouseEvent) {
       case 'paste':
         await pasteClipboard(panelId)
@@ -302,7 +302,7 @@ export const createTerminalWorkspaceShellRuntime = (
   }
 
   const handleTerminalMouseDown = async (panelId: string, event: MouseEvent) => {
-    workspace.activePanelId = panelId
+    workspace.selectPanelForLifecycle(panelId)
     if (event.button !== 1) return
     event.preventDefault()
     switch (workspace.terminalSettings.middleMouseEvent) {
@@ -355,8 +355,7 @@ export const createTerminalWorkspaceShellRuntime = (
   }
 
   const closeOtherTabsFromMenu = async () => {
-    workspace.activePanelId = menu.panelId
-    await workspace.closeOthers()
+    await workspace.closeOthers(menu.panelId)
     menu.visible = false
   }
 
@@ -400,8 +399,7 @@ export const createTerminalWorkspaceShellRuntime = (
 
   const createSplitPanel = async (direction: PanelDirection, sourcePanelId: string) => {
     const sourcePanel = panelById(sourcePanelId)
-    workspace.activePanelId = sourcePanelId
-    const panel = workspace.createPanel(direction)
+    const panel = workspace.createPanel({ split: direction, anchorPanelId: sourcePanelId })
     await afterDomUpdate()
     focusPanel(panel.id)
     void connectSplitPanelFromSource(panel, sourcePanel)
@@ -453,7 +451,7 @@ export const createTerminalWorkspaceShellRuntime = (
     const endpoint = managedAssetEndpoint({ host: pendingSsh?.host || ssh.host })
     const managedName = String(pendingSsh?.assetName || ssh.assetName || '').trim()
     const displayName = managedName || managedAssetDisplayName({ title: forkPanel.title, host: endpoint, id: contextId })
-    workspace.selectedContexts = [
+    workspace.setSelectedContexts([
       ...workspace.selectedContexts.filter((item) => item.id !== contextId),
       {
         id: contextId,
@@ -467,7 +465,7 @@ export const createTerminalWorkspaceShellRuntime = (
         username: pendingSsh?.username || ssh.username,
         assetName: displayName
       }
-    ]
+    ])
   }
 
   const forkSelected = async () => {
@@ -628,9 +626,7 @@ export const createTerminalWorkspaceShellRuntime = (
     if (index < 0) return false
     const targetIndex = index + direction
     if (targetIndex < 0 || targetIndex >= workspace.panels.length) return false
-    const [panel] = workspace.panels.splice(index, 1)
-    workspace.panels.splice(targetIndex, 0, panel)
-    workspace.activePanelId = panel.id
+    if (!workspace.reorderPanel(panelId, targetIndex)) return false
     void Promise.resolve(afterDomUpdate()).then(() => scheduleVisibleTerminalFit({ scrollToBottom: false, frames: 2, forceGeometry: true }))
     return true
   }
@@ -658,7 +654,7 @@ export const createTerminalWorkspaceShellRuntime = (
   const handleTerminalKeyboardShortcut = (panelId: string, action: TerminalShortcutAction, event?: KeyboardEvent) => {
     const panel = panelById(panelId)
     if (!panel || !isTerminalWorkspacePanel(panel)) return false
-    workspace.activePanelId = panelId
+    workspace.selectPanelForLifecycle(panelId)
     switch (action.type) {
       case 'copy':
         void copySelection(panelId)
@@ -814,11 +810,11 @@ export const createTerminalWorkspaceShellRuntime = (
     const view = terminalViews.get(panelId)
     const selected = view?.terminal.getSelection().trim()
     if (selected) {
-      workspace.rightPanelOpen = true
-      workspace.selectedContexts = [
+      workspace.setRightPanelOpen(true)
+      workspace.setSelectedContexts([
         ...workspace.selectedContexts.filter((item) => item.id !== `terminal-${panelId}`),
         { id: `terminal-${panelId}`, kind: 'hosts', label: `Terminal selection: ${selected.slice(0, 24)}` }
-      ]
+      ])
       void workspace.sendChat(`Terminal output:\n\`\`\`\n${selected}\n\`\`\``, undefined, undefined, { skipKnowledgeSearch: true })
       view?.terminal.clearSelection?.()
     }

@@ -55,9 +55,14 @@ const createWorkspace = (panel = createPanel()) => {
   const panels = [panel]
   const workspace = {
     activePanelId: panel.id,
-    activatePanelSurface: vi.fn((panelId: string) => {
+    selectPanelForLifecycle: vi.fn((panelId: string) => {
       if (!panels.some((item) => item.id === panelId)) return false
       workspace.activePanelId = panelId
+      return true
+    }),
+    activatePanelSurface: vi.fn((panelId: string) => {
+      if (!panels.some((item) => item.id === panelId)) return false
+      workspace.selectPanelForLifecycle(panelId)
       return true
     }),
     canForkSshPanel: vi.fn(() => false),
@@ -74,7 +79,7 @@ const createWorkspace = (panel = createPanel()) => {
         split: direction
       })
       panels.push(next)
-      workspace.activePanelId = next.id
+      workspace.selectPanelForLifecycle(next.id)
       return next
     }),
     openLocalTerminalPanel: vi.fn(async (options?: { cwd?: string }) => {
@@ -97,8 +102,14 @@ const createWorkspace = (panel = createPanel()) => {
       if (target) target.output = output
     }),
     rightPanelOpen: false,
+    setRightPanelOpen: vi.fn((open: boolean) => {
+      workspace.rightPanelOpen = open
+    }),
     runTerminalCommand: vi.fn(async () => ({ status: 'allow' as const })),
     selectedContexts: [] as Array<{ id: string; kind: string; label: string; detail?: string }>,
+    setSelectedContexts: vi.fn((contexts) => {
+      workspace.selectedContexts = contexts
+    }),
     sendChat: vi.fn(async () => undefined),
     setTopNotice: vi.fn(),
     settingsShortcuts: [],
@@ -576,7 +587,7 @@ describe('terminalWorkspaceShellRuntime', () => {
         }
       })
       workspace.panels.push(fork)
-      workspace.activePanelId = fork.id
+      workspace.selectPanelForLifecycle(fork.id)
       return fork
     })
     const { calls, runtime, state } = createRuntime({ workspace })
@@ -647,7 +658,7 @@ describe('terminalWorkspaceShellRuntime', () => {
         }
       })
       workspace.panels.push(fork)
-      workspace.activePanelId = fork.id
+      workspace.selectPanelForLifecycle(fork.id)
       return fork
     })
     const { calls, runtime } = createRuntime({ workspace })

@@ -7,7 +7,7 @@ import type {
   DatabaseGroupInfo
 } from './contracts/database'
 
-export const supportedDatabaseEngines = new Set<DatabaseEngineCode>([
+export const supportedDatabaseEngines: ReadonlySet<DatabaseEngineCode> = new Set<DatabaseEngineCode>([
   'mysql',
   'mariadb',
   'oceanbase',
@@ -218,7 +218,7 @@ export const databaseConnectionSeed: DatabaseConnectionInfo[] = [
   }
 ]
 
-export const databaseConnectionSeedIds = new Set(databaseConnectionSeed.map((connection) => connection.id))
+export const databaseConnectionSeedIds: ReadonlySet<string> = new Set(databaseConnectionSeed.map((connection) => connection.id))
 
 export const databaseSeedQueryRows: Record<string, Array<Record<string, unknown>>> = {
   'conn-prod-pg:orders:public:orders': [

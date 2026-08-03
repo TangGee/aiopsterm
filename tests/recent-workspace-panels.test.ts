@@ -31,8 +31,8 @@ describe('RecentWorkspacePanels', () => {
       }
     }
     workspace.panels = [terminal, projectFile]
-    workspace.activePanelId = projectFile.id
-    workspace.activePanelId = terminal.id
+    workspace.selectPanelForLifecycle(projectFile.id)
+    workspace.selectPanelForLifecycle(terminal.id)
     const wrapper = mount(RecentWorkspacePanels, { attachTo: document.body })
 
     expect(workspace.triggerShortcutAction('recentPanels')).toBe(true)
@@ -64,8 +64,8 @@ describe('RecentWorkspacePanels', () => {
     const first = terminalPanel('terminal-a', 'First')
     const second = terminalPanel('terminal-b', 'Second')
     workspace.panels = [first, second]
-    workspace.activePanelId = first.id
-    workspace.activePanelId = second.id
+    workspace.selectPanelForLifecycle(first.id)
+    workspace.selectPanelForLifecycle(second.id)
     const previousFocus = document.createElement('button')
     document.body.appendChild(previousFocus)
     previousFocus.focus()
@@ -93,8 +93,8 @@ describe('RecentWorkspacePanels', () => {
     const first = terminalPanel('terminal-a', 'First')
     const second = terminalPanel('terminal-b', 'Second')
     workspace.panels = [first, second]
-    workspace.activePanelId = first.id
-    workspace.activePanelId = second.id
+    workspace.selectPanelForLifecycle(first.id)
+    workspace.selectPanelForLifecycle(second.id)
     workspace.mode = 'agents'
     workspace.activeModule = 'settings'
 
@@ -118,7 +118,7 @@ describe('RecentWorkspacePanels', () => {
     const workspace = useWorkspaceStore()
     const panel = terminalPanel('terminal-a', 'First')
     workspace.panels = [panel]
-    workspace.activePanelId = panel.id
+    workspace.selectPanelForLifecycle(panel.id)
 
     expect(workspace.activatePanelSurface(panel.id, { cause: 'pointer' })).toBe(true)
     const firstSequence = workspace.panelFocusRequest?.sequence || 0

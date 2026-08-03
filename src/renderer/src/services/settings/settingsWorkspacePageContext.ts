@@ -525,7 +525,16 @@ export const createSettingsWorkspacePageContext = (workspace: SettingsWorkspaceS
       ])
     ])
 
-  const numberRow = (label: string, value: number, min: number, max: number | undefined, onChange: (value: number) => PersistResult, step = 1, fullLabel = false) =>
+  const numberRow = (
+    label: string,
+    value: number,
+    min: number,
+    max: number | undefined,
+    onChange: (value: number) => PersistResult,
+    step = 1,
+    fullLabel = false,
+    settingKey?: string
+  ) =>
     h('div', { class: ['settings-form-row', { 'full-label': fullLabel }] }, [
       h('label', label),
       h('input', {
@@ -535,6 +544,7 @@ export const createSettingsWorkspacePageContext = (workspace: SettingsWorkspaceS
         max,
         step,
         value,
+        ...(settingKey ? { 'data-setting-key': settingKey } : {}),
         onChange: async (event: Event) => {
           const input = event.target as HTMLInputElement
           const saved = await onChange(Number(input.value))

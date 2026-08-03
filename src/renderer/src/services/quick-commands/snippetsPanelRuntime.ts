@@ -57,7 +57,7 @@ export const useSnippetsPanelRuntime = (options: SnippetsPanelRuntimeOptions) =>
   }
 
   const clearSearch = () => {
-    workspace.snippetSearchQuery = ''
+    workspace.setSnippetBrowserState({ searchQuery: '' })
     nextTick(() => options.searchInput.value?.focus())
   }
 

@@ -61,9 +61,10 @@ export const createTerminalControlSurfaceProjectFileHandlers = ({
   }
 
   const focusControlSurfacePanel = async (panel: TerminalPanel, requestedFocus = true) => {
-    workspace.mode = 'terminal'
-    workspace.activeModule = 'workspace'
-    workspace.activePanelId = panel.id
+    workspace.activatePanelSurface(panel.id, {
+      cause: 'external',
+      focusPolicy: requestedFocus ? 'target-primary' : 'preserve'
+    })
     await nextTick()
     if (requestedFocus && isTerminalWorkspacePanel(panel)) {
       if (focusTerminalPanel) focusTerminalPanel(panel.id, 'external-request')
@@ -84,7 +85,7 @@ export const createTerminalControlSurfaceProjectFileHandlers = ({
     const openedPanels: TerminalPanel[] = []
     const unsupported: Array<{ path: string; relPath: string; unsupportedReason: string }> = []
     const sourcePanel = resolveControlSourceSurfacePanel(params)
-    const previousActivePanelId = workspace.activePanelId
+    const focus = controlBool(params.focus, true)
     for (const rawPath of rawPaths) {
       const relPath = normalizeControlKnowledgePath(rawPath)
       const node = await findControlKnowledgeNode(relPath)
@@ -99,7 +100,7 @@ export const createTerminalControlSurfaceProjectFileHandlers = ({
         })
         continue
       }
-      const panel = workspace.openKnowledgeFile(relPath, controlKnowledgeOpenRange(params))
+      const panel = workspace.openKnowledgeFile(relPath, controlKnowledgeOpenRange(params), { activation: 'preserve' })
       if (panel) openedPanels.push(panel)
     }
     const primary = openedPanels[openedPanels.length - 1] || null
@@ -118,11 +119,7 @@ export const createTerminalControlSurfaceProjectFileHandlers = ({
       })
     }
     if (!primary) return controlFail('KNOWLEDGE_FILE_OPEN_FAILED', 'Knowledge file could not be opened.', { paths: rawPaths })
-    if (!controlBool(params.focus, true) && workspace.panels.some((item) => item.id === previousActivePanelId)) {
-      workspace.activePanelId = previousActivePanelId
-    } else {
-      await focusControlSurfacePanel(primary, false)
-    }
+    if (focus) await focusControlSurfacePanel(primary, false)
     const surfaces = openedPanels.map((panel) => surfaceSummaryForControl(panel))
     return controlOk({
       opened: true,
@@ -154,17 +151,13 @@ export const createTerminalControlSurfaceProjectFileHandlers = ({
     const paths = controlFileOpenRawPaths(params)
     if (!paths.length) return controlFail('FILE_PATH_REQUIRED', 'file.editor.open requires at least one path.')
     const sourcePanel = resolveControlSourceSurfacePanel(params)
-    const previousActivePanelId = workspace.activePanelId
+    const focus = controlBool(params.focus, true)
     const openedPanels = paths
-      .map((filePath) => workspace.openLocalFile(filePath))
+      .map((filePath) => workspace.openLocalFile(filePath, { activation: 'preserve' }))
       .filter((panel): panel is TerminalPanel => Boolean(panel))
     const primary = openedPanels[openedPanels.length - 1] || null
     if (!primary) return controlFail('LOCAL_FILE_OPEN_FAILED', 'Local files could not be opened.', { paths })
-    if (!controlBool(params.focus, true) && workspace.panels.some((item) => item.id === previousActivePanelId)) {
-      workspace.activePanelId = previousActivePanelId
-    } else {
-      await focusControlSurfacePanel(primary, false)
-    }
+    if (focus) await focusControlSurfacePanel(primary, false)
     const surfaces = openedPanels.map((panel) => surfaceSummaryForControl(panel))
     return controlOk({
       opened: true,
@@ -230,13 +223,13 @@ export const createTerminalControlSurfaceProjectFileHandlers = ({
       const rawPath = controlText(params.path || params.projectPath || params.project_path)
       if (!rawPath) return controlFail('PROJECT_PATH_REQUIRED', 'project.open requires a path.')
       const existingFile = await findControlKnowledgeNode(normalizeControlKnowledgePath(rawPath))
-      const previousActivePanelId = workspace.activePanelId
+      const focus = controlBool(params.focus, true)
       let panel: TerminalPanel | null = null
       if (existingFile?.type === 'file') {
-        panel = workspace.openKnowledgeFile(existingFile.relPath)
+        panel = workspace.openKnowledgeFile(existingFile.relPath, undefined, { activation: 'preserve' })
       } else {
         panel = resolveControlSourceSurfacePanel(params)
-        if (!panel || !isTerminalWorkspacePanel(panel)) panel = workspace.createPanel()
+        if (!panel || !isTerminalWorkspacePanel(panel)) panel = workspace.createPanel({ activation: 'preserve' })
         const title = rawPath.split(/[\\/]/).filter(Boolean).pop() || rawPath || 'Project'
         workspace.renamePanel(panel.id, title)
         panel.cwd = rawPath
@@ -256,11 +249,7 @@ export const createTerminalControlSurfaceProjectFileHandlers = ({
           updatedAt: Date.now()
         }
       }
-      if (!controlBool(params.focus, true) && workspace.panels.some((item) => item.id === previousActivePanelId)) {
-        workspace.activePanelId = previousActivePanelId
-      } else {
-        await focusControlSurfacePanel(panel, false)
-      }
+      if (focus) await focusControlSurfacePanel(panel, false)
       return controlOk({
         opened: true,
         path: rawPath,

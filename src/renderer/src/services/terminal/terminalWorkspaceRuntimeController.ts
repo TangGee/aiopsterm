@@ -464,13 +464,13 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     t
   })
   const openAiSessionsFromContextBar = () => {
-    workspace.activeModule = 'aiSessions'
-    workspace.leftPanelOpen = true
+    workspace.setActiveModule('aiSessions')
+    workspace.setLeftPanelOpen(true)
   }
   const openPendingAiSessionFromContextBar = () => {
     const panel = activeTerminalPanel.value
     const session = panel ? pendingAiSessionsForPanel(panel)[0] : null
-    if (session) workspace.selectedManagedAiSessionKey = `${session.source}:${session.id}`
+    if (session) workspace.setSelectedManagedAiSession(`${session.source}:${session.id}`)
     openAiSessionsFromContextBar()
   }
   const refreshAiSessionsFromContextBar = async () => {
@@ -480,9 +480,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   const focusActiveTerminalFromContextBar = () => {
     const panel = activeTerminalPanel.value
     if (!panel || !isTerminalWorkspacePanel(panel)) return
-    workspace.activeModule = 'workspace'
-    workspace.activePanelId = panel.id
-    focusPanel(panel.id, 'pointer')
+    workspace.activatePanelSurface(panel.id, { cause: 'pointer' })
   }
   const copyActiveTerminalContext = async () => {
     const context = activeTerminalContextBar.value
@@ -646,7 +644,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   })
 
   const openTerminalDashboardChat = () => {
-    workspace.rightPanelOpen = true
+    workspace.setRightPanelOpen(true)
   }
 
   const openTerminalDashboardAssets = () => {
@@ -654,9 +652,9 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   }
 
   const openTerminalDashboardSettings = () => {
-    workspace.mode = 'terminal'
+    workspace.setWorkspaceMode('terminal')
     workspace.setActiveModule('settings')
-    workspace.rightPanelOpen = false
+    workspace.setRightPanelOpen(false)
     workspace.setActiveSettingsSection('general')
   }
 
@@ -670,9 +668,9 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   const toggleTerminalDashboardLayout = () => workspace.toggleMode()
 
   const openKnowledgeBaseDocumentation = async () => {
-    workspace.mode = 'terminal'
+    workspace.setWorkspaceMode('terminal')
     workspace.setActiveModule('settings')
-    workspace.rightPanelOpen = false
+    workspace.setRightPanelOpen(false)
     workspace.setActiveSettingsSection('general')
     const documentationLocale = locale.value === 'zh-CN' || locale.value === 'zh-TW' ? 'zh-CN' : 'en-US'
     await workspace.openSettingsDocumentationFile(`usage/best-practices/${documentationLocale}/05-knowledge-base.md`)

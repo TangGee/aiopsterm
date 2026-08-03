@@ -2054,6 +2054,8 @@ test('aiopsterm primary desktop flows', async () => {
 
     await page.getByTestId('agents-new-session-open').click()
     await page.getByTestId('agents-new-classic').click()
+    await expect(page.getByTestId('agents-resource-dialog')).toBeVisible()
+    await page.getByTestId('agents-resource-create').click()
     await expect(page.locator('.ai-empty-chat')).toBeVisible()
     await expect(page.getByText('请输入本次运维目标。')).not.toBeVisible()
     const modeSelect = page.locator('[data-onboarding-id="ai-mode-select"]')

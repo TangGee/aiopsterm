@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { onScopeDispose, ref, watch } from 'vue'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 import { createWorkspaceStoreState } from '@/stores/workspaceState'
 import { createWorkspaceFilesController, type FilesUiMode } from '@/services/files/workspaceFilesController'
 import {
@@ -574,6 +574,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const {
     createPanel,
+    reorderPanel,
+    reorderPanelCollection,
+    swapPanelPositions,
+    restorePanelCollection,
     touchPanelActivity,
     touchActivePanelActivity,
     initializePanelActivity,
@@ -631,7 +635,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       touchManagedAiTerminalActivity,
       applyManagedAiTerminalLifecycle,
       applyManagedAiTerminalExit,
-      applyManagedAiTerminalPanelClosed
+      applyManagedAiTerminalPanelClosed,
+      selectPanelForLifecycle: panelNavigationRuntime.selectPanelForLifecycle,
+      activatePanelSurface: panelNavigationRuntime.activatePanelSurface
     }
   )
 
@@ -1064,7 +1070,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       resolveActiveWritableTerminalPanel,
       resolveClassicHostTerminalPanel: (context) => resolveClassicHostTerminalPanel(panels.value, context, activePanelId.value),
       openTerminalForAiHostContext,
-      activateTerminalPanel,
+      restoreTerminalPanelSelection: panelNavigationRuntime.restorePanelSelection,
       runActiveTerminalCommand,
       waitForTerminalOutputAfter,
       findKnowledgeNode: (relPath) => findKnowledgeNode(relPath),
@@ -1314,6 +1320,64 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   )
   setShellShortcutAction(triggerShortcutAction)
 
+  const setWorkspaceMode = (nextMode: typeof mode.value) => {
+    mode.value = nextMode
+  }
+  const setLeftPanelOpen = (open: boolean) => {
+    leftPanelOpen.value = open
+  }
+  const setRightPanelOpen = (open: boolean) => {
+    rightPanelOpen.value = open
+  }
+  const setSelectedContexts = (contexts: typeof selectedContexts.value) => {
+    selectedContexts.value = contexts
+  }
+  const setSelectedManagedAiSession = (key: string) => {
+    selectedManagedAiSessionKey.value = key
+  }
+  const setSnippetBrowserState = (patch: {
+    selectedGroupUuid?: typeof selectedSnippetGroupUuid.value
+    searchQuery?: string
+  }) => {
+    if ('selectedGroupUuid' in patch) selectedSnippetGroupUuid.value = patch.selectedGroupUuid!
+    if (patch.searchQuery !== undefined) snippetSearchQuery.value = patch.searchQuery
+  }
+  const setKnowledgeBrowserState = (patch: {
+    expandedKeys?: string[]
+    selectedKeys?: string[]
+    searchQuery?: string
+  }) => {
+    if (patch.expandedKeys) kbExpandedKeys.value = patch.expandedKeys
+    if (patch.selectedKeys) kbSelectedKeys.value = patch.selectedKeys
+    if (patch.searchQuery !== undefined) kbSearchQuery.value = patch.searchQuery
+  }
+  const setExtensionDetailTab = (tab: typeof extensionDetailTab.value) => {
+    extensionDetailTab.value = tab
+  }
+  const updateK8sUiState = (patch: {
+    configTab?: typeof k8sConfigTab.value
+    selectedClusterId?: typeof k8sSelectedClusterId.value
+    addModalOpen?: boolean
+    editModalOpen?: boolean
+    editingClusterId?: typeof k8sEditingClusterId.value
+    addMode?: typeof k8sAddMode.value
+    testResult?: typeof k8sTestResult.value
+    agentCommandDraft?: string
+    searchQuery?: string
+    resourceQuery?: string
+  }) => {
+    if (patch.configTab !== undefined) k8sConfigTab.value = patch.configTab
+    if ('selectedClusterId' in patch) k8sSelectedClusterId.value = patch.selectedClusterId!
+    if (patch.addModalOpen !== undefined) k8sAddModalOpen.value = patch.addModalOpen
+    if (patch.editModalOpen !== undefined) k8sEditModalOpen.value = patch.editModalOpen
+    if ('editingClusterId' in patch) k8sEditingClusterId.value = patch.editingClusterId!
+    if (patch.addMode !== undefined) k8sAddMode.value = patch.addMode
+    if ('testResult' in patch) k8sTestResult.value = patch.testResult!
+    if (patch.agentCommandDraft !== undefined) k8sAgentCommandDraft.value = patch.agentCommandDraft
+    if (patch.searchQuery !== undefined) k8sSearchQuery.value = patch.searchQuery
+    if (patch.resourceQuery !== undefined) k8sResourceQuery.value = patch.resourceQuery
+  }
+
   return {
     mode,
     activeModule,
@@ -1326,6 +1390,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     topUpdateState,
     topNotice,
     setTopNotice,
+    setWorkspaceMode,
+    setLeftPanelOpen,
+    setRightPanelOpen,
+    setSelectedContexts,
+    setSelectedManagedAiSession,
+    setSnippetBrowserState,
+    setKnowledgeBrowserState,
+    setExtensionDetailTab,
+    updateK8sUiState,
     aiAttentionItems,
     controlNotifications,
     pendingAiAttentionItems,
@@ -1376,7 +1449,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     onboardingAutoApprovalEvent,
     config,
     panels,
-    activePanelId,
+    activePanelId: computed(() => activePanelId.value),
     activePanel,
     touchPanelActivity,
     touchActivePanelActivity,
@@ -1865,6 +1938,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     quickCloseLeftPanel,
     quickCloseRightPanel,
     createPanel,
+    reorderPanel,
+    reorderPanelCollection,
+    swapPanelPositions,
+    restorePanelCollection,
     hasSplitState,
     unsplitPanel,
     attachPanelToSplit,

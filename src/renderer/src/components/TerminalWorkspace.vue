@@ -448,7 +448,7 @@
             ref="commandLineInput"
             v-model="command"
             placeholder="输入命令，Enter 发送"
-            @focus="workspace.activePanelId = panel.id"
+            @focus="workspace.adoptFocusedPanel(panel.id)"
             @input="updateSuggestions(panel.id)"
             @keydown.right.prevent="enterSuggestionSelection"
             @keydown.down.prevent="moveSuggestion(1)"

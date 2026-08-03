@@ -121,6 +121,19 @@ Poor examples:
 - a shared contract imports runtime behavior or platform APIs;
 - two UI entry points implement separate copies of the same mutation flow.
 
+## State Ownership And Mutation Boundaries
+
+Application state has one owning runtime or controller. Callers express intent through domain actions instead of assigning store fields or exported collections directly.
+
+- `activePanelId` is written only by `workspacePanelNavigationRuntime.ts`. Panel focus, lifecycle restoration, and pointer adoption use its explicit actions.
+- Panel collection creation, closing, splitting, ordering, swapping, and restoration are owned by `workspaceTerminalPanelsController.ts`.
+- Background control-surface operations use explicit `activation: 'preserve'` options. They must not select a panel temporarily and then restore the old selection.
+- Vue components emit user intent through workspace actions. Direct `v-model` bindings to protected workspace fields are not allowed.
+- Main-process registries keep mutable `Map` and `Set` instances private. Export owner methods or readonly catalog types instead of writable containers.
+- Owner-local variables and collections may be mutated inside their cohesive runtime when they are not exported and do not have multiple independent writers.
+
+The repository audit enforces the protected renderer fields, the single `activePanelId` writer, and exported mutable-container rule. A new protected state field must be added to the audit when it becomes part of a cross-module workflow.
+
 ## When To Split
 
 Split a module only when there is a concrete responsibility boundary:

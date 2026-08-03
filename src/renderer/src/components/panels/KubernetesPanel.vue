@@ -3,7 +3,8 @@
     <div class="k8s-manage">
       <label class="k8s-search">
         <input
-          v-model="workspace.k8sSearchQuery"
+          :value="workspace.k8sSearchQuery"
+          @input="workspace.updateK8sUiState({ searchQuery: ($event.target as HTMLInputElement).value })"
           placeholder="搜索"
           @keydown.esc="workspace.clearK8sSearch"
         />
@@ -138,14 +139,14 @@ onMounted(() => {
 })
 
 const openAddCluster = () => {
-  workspace.k8sAddMode = 'import'
-  workspace.k8sTestResult = null
-  workspace.k8sAddModalOpen = true
+  workspace.updateK8sUiState({ addMode: 'import', testResult: null, addModalOpen: true })
 }
 
 const openConfig = () => {
-  workspace.k8sSelectedClusterId = workspace.k8sSelectedClusterId || workspace.filteredK8sClusters[0]?.id || null
-  workspace.k8sConfigTab = 'local'
+  workspace.updateK8sUiState({
+    selectedClusterId: workspace.k8sSelectedClusterId || workspace.filteredK8sClusters[0]?.id || null,
+    configTab: 'local'
+  })
   workspace.setActiveModule('kubernetes')
 }
 
@@ -155,7 +156,6 @@ const toggleMenu = (clusterId: string) => {
 
 const openEdit = (clusterId: string) => {
   workspace.setK8sActionMenu(null)
-  workspace.k8sEditingClusterId = clusterId
-  workspace.k8sEditModalOpen = true
+  workspace.updateK8sUiState({ editingClusterId: clusterId, editModalOpen: true })
 }
 </script>

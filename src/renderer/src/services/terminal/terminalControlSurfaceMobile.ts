@@ -135,8 +135,7 @@ export const createTerminalControlSurfaceMobileHandlers = ({
   const handleTerminalFocusControlRequest = async (params: Record<string, unknown>): Promise<ControlResponse> => {
     const panel = resolveControlTerminalPanel(params)
     if (!panel) return controlFail('TERMINAL_PANEL_NOT_FOUND', 'Terminal panel not found.')
-    workspace.activeModule = 'workspace'
-    workspace.activePanelId = panel.id
+    workspace.activatePanelSurface(panel.id, { cause: 'external' })
     workspace.touchPanelActivity(panel.id)
     await nextTick()
     if (focusTerminalPanel) focusTerminalPanel(panel.id, 'external-request')

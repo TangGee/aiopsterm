@@ -37,7 +37,7 @@
       <span>尚未添加 Kubernetes 集群</span>
       <button
         class="k8s-workspace-button"
-        @click="workspace.k8sAddModalOpen = true"
+        @click="workspace.updateK8sUiState({ addModalOpen: true })"
       >
         <Plus />
         添加集群

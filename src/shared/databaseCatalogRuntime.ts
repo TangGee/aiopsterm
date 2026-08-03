@@ -114,7 +114,7 @@ export const cloneDatabaseConnectionForRuntime = (
 export const visibleDatabaseConnectionsForRuntime = (input: {
   connections: DatabaseConnectionInfo[]
   shouldUseSeedData: boolean
-  seedConnectionIds: Set<string>
+  seedConnectionIds: ReadonlySet<string>
   isVerifiedConnection: (connectionId: string) => boolean
   hasConnectionSecret: (connectionId: string) => boolean
 }) =>

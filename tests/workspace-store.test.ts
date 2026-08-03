@@ -5022,6 +5022,7 @@ describe('workspace store', () => {
       skills: defaultSkills,
       mcpServers: defaultMcpServers,
       mcpToolStates: defaultMcpToolStates,
+      workspaceIdleCleanup: { enabled: false, timeoutMinutes: 20 },
       quickCommands: { groups: [], snippets: [] },
       knowledgeBase: {
         tree: [
@@ -5150,6 +5151,7 @@ describe('workspace store', () => {
       aiPreferences: defaultAiPreferences,
       modelSettings: defaultModelSettings,
       shortcuts: defaultShortcuts,
+      workspaceIdleCleanup: { enabled: false, timeoutMinutes: 20 },
       rules: [
         { content: 'legacy rule without id', enabled: true },
         { id: 'rule-backend-owned', content: 'backend-owned rule', enabled: false }
@@ -6070,6 +6072,7 @@ describe('workspace store', () => {
         groups: [],
         snippets: []
       },
+      workspaceIdleCleanup: { enabled: false, timeoutMinutes: 20 },
       knowledgeBase: {
         tree: [
           {
@@ -7335,7 +7338,7 @@ describe('workspace store', () => {
     expect(skillSummary?.name).toMatch(/skill$/)
     expect(store.settingsSkills[0].name).toBe(skillSummary?.name)
 
-    store.activePanelId = 'panel-main'
+    store.selectPanelForLifecycle('panel-main')
     const unavailableTerminalDecision = await store.runActiveTerminalCommand('echo ai-message')
     expect(unavailableTerminalDecision?.status).toBe('unavailable')
     expect(store.activePanel.output).not.toContain('[aiopsterm] no live terminal session for: echo ai-message')
@@ -7427,7 +7430,7 @@ describe('workspace store', () => {
     expect(store.recordedCommands).toEqual([])
     store.cancelMacroRecording()
 
-    store.activePanelId = 'panel-main'
+    store.selectPanelForLifecycle('panel-main')
     firstPanel.sessionId = 'terminal-write-main'
     const approvalDecision = await store.runActiveTerminalCommand('rm /tmp/unsafe-file')
     expect(approvalDecision?.status).toBe('needs-approval')
@@ -8338,7 +8341,7 @@ describe('workspace store', () => {
         assetName: 'prod-bastion'
       }
     })
-    store.activePanelId = 'panel-open-prod'
+    store.selectPanelForLifecycle('panel-open-prod')
     await store.refreshAiContextCatalog()
 
     expect(window.aiops.listAiContextCatalog).toHaveBeenCalled()
@@ -8373,16 +8376,16 @@ describe('workspace store', () => {
     await store.refreshAiContextCatalog({ hydrateSelection: true })
     expect(store.selectedContexts).toEqual([])
 
-    store.activePanelId = store.panels[0].id
+    store.selectPanelForLifecycle(store.panels[0].id)
     await flushMicrotasks()
     expect(store.selectedContexts).toEqual([])
 
-    store.activePanelId = 'panel-open-prod'
+    store.selectPanelForLifecycle('panel-open-prod')
     await flushMicrotasks()
     expect(store.selectedContexts).toEqual([])
 
     store.selectedContexts = [{ id: 'manual-host', kind: 'hosts', label: '10.0.0.9', detail: 'manual selection' }]
-    store.activePanelId = store.panels[0].id
+    store.selectPanelForLifecycle(store.panels[0].id)
     await flushMicrotasks()
     await store.refreshAiContextCatalog({ hydrateSelection: true })
     expect(store.selectedContexts.map((context) => context.id)).toEqual(['manual-host'])
@@ -8467,7 +8470,7 @@ describe('workspace store', () => {
         assetName: 'remote-host'
       }
     })
-    store.activePanelId = 'panel-auto-follow-remote'
+    store.selectPanelForLifecycle('panel-auto-follow-remote')
     await flushMicrotasks()
 
     expect(store.selectedContexts).toEqual([])

@@ -746,7 +746,7 @@ const ensureStressPanels = async (input: TerminalStressHarnessInput, foreground:
     const target = largestStressSplitTarget(workspace)?.panel ||
       workspace.panels.find((panel) => panel.id === workspace.activePanelId && isTerminalWorkspacePanel(panel)) ||
       workspace.panels.find((panel) => isTerminalWorkspacePanel(panel))
-    if (target) workspace.activePanelId = target.id
+    if (target) workspace.selectPanelForLifecycle(target.id)
     const targetRect = largestStressSplitTarget(workspace)?.rect
     const direction = !targetRect || targetRect.width >= targetRect.height ? 'right' : 'below'
     const panel = workspace.createPanel(direction)
@@ -762,7 +762,7 @@ const ensureStressPanels = async (input: TerminalStressHarnessInput, foreground:
     panel.status = 'running'
   }
   const foregroundPanel = workspace.panels.find((panel) => isTerminalWorkspacePanel(panel) && panel.splitGroupId)
-  if (foregroundPanel) workspace.activePanelId = foregroundPanel.id
+  if (foregroundPanel) workspace.selectPanelForLifecycle(foregroundPanel.id)
   await nextTick()
   await syncStressPanelViews(input)
 }
@@ -1409,7 +1409,7 @@ const runTerminalStressHarness = async (
         outgoing
       workspace.unsplitPanel(outgoing.id)
       workspace.attachPanelToSplit(incoming.id, target.id, backgroundCursor % 2 === 0 ? 'right' : 'below')
-      workspace.activePanelId = incoming.id
+      workspace.selectPanelForLifecycle(incoming.id)
       await syncStressPanelViews(input)
       input.syncTerminalView(incoming, { refit: true })
       input.scheduleVisibleTerminalFit({ scrollToBottom: true, frames: 2, forceGeometry: true })

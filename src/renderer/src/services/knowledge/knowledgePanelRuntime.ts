@@ -39,7 +39,7 @@ export const useKnowledgePanelRuntime = (props: KnowledgePanelRuntimeProps) => {
   watch(
     () => props.query,
     (query) => {
-      if (query !== undefined) workspace.kbSearchQuery = query
+      if (query !== undefined) workspace.setKnowledgeBrowserState({ searchQuery: query })
     },
     { immediate: true }
   )
@@ -74,9 +74,11 @@ export const useKnowledgePanelRuntime = (props: KnowledgePanelRuntimeProps) => {
   }
 
   const toggleExpanded = (relPath: string) => {
-    workspace.kbExpandedKeys = workspace.kbExpandedKeys.includes(relPath)
-      ? workspace.kbExpandedKeys.filter((key) => key !== relPath)
-      : [...workspace.kbExpandedKeys, relPath]
+    workspace.setKnowledgeBrowserState({
+      expandedKeys: workspace.kbExpandedKeys.includes(relPath)
+        ? workspace.kbExpandedKeys.filter((key) => key !== relPath)
+        : [...workspace.kbExpandedKeys, relPath]
+    })
   }
 
   const openNodeMenu = (event: MouseEvent, node: KnowledgeNode) => {
@@ -101,7 +103,7 @@ export const useKnowledgePanelRuntime = (props: KnowledgePanelRuntimeProps) => {
 
   const clearBlankSelection = (event: MouseEvent) => {
     if ((event.target as HTMLElement).closest('.kb-tree-node') || (event.target as HTMLElement).closest('.kb-capacity-bar')) return
-    workspace.kbSelectedKeys = []
+    workspace.setKnowledgeBrowserState({ selectedKeys: [] })
   }
 
   const closeFloatingMenus = () => {

@@ -49,7 +49,7 @@ type KubernetesClusterRuntimeOptions = {
   cloneCatalog: () => KubernetesCatalog
   persistCatalogState: () => void
   shouldUseSeedData: () => boolean
-  developmentSeedClusterIds: Set<string>
+  developmentSeedClusterIds: ReadonlySet<string>
   kubectlRuntimeOptions: () => KubernetesKubectlRuntimeOptions
   canRunLocalKubectl: (cluster: KubernetesClusterRecord) => boolean
   nonRunnableKubernetesReason: (cluster: KubernetesClusterRecord) => KubernetesNonRunnableReason | null

@@ -472,7 +472,7 @@ export const useAiSessionsPanelRuntime = (options: AiSessionsPanelRuntimeOptions
       cause: focusCauseForTerminalSwitch(trigger),
       modulePolicy: 'preserve'
     })
-    workspace.selectedManagedAiSessionKey = sessionKey(session)
+    workspace.setSelectedManagedAiSession(sessionKey(session))
     if (!terminalSwitchTelemetry.panelActivated(trace, {
       activePanelId: workspace.activePanelId,
       activeMode: workspace.mode,
@@ -509,7 +509,7 @@ export const useAiSessionsPanelRuntime = (options: AiSessionsPanelRuntimeOptions
   const selectSession = (session: Pick<ManagedAiSession, 'source' | 'id' | 'panelId' | 'terminalSessionId'>) => {
     const key = sessionKey(session)
     locallySelectedSessionKey.value = workspace.selectedManagedAiSessionKey === key ? '' : key
-    workspace.selectedManagedAiSessionKey = key
+    workspace.setSelectedManagedAiSession(key)
   }
 
   const locateSessionTerminal = (
@@ -522,7 +522,7 @@ export const useAiSessionsPanelRuntime = (options: AiSessionsPanelRuntimeOptions
     if (!focusLinkedPanel(session, trace, 'activated-existing', trigger)) {
       terminalSwitchTelemetry.unavailable(trace, { outcome: 'target-unavailable' })
     }
-    workspace.selectedManagedAiSessionKey = sessionKey(session)
+    workspace.setSelectedManagedAiSession(sessionKey(session))
   }
 
   const canResumeSession = (session: Pick<ManagedAiSession, 'state' | 'resumeCommand' | 'sessionKind' | 'restorable'>) => managedAiSessionAllowsResume(session)
@@ -589,7 +589,7 @@ export const useAiSessionsPanelRuntime = (options: AiSessionsPanelRuntimeOptions
         }, error))
       return
     }
-    workspace.selectedManagedAiSessionKey = sessionKey(session)
+    workspace.setSelectedManagedAiSession(sessionKey(session))
     terminalSwitchTelemetry.unavailable(trace, { outcome: 'not-restorable' })
   }
 

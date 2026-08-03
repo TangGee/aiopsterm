@@ -22,7 +22,7 @@
         :tags="selectedTags"
         :provider-values="providerValues"
         :provider-loading="providerLoading"
-        @update:active-tab="workspace.extensionDetailTab = $event"
+        @update:active-tab="workspace.setExtensionDetailTab($event)"
         @install="workspace.installExtensionPlugin"
         @update="workspace.updateExtensionPlugin"
         @uninstall="workspace.uninstallExtensionPlugin"
