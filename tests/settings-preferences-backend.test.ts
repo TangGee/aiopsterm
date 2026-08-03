@@ -82,7 +82,8 @@ describe('settings preferences backend boundary', () => {
       { id: 'toggleAi', action: '显示/隐藏 AI 侧边栏', shortcut: 'Ctrl+Shift+A' },
       { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
       { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' },
-      { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+E' },
+      { id: 'closeCurrentPanel', action: '关闭当前面板', shortcut: 'Ctrl+Shift+W' },
+      { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+Tab' },
       { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
       { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' }
     ])
@@ -126,11 +127,31 @@ describe('settings preferences backend boundary', () => {
       { id: 'toggleAi', action: '显示/隐藏 AI 侧边栏', shortcut: 'Ctrl+Shift+A' },
       { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
       { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' },
-      { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+E' },
+      { id: 'closeCurrentPanel', action: '关闭当前面板', shortcut: 'Ctrl+Shift+W' },
+      { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+Tab' },
       { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
       { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' }
     ])
     expect(result.data?.rules).toEqual([])
+  })
+
+  it('migrates the old recent panels default while preserving an existing Ctrl+Tab binding', async () => {
+    storeState.set('aiopsterm-settings-preferences', {
+      preferences: {
+        shortcuts: [
+          { id: 'newTerminal', action: '新建终端', shortcut: 'Ctrl+Tab' },
+          { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+E' }
+        ],
+        rules: []
+      }
+    })
+    const backend = await loadBackend()
+    const result = backend.getSettingsPreferences()
+
+    expect(result.ok).toBe(true)
+    expect(result.data?.shortcuts.find((shortcut: { id: string }) => shortcut.id === 'newTerminal')?.shortcut).toBe('Ctrl+Tab')
+    expect(result.data?.shortcuts.find((shortcut: { id: string }) => shortcut.id === 'recentPanels')?.shortcut).toBe('Ctrl+Shift+E')
+    expect(result.data?.shortcuts.find((shortcut: { id: string }) => shortcut.id === 'closeCurrentPanel')?.shortcut).toBe('Ctrl+Shift+W')
   })
 
   it('strips unchanged legacy seed rules in non-seed runtime while preserving user edits', async () => {
@@ -208,7 +229,8 @@ describe('settings preferences backend boundary', () => {
       { id: 'toggleAi', action: '显示/隐藏 AI 侧边栏', shortcut: 'Ctrl+Alt+A' },
       { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
       { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' },
-      { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+E' },
+      { id: 'closeCurrentPanel', action: '关闭当前面板', shortcut: 'Ctrl+Shift+W' },
+      { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+Tab' },
       { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
       { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' }
     ])

@@ -147,7 +147,8 @@ const defaultShortcuts = [
   { id: 'toggleAi', action: '显示/隐藏 AI 侧边栏', shortcut: 'Ctrl+Shift+A' },
   { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
   { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' },
-  { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+E' },
+  { id: 'closeCurrentPanel', action: '关闭当前面板', shortcut: 'Ctrl+Shift+W' },
+  { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+Tab' },
   { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
   { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' }
 ]
@@ -1719,6 +1720,18 @@ describe('workspace store', () => {
     expect(store.panels[0].title).toBe('欢迎')
     expect(store.panels[0].output).toBe('')
     expect(store.panels[0].outputSegments).toEqual([])
+  })
+
+  it('closes only the active panel through the configurable shortcut action', async () => {
+    const store = useWorkspaceStore()
+    const preservedPanelId = store.activePanelId
+    store.createPanel()
+    const closingPanelId = store.activePanelId
+
+    expect(store.triggerShortcutAction('closeCurrentPanel')).toBe(true)
+    await vi.waitFor(() => expect(store.panels.some((panel) => panel.id === closingPanelId)).toBe(false))
+    expect(store.panels.map((panel) => panel.id)).toEqual([preservedPanelId])
+    expect(store.activePanelId).toBe(preservedPanelId)
   })
 
   it('closes idle workspace panels while keeping active or recently active panels', async () => {
@@ -4779,7 +4792,8 @@ describe('workspace store', () => {
       { id: 'toggleAi', action: '显示/隐藏 AI 侧边栏', shortcut: 'Ctrl+Alt+A' },
       { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
       { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' },
-      { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+E' },
+      { id: 'closeCurrentPanel', action: '关闭当前面板', shortcut: 'Ctrl+Shift+W' },
+      { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+Tab' },
       { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
       { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' }
     ])

@@ -168,6 +168,7 @@ export const createWorkspaceStoreState = () => {
     toggleAi: () => shellShortcutAction?.('toggleAi') ?? false,
     switchToSpecificTab: (payload) => shellShortcutAction?.('switchToSpecificTab', payload?.digit) ?? false,
     quickCommand: () => shellShortcutAction?.('quickCommand') ?? false,
+    closeCurrentPanel: () => shellShortcutAction?.('closeCurrentPanel') ?? false,
     recentPanels: () => shellShortcutAction?.('recentPanels') ?? false,
     navigatePanelBack: () => shellShortcutAction?.('navigatePanelBack') ?? false,
     navigatePanelForward: () => shellShortcutAction?.('navigatePanelForward') ?? false

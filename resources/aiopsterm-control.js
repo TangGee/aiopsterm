@@ -168,6 +168,7 @@ Short SSH:
 
 Short cleanup:
   aioic
+  aiobc
 `
 
 const readOption = (name) => {
@@ -3486,6 +3487,10 @@ const printResponse = (response) => {
     return
   }
   const data = response.data || {}
+  if (data.action === 'close_others' && typeof data.closed === 'number') {
+    process.stdout.write(['background-cleanup', data.closed, data.skipped || 0].join('\t') + '\n')
+    return
+  }
   if (data.idleCleanup) {
     process.stdout.write(['idle-cleanup', data.scanned || 0, data.eligible || 0, data.closed || 0, data.failed || 0].join('\t') + '\n')
     return

@@ -228,6 +228,8 @@ const getShortcutParts = (shortcut: string) =>
     .map((part) => part.trim())
     .filter(Boolean)
 
+const normalizeShortcutText = (shortcut: string) => shortcut.replace(/\s+/g, '').toLowerCase()
+
 export const isValidShortcutForAction = (actionId: string, shortcut: string) => {
   const parts = getShortcutParts(shortcut)
   if (!parts.length) return false
@@ -284,6 +286,18 @@ export const normalizeShortcutsConfig = (source?: unknown) => {
       shortcutsById.set(id, { ...defaultShortcut, shortcut })
       if (value !== shortcut) changed = true
     })
+  }
+
+  const recentPanels = shortcutsById.get('recentPanels')
+  if (recentPanels && normalizeShortcutText(recentPanels.shortcut) === 'ctrl+e') {
+    const ctrlTabTaken = Array.from(shortcutsById.entries()).some(
+      ([id, shortcut]) => id !== 'recentPanels' && normalizeShortcutText(shortcut.shortcut) === 'ctrl+tab'
+    )
+    shortcutsById.set('recentPanels', {
+      ...recentPanels,
+      shortcut: ctrlTabTaken ? 'Ctrl+Shift+E' : 'Ctrl+Tab'
+    })
+    changed = true
   }
 
   const normalized = Array.from(shortcutsById.values())

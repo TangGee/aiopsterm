@@ -877,16 +877,49 @@ const arrowKeyToInput = (event: KeyboardEvent, mode: ThreadedTerminalModeState) 
   return mode.applicationCursorKeysMode ? `\x1bO${final}` : `\x1b[${final}`
 }
 
+const controlAliasInput = (event: KeyboardEvent) => {
+  if (!event.ctrlKey || event.altKey || event.metaKey) return ''
+  const codeAliases: Record<string, string> = {
+    Space: '\x00',
+    Digit2: '\x00',
+    Digit3: '\x1b',
+    Digit4: '\x1c',
+    Digit5: '\x1d',
+    Digit6: '\x1e',
+    Digit7: '\x1f',
+    Digit8: '\x7f'
+  }
+  const alias = codeAliases[event.code]
+  if (alias) return alias
+  if (event.key.length !== 1) return ''
+  const code = event.key.toUpperCase().charCodeAt(0)
+  return code >= 64 && code <= 95 ? String.fromCharCode(code - 64) : ''
+}
+
+const isMacKeyboardPlatform = () =>
+  typeof navigator !== 'undefined' && /mac/i.test(String(navigator.platform || ''))
+
+const altPrintableInput = (event: KeyboardEvent) => {
+  if (!event.altKey || event.ctrlKey || event.metaKey || isMacKeyboardPlatform()) return ''
+  if (event.key.length === 1) return `\x1b${event.key}`
+  if (event.key === 'Dead' && event.code.startsWith('Key')) {
+    const letter = event.code.slice(3, 4)
+    return `\x1b${event.shiftKey ? letter.toUpperCase() : letter.toLowerCase()}`
+  }
+  return ''
+}
+
 const keyEventToInput = (event: KeyboardEvent, mode: ThreadedTerminalModeState = defaultModeState()) => {
   if (event.defaultPrevented) return ''
   if (event.isComposing || event.key === 'Process') return ''
-  if (event.key === 'Enter') return '\r'
+  if (event.key === 'Enter') return event.altKey ? '\x1b\r' : '\r'
   if (event.key === 'Tab') return event.shiftKey ? '\x1b[Z' : '\t'
   if (event.key === 'Backspace') {
     if (isTerminalDeletePreviousWordShortcut(event)) return terminalDeletePreviousWordInput
-    return event.ctrlKey ? '\b' : '\x7f'
+    const input = event.ctrlKey ? '\b' : '\x7f'
+    return event.altKey ? `\x1b${input}` : input
   }
-  if (event.key === 'Escape') return '\x1b'
+  if (event.key === 'Escape') return event.altKey ? '\x1b\x1b' : '\x1b'
   if (event.key.startsWith('Arrow')) return arrowKeyToInput(event, mode)
   if (event.key === 'Home') {
     const modified = modifiedCsi(event, 'H')
@@ -917,10 +950,10 @@ const keyEventToInput = (event: KeyboardEvent, mode: ThreadedTerminalModeState =
     const tildeCode: Record<number, number> = { 5: 15, 6: 17, 7: 18, 8: 19, 9: 20, 10: 21, 11: 23, 12: 24 }
     return modifiedTilde(event, tildeCode[number])
   }
-  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.length === 1) {
-    const code = event.key.toUpperCase().charCodeAt(0)
-    if (code >= 64 && code <= 95) return String.fromCharCode(code - 64)
-  }
+  const controlInput = controlAliasInput(event)
+  if (controlInput) return controlInput
+  const altInput = altPrintableInput(event)
+  if (altInput) return altInput
   return ''
 }
 

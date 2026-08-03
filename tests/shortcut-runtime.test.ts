@@ -72,7 +72,7 @@ describe('ShortcutRuntime', () => {
     const navigatePanelForward = vi.fn()
     runtime.install(
       [
-        { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+E' },
+        { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+Tab' },
         { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
         { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' }
       ],
@@ -82,7 +82,8 @@ describe('ShortcutRuntime', () => {
     terminal.className = 'xterm-host'
     document.body.appendChild(terminal)
 
-    expect(dispatchShortcutFrom(terminal, 'e', { ctrlKey: true, code: 'KeyE' })).toBe(true)
+    expect(dispatchShortcutFrom(terminal, 'Tab', { ctrlKey: true, code: 'Tab' })).toBe(true)
+    expect(dispatchShortcutFrom(terminal, 'e', { ctrlKey: true, code: 'KeyE' })).toBe(false)
     expect(dispatchShortcutFrom(terminal, 'ArrowLeft', { ctrlKey: true })).toBe(true)
     expect(dispatchShortcutFrom(terminal, 'ArrowRight', { ctrlKey: true })).toBe(true)
     expect(recentPanels).toHaveBeenCalledTimes(1)
@@ -109,13 +110,13 @@ describe('ShortcutRuntime', () => {
     const runtime = new ShortcutRuntime()
     runtimes.push(runtime)
     const handler = vi.fn()
-    runtime.install([{ id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+E' }], { recentPanels: handler })
+    runtime.install([{ id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+Tab' }], { recentPanels: handler })
     const dialog = document.createElement('section')
     dialog.setAttribute('role', 'dialog')
     dialog.setAttribute('aria-modal', 'true')
     document.body.appendChild(dialog)
 
-    expect(dispatchShortcut('e', { ctrlKey: true, code: 'KeyE' })).toBe(false)
+    expect(dispatchShortcut('Tab', { ctrlKey: true, code: 'Tab' })).toBe(false)
     expect(handler).not.toHaveBeenCalled()
     dialog.remove()
   })

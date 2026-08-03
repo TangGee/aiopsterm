@@ -163,7 +163,8 @@ export const defaultConfig: UserConfig = {
     { id: 'toggleAi', action: '显示/隐藏 AI 侧边栏', shortcut: 'Ctrl+Shift+A' },
     { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
     { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' },
-    { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+E' },
+    { id: 'closeCurrentPanel', action: '关闭当前面板', shortcut: 'Ctrl+Shift+W' },
+    { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+Tab' },
     { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
     { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' }
   ],

@@ -534,6 +534,23 @@ describe('workspaceConfigRuntime', () => {
     expect(isValidShortcutForAction('switchToSpecificTab', 'Ctrl+1')).toBe(false)
     expect(isValidShortcutForAction('switchToSpecificTab', 'Ctrl+Shift+T')).toBe(true)
 
+    expect(normalizeShortcutsConfig([{ id: 'recentPanels', action: 'recentPanels', shortcut: 'Ctrl+E' }])).toEqual({
+      normalized: [{ id: 'recentPanels', action: 'recentPanels', shortcut: 'Ctrl+Tab' }],
+      changed: true
+    })
+    expect(
+      normalizeShortcutsConfig([
+        { id: 'recentPanels', action: 'recentPanels', shortcut: 'Ctrl+E' },
+        { id: 'openSettings', action: 'openSettings', shortcut: 'Ctrl+Tab' }
+      ])
+    ).toEqual({
+      normalized: [
+        { id: 'recentPanels', action: 'recentPanels', shortcut: 'Ctrl+Shift+E' },
+        { id: 'openSettings', action: 'openSettings', shortcut: 'Ctrl+Tab' }
+      ],
+      changed: true
+    })
+
     const rules = normalizeRulesConfig([{ id: ' rule-1 ', content: ' Always check cwd ', enabled: 1, extra: true }], ' Legacy instruction ')
     expect(rules.changed).toBe(true)
     expect(rules.normalized).toEqual([

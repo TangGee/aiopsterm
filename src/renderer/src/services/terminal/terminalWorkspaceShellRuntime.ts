@@ -699,6 +699,7 @@ export const createTerminalWorkspaceShellRuntime = (
         void forkSshFromPanel(panelId)
         return true
       case 'closeTab':
+        if (terminalDefaultShortcutOverridden('closeCurrentPanel', 'Ctrl+Shift+W')) return false
         void closeTab(panelId)
         return true
       case 'commandDialog':

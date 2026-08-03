@@ -30,6 +30,7 @@ type WorkspaceShellControllerState = {
 type WorkspaceShellControllerDeps = {
   setTopNotice: (message: string) => void
   openLocalTerminalPanel: (options?: { cwd?: string }) => Promise<TerminalPanel | null>
+  closePanel: (panelId: string) => Promise<unknown>
   toggleRight: () => Promise<boolean> | boolean
   setActiveSettingsSection: (section: SettingSectionKey) => void
   openRecentPanels: () => boolean
@@ -56,6 +57,7 @@ export const createWorkspaceShellController = (
   const {
     setTopNotice,
     openLocalTerminalPanel,
+    closePanel,
     toggleRight,
     setActiveSettingsSection,
     openRecentPanels,
@@ -99,6 +101,10 @@ export const createWorkspaceShellController = (
       activeModule.value = 'snippets'
       leftPanelOpen.value = true
       setTopNotice('已打开快捷命令')
+      return true
+    }
+    if (actionId === 'closeCurrentPanel') {
+      void closePanel(activePanelId.value)
       return true
     }
     if (actionId === 'recentPanels') return openRecentPanels()

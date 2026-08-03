@@ -1302,6 +1302,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     {
       setTopNotice,
       openLocalTerminalPanel,
+      closePanel,
       toggleRight,
       setActiveSettingsSection,
       openRecentPanels: panelNavigationRuntime.openRecentPanels,

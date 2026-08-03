@@ -676,6 +676,55 @@ describe('threadedTerminalRuntime', () => {
     host.dispose()
   })
 
+  it('routes shell control aliases and unreserved Alt Meta input', async () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    const element = createHostElement()
+    host.open(element)
+    const before = await workerMessages()
+
+    const keys: KeyboardEventInit[] = [
+      { key: 'a', code: 'KeyA', ctrlKey: true },
+      { key: 'e', code: 'KeyE', ctrlKey: true },
+      { key: ' ', code: 'Space', ctrlKey: true },
+      { key: '2', code: 'Digit2', ctrlKey: true },
+      { key: '3', code: 'Digit3', ctrlKey: true },
+      { key: '4', code: 'Digit4', ctrlKey: true },
+      { key: '5', code: 'Digit5', ctrlKey: true },
+      { key: '6', code: 'Digit6', ctrlKey: true },
+      { key: '7', code: 'Digit7', ctrlKey: true },
+      { key: '8', code: 'Digit8', ctrlKey: true },
+      { key: 'e', code: 'KeyE', altKey: true },
+      { key: 'Backspace', code: 'Backspace', altKey: true },
+      { key: 'Enter', code: 'Enter', altKey: true },
+      { key: 'Escape', code: 'Escape', altKey: true }
+    ]
+    keys.forEach((init) => element.dispatchEvent(new KeyboardEvent('keydown', { ...init, bubbles: true })))
+
+    const after = await workerMessages()
+    const inputs = after.core
+      .slice(before.core.length)
+      .filter((message: any) => message.type === 'input')
+      .map((message: any) => message.data)
+    expect(inputs).toEqual([
+      '\x01',
+      '\x05',
+      '\x00',
+      '\x00',
+      '\x1b',
+      '\x1c',
+      '\x1d',
+      '\x1e',
+      '\x1f',
+      '\x7f',
+      '\x1be',
+      '\x1b\x7f',
+      '\x1b\r',
+      '\x1b\x1b'
+    ])
+    host.dispose()
+  })
+
   it('sets DOM copy event data synchronously while resolving full selection through the core worker', async () => {
     installOffscreenCanvasSupport()
     const host = createHost()

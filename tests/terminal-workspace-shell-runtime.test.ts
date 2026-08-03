@@ -512,6 +512,26 @@ describe('terminalWorkspaceShellRuntime', () => {
     })
   })
 
+  it('closes the current panel with the default shortcut and respects a custom binding', async () => {
+    const workspace = createWorkspace()
+    const { runtime } = createRuntime({ workspace })
+    const terminalHost = document.createElement('div')
+    terminalHost.className = 'xterm-host'
+    terminalHost.dataset.terminalSurface = 'workspace'
+
+    const defaultShortcut = createKeyboardEvent({ ctrlKey: true, shiftKey: true, key: 'W', target: terminalHost })
+    await runtime.handleShortcut(defaultShortcut)
+    expect(workspace.closePanel).toHaveBeenCalledWith('panel-1')
+    expect(defaultShortcut.preventDefault).toHaveBeenCalledTimes(1)
+
+    vi.mocked(workspace.closePanel).mockClear()
+    workspace.settingsShortcuts = [{ id: 'closeCurrentPanel', action: '关闭当前面板', shortcut: 'Ctrl+Alt+W' }]
+    const oldDefault = createKeyboardEvent({ ctrlKey: true, shiftKey: true, key: 'W', target: terminalHost })
+    await runtime.handleShortcut(oldDefault)
+    expect(workspace.closePanel).not.toHaveBeenCalled()
+    expect(oldDefault.preventDefault).not.toHaveBeenCalled()
+  })
+
   it('forks SSH from the terminal context menu while preserving relay metadata', async () => {
     const workspace = createWorkspace(
       createPanel({

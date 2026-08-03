@@ -284,6 +284,9 @@ describe('local terminal backend runtime', () => {
     const aioicPath = join(controlBinDir, 'aioic')
     expect(readFileSync(aioicPath, 'utf8')).toContain('ELECTRON_RUN_AS_NODE=1 exec "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_CONTROL_HELPER_PATH" \'workspace\' \'close-idle\' "$@"')
     expect(statSync(aioicPath).mode & 0o111).not.toBe(0)
+    const aiobcPath = join(controlBinDir, 'aiobc')
+    expect(readFileSync(aiobcPath, 'utf8')).toContain('ELECTRON_RUN_AS_NODE=1 exec "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_CONTROL_HELPER_PATH" \'workspace\' \'action\' \'close_others\' "$@"')
+    expect(statSync(aiobcPath).mode & 0o111).not.toBe(0)
 
     const completionPath = String(env.AIOPSTERM_CONTROL_COMPLETION_BASH || '')
     expect(completionPath).toBe(join(controlBinDir, 'aiopsterm-control-completion.bash'))
