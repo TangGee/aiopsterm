@@ -2754,7 +2754,6 @@ export class ThreadedTerminalHost {
       const point = this.pointFromMouseEvent(event)
       const mode: ThreadedTerminalSelectionMode = event.detail >= 3 ? 'line' : event.detail === 2 ? 'word' : 'char'
       this.beginSelection(point, mode)
-      this.updateSelectionAutoscroll(event)
       this.renderSelection()
       this.emitSelectionChange()
     }, { signal })
@@ -2893,9 +2892,14 @@ export class ThreadedTerminalHost {
       this.applyScrollbarTheme()
     }, { signal })
     window.addEventListener('mousemove', (event) => {
-      if (!this.scrollbarDrag) return
-      event.preventDefault()
-      this.scrollToLine(Math.max(0, Math.min(this.scrollbarDrag.max, this.scrollLineFromDrag(event))))
+      if (this.selection?.selecting && !event.composedPath().includes(host)) {
+        event.preventDefault()
+        this.updateSelectionFromMouseEvent(event)
+      }
+      if (this.scrollbarDrag) {
+        event.preventDefault()
+        this.scrollToLine(Math.max(0, Math.min(this.scrollbarDrag.max, this.scrollLineFromDrag(event))))
+      }
     }, { signal })
     host.addEventListener('wheel', (event) => {
       const lineHeight = Math.max(1, Number(this.options.fontSize || 12) * Number(this.options.lineHeight || 1))

@@ -1107,6 +1107,62 @@ describe('threadedTerminalRuntime', () => {
     host.dispose()
   })
 
+  it('keeps scrolling while a selection drag moves above the terminal', async () => {
+    vi.useFakeTimers()
+    let host: ThreadedTerminalHost | null = null
+    try {
+      installOffscreenCanvasSupport()
+      host = createHost()
+      const element = createHostElement()
+      Object.defineProperty(element, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => ({ left: 0, top: 0, width: 800, height: 400, right: 800, bottom: 400, x: 0, y: 0, toJSON: () => ({}) })
+      })
+      host.open(element)
+      host.applySnapshot({
+        terminalId: 'panel-1',
+        seq: 1,
+        cols: 80,
+        rows: 10,
+        cursorX: 0,
+        cursorY: 9,
+        cursorAbsoluteY: 29,
+        viewportY: 20,
+        baseY: 30,
+        lines: Array.from({ length: 10 }, (_item, y) => ({ y, text: `line ${y + 20}`, cells: [] })),
+        dirtyRows: Array.from({ length: 10 }, (_item, y) => y),
+        full: true,
+        visible: true,
+        priority: 'active'
+      })
+
+      const before = await workerMessages()
+      element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, buttons: 1, clientX: 80, clientY: 75 }))
+      window.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, buttons: 1, clientX: 0, clientY: -10 }))
+      vi.advanceTimersByTime(85)
+
+      const during = await workerMessages()
+      const scrollMessages = during.core
+        .slice(before.core.length)
+        .filter((message: any) => message.type === 'scroll-lines')
+      expect(scrollMessages).toEqual([
+        expect.objectContaining({ terminalId: 'panel-1', amount: -1 }),
+        expect.objectContaining({ terminalId: 'panel-1', amount: -1 })
+      ])
+      expect(host.getSelectionPosition()).toEqual({ start: { x: 0, y: 19 }, end: { x: 10, y: 25 } })
+
+      window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 0, clientY: -10 }))
+      vi.advanceTimersByTime(100)
+      const after = await workerMessages()
+      expect(after.core.filter((message: any) => message.type === 'scroll-lines')).toHaveLength(
+        before.core.filter((message: any) => message.type === 'scroll-lines').length + 2
+      )
+    } finally {
+      host?.dispose()
+      vi.useRealTimers()
+    }
+  })
+
   it('underlines a hovered HTTP link and clears the decoration on mouse leave', () => {
     installOffscreenCanvasSupport()
     const host = createHost()

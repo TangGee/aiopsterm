@@ -73,6 +73,7 @@ VTE keeps the input-method boundary on the GTK widget: key events are filtered t
 - In mouse-tracking modes used by Vim, less, tmux, and other TUIs, normal mouse presses, releases, movement, and wheel events are forwarded to `@xterm/headless`'s core mouse service. Holding Shift forces terminal selection, matching the VTE convention for selecting text inside mouse-aware applications.
 - In the alternate screen without mouse tracking, wheel input is converted to Up/Down key sequences, using application cursor sequences when that mode is active. This keeps Vim-style editors responsive to scroll wheels without moving scrollback that does not apply to the alternate buffer.
 - Printable text is read from DOM `input` events instead of being synthesized from `keydown`, leaving non-US keyboard layouts and IME commits on Chromium's native path.
+- Threaded-terminal text selection continues tracking pointer movement at the window boundary after a drag leaves the canvas host. Crossing the top or bottom edge starts a bounded selection-scroll interval, extends the absolute buffer range as viewport snapshots advance, and stops on primary-button release or surface detach.
 
 ## Data Coalescing
 
