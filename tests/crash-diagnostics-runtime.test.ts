@@ -53,34 +53,29 @@ describe('crash diagnostics runtime', () => {
     expect(shouldEnableCrashDiagnostics({ AIOPSTERM_CRASH_DIAGNOSTICS: '1' } as NodeJS.ProcessEnv)).toBe(true)
   })
 
-  it('starts local Crashpad diagnostics without safe mode on a clean first run', async () => {
+  it('starts local Crashpad diagnostics on a clean first run', async () => {
     const { configureCrashDiagnosticsRuntime } = await loadRuntime()
     const harness = await createHarness()
-    const env = {} as NodeJS.ProcessEnv
     const snapshot = configureCrashDiagnosticsRuntime({
       app: harness.app as any,
       crashReporter: harness.crashReporter,
-      env,
       pid: 123,
       onProcess: vi.fn() as any,
       log: harness.log
     })
 
-    expect(snapshot.safeModeActive).toBe(false)
     expect(harness.app.setPath).toHaveBeenCalledWith('crashDumps', join(harness.userDataPath, 'crashes'))
     expect(harness.crashReporter.start).toHaveBeenCalledWith(expect.objectContaining({
-      uploadToServer: false,
-      globalExtra: expect.objectContaining({ safe_mode: '0' })
+      uploadToServer: false
     }))
     expect(harness.app.disableHardwareAcceleration).not.toHaveBeenCalled()
-    expect(env.AIOPSTERM_THREADED_TERMINAL).toBeUndefined()
 
     harness.emit('will-quit')
     const state = JSON.parse(await readFile(join(harness.userDataPath, 'crash-diagnostics', 'last-run.json'), 'utf-8'))
     expect(state.status).toBe('clean-exit')
   })
 
-  it('enters safe mode after a previous abnormal exit', async () => {
+  it('records a previous abnormal exit without changing the terminal renderer', async () => {
     const { configureCrashDiagnosticsRuntime } = await loadRuntime()
     const harness = await createHarness()
     const statePath = join(harness.userDataPath, 'crash-diagnostics', 'last-run.json')
@@ -94,12 +89,9 @@ describe('crash diagnostics runtime', () => {
       platform: process.platform,
       arch: process.arch
     }), 'utf-8')
-    const env = {} as NodeJS.ProcessEnv
-
     const snapshot = configureCrashDiagnosticsRuntime({
       app: harness.app as any,
       crashReporter: harness.crashReporter,
-      env,
       pid: 789,
       isProcessAlive: vi.fn(() => false),
       onProcess: vi.fn() as any,
@@ -107,13 +99,8 @@ describe('crash diagnostics runtime', () => {
     })
 
     expect(snapshot.previousAbnormalExit).toBe(true)
-    expect(snapshot.safeModeActive).toBe(true)
-    expect(snapshot.safeModeReason).toBe('previous-abnormal-exit')
-    expect(env.AIOPSTERM_CRASH_SAFE_MODE_ACTIVE).toBe('1')
-    expect(env.AIOPSTERM_THREADED_TERMINAL).toBe('0')
-    expect(env.AIOPSTERM_TERMINAL_RENDER_BACKEND).toBe('2d')
-    expect(harness.app.disableHardwareAcceleration).toHaveBeenCalled()
-    expect(harness.app.commandLine.appendSwitch).toHaveBeenCalledWith('disable-gpu')
+    expect(harness.app.disableHardwareAcceleration).not.toHaveBeenCalled()
+    expect(harness.app.commandLine.appendSwitch).not.toHaveBeenCalled()
   })
 
   it('does not enter safe mode for build-start expected restarts', async () => {
@@ -134,12 +121,9 @@ describe('crash diagnostics runtime', () => {
       createdAt: '2026-07-05T00:00:02.000Z',
       pids: [456]
     }), 'utf-8')
-    const env = {} as NodeJS.ProcessEnv
-
     const snapshot = configureCrashDiagnosticsRuntime({
       app: harness.app as any,
       crashReporter: harness.crashReporter,
-      env,
       pid: 789,
       isProcessAlive: vi.fn(() => false),
       onProcess: vi.fn() as any,
@@ -147,8 +131,6 @@ describe('crash diagnostics runtime', () => {
     })
 
     expect(snapshot.previousAbnormalExit).toBe(false)
-    expect(snapshot.safeModeActive).toBe(false)
-    expect(env.AIOPSTERM_CRASH_SAFE_MODE_ACTIVE).toBeUndefined()
     expect(harness.app.disableHardwareAcceleration).not.toHaveBeenCalled()
     await expect(readFile(join(diagnosticsDir, 'expected-restart.json'), 'utf-8')).rejects.toThrow()
   })
@@ -160,7 +142,6 @@ describe('crash diagnostics runtime', () => {
     configureCrashDiagnosticsRuntime({
       app: harness.app as any,
       crashReporter: harness.crashReporter,
-      env: {} as NodeJS.ProcessEnv,
       pid: 123,
       onProcess: vi.fn() as any,
       getWindows: () => [focusedWindow as any],

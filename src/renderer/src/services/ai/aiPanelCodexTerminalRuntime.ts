@@ -31,7 +31,7 @@ import type { CodexTargetEventKind } from '@/services/ai/codexTargetRuntime'
 import type { TerminalSettings } from '@/services/settings/workspaceConfigRuntime'
 import type { RuntimeLogLevel } from '@shared/contracts/appRuntime'
 import type { CodexSessionKillResult, CodexSessionTargetContext } from '@shared/contracts/codexSessions'
-import { shouldUseTerminalDebugLogs, shouldUseThreadedTerminal } from '@shared/runtimeSwitches'
+import { shouldUseTerminalDebugLogs } from '@shared/runtimeSwitches'
 
 type XtermRuntimeOptions = XtermTerminal['options'] & { termName?: string; minimumContrastRatio?: number }
 
@@ -203,7 +203,6 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
   const terminalUnavailableReasonByConversation = new WeakMap<TConversation, string>()
   const shouldUseInjectedTerminal = () => Boolean(options.terminalConstructor && options.fitConstructor)
   const threadedTerminalUnavailableReason = () => {
-    if (!shouldUseThreadedTerminal()) return 'threaded terminal switch is disabled'
     const capability = threadedTerminalCapability()
     if (!capability.supported) return capability.reason || 'threaded terminal capability check failed'
     return ''

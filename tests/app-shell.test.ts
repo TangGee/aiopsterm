@@ -1998,7 +1998,7 @@ describe('AppShell', () => {
     expect(store.activePanelId).toBe(firstPanelId)
   })
 
-  it('keeps Codex binding responsive when safe mode disables the threaded terminal', async () => {
+  it('keeps Codex threaded rendering enabled when a legacy off switch is present', async () => {
     const runtimeEnv = ((globalThis as {
       __AIOPSTERM_RUNTIME_ENV__?: Record<string, string | undefined>
     }).__AIOPSTERM_RUNTIME_ENV__ ||= {})
@@ -2033,12 +2033,11 @@ describe('AppShell', () => {
 
       expect(wrapper.find('[data-testid="ai-codex-target-picker"]').exists()).toBe(false)
       expect(wrapper.find('[data-testid="ai-codex-target-bar"]').text()).toContain('safe-mode-host')
-      expect(wrapper.find('[data-testid="ai-codex-error"]').exists()).toBe(true)
-      expect(store.aiAttentionUnreadCount).toBe(1)
-      expect(window.aiops.createCodexSession).not.toHaveBeenCalled()
+      expect(wrapper.find('[data-testid="ai-codex-error"]').exists()).toBe(false)
+      expect(window.aiops.createCodexSession).toHaveBeenCalledTimes(1)
       expect(vi.mocked(window.aiops.writeRuntimeLog!).mock.calls.filter(([, event]) =>
         event === 'renderer.codex-threaded-terminal.required'
-      )).toHaveLength(1)
+      )).toHaveLength(0)
 
       await wrapper.find('[data-testid="ai-codex-target-change"]').trigger('click')
       await wrapper.vm.$nextTick()

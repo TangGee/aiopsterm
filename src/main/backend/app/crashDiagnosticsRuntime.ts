@@ -11,14 +11,11 @@ type CrashDiagnosticsState = {
   version: string
   platform: NodeJS.Platform
   arch: string
-  safeModeActive?: boolean
-  safeModeReason?: string
 }
 
 type CrashDiagnosticsRuntimeInput = {
-  app: Pick<App, 'commandLine' | 'disableHardwareAcceleration' | 'getName' | 'getPath' | 'getVersion' | 'isReady' | 'on' | 'setPath'>
+  app: Pick<App, 'getName' | 'getPath' | 'getVersion' | 'on' | 'setPath'>
   crashReporter: Pick<CrashReporter, 'addExtraParameter' | 'start'>
-  env?: NodeJS.ProcessEnv
   now?: () => Date
   pid?: number
   isProcessAlive?: (pid: number) => boolean
@@ -32,8 +29,6 @@ export type CrashDiagnosticsSnapshot = {
   crashDumpsDir: string
   stateFilePath: string
   previousAbnormalExit: boolean
-  safeModeActive: boolean
-  safeModeReason: string
 }
 
 const stateDirName = 'crash-diagnostics'
@@ -107,29 +102,6 @@ const cleanShortText = (value: unknown, fallback = '') => {
   return (text || fallback).slice(0, 120)
 }
 
-const shouldForceSafeMode = (env: NodeJS.ProcessEnv) => cleanShortText(env.AIOPSTERM_CRASH_SAFE_MODE) === '1'
-const shouldDisableSafeMode = (env: NodeJS.ProcessEnv) => cleanShortText(env.AIOPSTERM_CRASH_SAFE_MODE) === '0'
-
-const setEnv = (env: NodeJS.ProcessEnv, name: string, value: string) => {
-  env[name] = value
-}
-
-const applySafeMode = (input: CrashDiagnosticsRuntimeInput, reason: string) => {
-  const env = input.env || process.env
-  setEnv(env, 'AIOPSTERM_CRASH_SAFE_MODE_ACTIVE', '1')
-  setEnv(env, 'AIOPSTERM_CRASH_SAFE_MODE_REASON', reason)
-  setEnv(env, 'AIOPSTERM_THREADED_TERMINAL', '0')
-  setEnv(env, 'AIOPSTERM_TERMINAL_RENDER_BACKEND', '2d')
-  try {
-    if (!input.app.isReady?.()) {
-      input.app.disableHardwareAcceleration()
-      input.app.commandLine?.appendSwitch?.('disable-gpu')
-    }
-  } catch {
-    // Safe mode must not block startup if Electron rejects a platform switch.
-  }
-}
-
 const windowContext = (input: CrashDiagnosticsRuntimeInput) => {
   const windows = input.getWindows?.() || []
   return {
@@ -159,7 +131,6 @@ const webContentsContext = (input: CrashDiagnosticsRuntimeInput, webContents: We
 }
 
 export const configureCrashDiagnosticsRuntime = (input: CrashDiagnosticsRuntimeInput): CrashDiagnosticsSnapshot => {
-  const env = input.env || process.env
   const now = () => (input.now?.() || new Date()).toISOString()
   const log = input.log || logRuntimeEvent
   const userDataPath = input.app.getPath('userData')
@@ -170,12 +141,6 @@ export const configureCrashDiagnosticsRuntime = (input: CrashDiagnosticsRuntimeI
   const rawPreviousAbnormalExit = previousRunEndedAbnormally(previousState, input.isProcessAlive)
   const expectedRestart = rawPreviousAbnormalExit && consumeExpectedRestartMarker(expectedRestartFilePath, previousState?.pid)
   const previousAbnormalExit = rawPreviousAbnormalExit && !expectedRestart
-  const safeModeReason = shouldForceSafeMode(env)
-    ? 'forced'
-    : previousAbnormalExit && !shouldDisableSafeMode(env)
-      ? 'previous-abnormal-exit'
-      : ''
-  const safeModeActive = Boolean(safeModeReason)
 
   try {
     mkdirSync(crashDumpsDir, { recursive: true })
@@ -187,8 +152,6 @@ export const configureCrashDiagnosticsRuntime = (input: CrashDiagnosticsRuntimeI
     })
   }
 
-  if (safeModeActive) applySafeMode(input, safeModeReason)
-
   const currentState: CrashDiagnosticsState = {
     pid: input.pid || process.pid,
     startedAt: now(),
@@ -196,8 +159,7 @@ export const configureCrashDiagnosticsRuntime = (input: CrashDiagnosticsRuntimeI
     status: 'starting',
     version: input.app.getVersion(),
     platform: process.platform,
-    arch: process.arch,
-    ...(safeModeActive ? { safeModeActive, safeModeReason } : {})
+    arch: process.arch
   }
   writeState(stateFilePath, currentState)
 
@@ -211,9 +173,7 @@ export const configureCrashDiagnosticsRuntime = (input: CrashDiagnosticsRuntimeI
         app: input.app.getName(),
         version: input.app.getVersion(),
         platform: process.platform,
-        arch: process.arch,
-        safe_mode: safeModeActive ? '1' : '0',
-        safe_reason: safeModeReason || 'none'
+        arch: process.arch
       }
     })
     input.crashReporter.addExtraParameter('pid', String(currentState.pid))
@@ -235,9 +195,7 @@ export const configureCrashDiagnosticsRuntime = (input: CrashDiagnosticsRuntimeI
       crashDumpsDir,
       stateFilePath,
       previousAbnormalExit,
-      expectedRestart,
-      safeModeActive,
-      safeModeReason: safeModeReason || undefined
+      expectedRestart
     })
   })
 
@@ -254,8 +212,7 @@ export const configureCrashDiagnosticsRuntime = (input: CrashDiagnosticsRuntimeI
       ...webContentsContext(input, webContents),
       ...windowContext(input),
       reason: cleanShortText(details?.reason),
-      exitCode: details?.exitCode,
-      safeModeActive
+      exitCode: details?.exitCode
     })
   })
 
@@ -266,8 +223,7 @@ export const configureCrashDiagnosticsRuntime = (input: CrashDiagnosticsRuntimeI
       reason: cleanShortText(details?.reason),
       exitCode: details?.exitCode,
       serviceName: cleanShortText(details?.serviceName),
-      name: cleanShortText(details?.name),
-      safeModeActive
+      name: cleanShortText(details?.name)
     })
   })
 
@@ -297,8 +253,6 @@ export const configureCrashDiagnosticsRuntime = (input: CrashDiagnosticsRuntimeI
   return {
     crashDumpsDir,
     stateFilePath,
-    previousAbnormalExit,
-    safeModeActive,
-    safeModeReason
+    previousAbnormalExit
   }
 }

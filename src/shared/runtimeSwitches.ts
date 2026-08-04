@@ -22,8 +22,6 @@ const envValue = (name: string) => {
   }
 }
 
-const envFlagDisabled = (name: string) => envValue(name) === '0'
-
 export const shouldUseAiChatBackendDouble = () => envFlagEnabled('AIOPSTERM_AI_CHAT_BACKEND_DOUBLE')
 
 export const shouldUseAiTodoSeedData = () => envFlagEnabled('AIOPSTERM_AI_TODO_ENABLE_SEED')
@@ -64,7 +62,7 @@ export const shouldUseTerminalDebugLogs = () => envFlagEnabled('AIOPSTERM_TERMIN
 
 export const shouldUseTerminalStressHarness = () => envFlagEnabled('AIOPSTERM_TERMINAL_STRESS')
 
-export const shouldUseThreadedTerminal = () => !envFlagDisabled('AIOPSTERM_THREADED_TERMINAL')
+export const shouldUseThreadedTerminal = () => true
 
 export const terminalRenderBackend = () => envValue('AIOPSTERM_TERMINAL_RENDER_BACKEND') === 'webgl2' ? 'webgl2' : '2d'
 

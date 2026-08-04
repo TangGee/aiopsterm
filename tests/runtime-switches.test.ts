@@ -96,12 +96,12 @@ describe('runtime switch boundaries', () => {
     })
   })
 
-  it('enables threaded terminals by default and allows an explicit off switch', () => {
+  it('keeps threaded terminals enabled even when an off switch is provided', () => {
     delete process.env.AIOPSTERM_THREADED_TERMINAL
     expect(shouldUseThreadedTerminal()).toBe(true)
 
     process.env.AIOPSTERM_THREADED_TERMINAL = '0'
-    expect(shouldUseThreadedTerminal()).toBe(false)
+    expect(shouldUseThreadedTerminal()).toBe(true)
 
     process.env.AIOPSTERM_THREADED_TERMINAL = '1'
     expect(shouldUseThreadedTerminal()).toBe(true)

@@ -871,7 +871,7 @@ describe('aiPanelCodexTerminalRuntime', () => {
     vi.resetModules()
   })
 
-  it('does not fall back to main-thread xterm when Codex threaded terminal is unavailable', async () => {
+  it('creates a threaded Codex terminal even when a legacy switch reports disabled', async () => {
     vi.resetModules()
     vi.doMock('@shared/runtimeSwitches', () => ({
       shouldUseTerminalDebugLogs: () => false,
@@ -890,7 +890,6 @@ describe('aiPanelCodexTerminalRuntime', () => {
     const conversation = createConversation()
     const clientBundle = createClient()
     const logs: Array<{ level: string; event: string; fields?: Record<string, unknown> }> = []
-    const syncAttentionState = vi.fn()
     const runtime = createRuntimeWithoutFallback<TestConversation>({
       conversations: () => [conversation],
       activeConversation: () => conversation,
@@ -898,7 +897,7 @@ describe('aiPanelCodexTerminalRuntime', () => {
       terminalSettings: () => terminalSettings,
       currentBoundTarget: (item) => item.boundTarget,
       isConversationVisible: (item) => item.id === conversation.id,
-      syncAttentionState,
+      syncAttentionState: vi.fn(),
       labels: {
         error: () => 'Codex error',
         bridgeMissing: () => 'Bridge missing',
@@ -924,20 +923,11 @@ describe('aiPanelCodexTerminalRuntime', () => {
     runtime.setHostElement(conversation, document.createElement('div'))
     await runtime.startSession(conversation)
 
-    expect(conversation.terminal).toBeNull()
-    expect(conversation.status).toBe('error')
-    expect(conversation.error).toBe('Threaded terminal unavailable')
-    expect(createThreadedTerminalHost).not.toHaveBeenCalled()
-    expect(FakeTerminal.instances).toHaveLength(0)
-    expect(syncAttentionState).toHaveBeenCalledTimes(1)
-    expect(logs.filter((entry) => entry.event === 'renderer.codex-threaded-terminal.required')).toHaveLength(1)
-    expect(logs).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        level: 'error',
-        event: 'renderer.codex-threaded-terminal.required',
-        fields: expect.objectContaining({ reason: 'threaded terminal switch is disabled' })
-      })
-    ]))
+    expect(conversation.terminal).toBeInstanceOf(FakeThreadedTerminal)
+    expect(conversation.status).toBe('ready')
+    expect(conversation.error).toBe('')
+    expect(createThreadedTerminalHost).toHaveBeenCalledTimes(1)
+    expect(logs.filter((entry) => entry.event === 'renderer.codex-threaded-terminal.required')).toHaveLength(0)
 
     vi.doUnmock('@shared/runtimeSwitches')
     vi.doUnmock('@/services/terminal/threadedTerminalRuntime')
