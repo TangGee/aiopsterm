@@ -69,13 +69,13 @@ run_privileged() {
   fi
 }
 
-command_missing() {
+command_exists() {
   local command_name="$1"
   command -v "${command_name}" >/dev/null 2>&1
 }
 
 node_is_supported() {
-  command_missing node || return 1
+  command_exists node || return 1
   node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)' >/dev/null 2>&1
 }
 
@@ -139,15 +139,15 @@ load_nvm() {
 
 ensure_node() {
   load_nvm
-  if node_is_supported && command_missing npm; then
+  if node_is_supported && command_exists npm; then
     return
   fi
-  if ! command_missing nvm; then
+  if ! command_exists nvm; then
     echo '[aiopsterm] installing nvm because Node.js 20+ is not available'
     curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
     load_nvm
   fi
-  command_missing nvm || { echo '[aiopsterm] nvm installation failed; install Node.js 22+ manually.' >&2; return 1; }
+  command_exists nvm || { echo '[aiopsterm] nvm installation failed; install Node.js 22+ manually.' >&2; return 1; }
   local node_major="${AIOPSTERM_NODE_MAJOR:-22}"
   nvm install "${node_major}"
   nvm alias default "${node_major}"
@@ -155,19 +155,19 @@ ensure_node() {
 }
 
 ensure_rustup() {
-  if command_missing rustup; then
+  if ! command_exists rustup; then
     echo '[aiopsterm] rustup is missing; installing it from the official rustup endpoint'
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
     export PATH="${HOME}/.cargo/bin:${PATH}"
   fi
-  command_missing rustup || { echo '[aiopsterm] rustup is still unavailable after installation.' >&2; return 1; }
+  command_exists rustup || { echo '[aiopsterm] rustup is still unavailable after installation.' >&2; return 1; }
 }
 
 ensure_prerequisites() {
   local -a system_required=(ca-certificates curl python3 git pkg-config musl-gcc clang ld.lld dpkg-deb xvfb-run)
   local missing=0 command_name
   for command_name in "${system_required[@]}"; do
-    if ! command_missing "${command_name}"; then
+    if ! command_exists "${command_name}"; then
       echo "[aiopsterm] missing command: ${command_name}" >&2
       missing=1
     fi
@@ -179,7 +179,7 @@ ensure_prerequisites() {
   ensure_node
   ensure_rustup
   for command_name in node npm "${system_required[@]}"; do
-    command_missing "${command_name}" || { echo "[aiopsterm] required command is still missing: ${command_name}" >&2; return 1; }
+    command_exists "${command_name}" || { echo "[aiopsterm] required command is still missing: ${command_name}" >&2; return 1; }
   done
   node_is_supported || { echo '[aiopsterm] Node.js 20 or newer is required for the Linux build.' >&2; return 1; }
 }

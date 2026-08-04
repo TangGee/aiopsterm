@@ -151,6 +151,7 @@ describe('package configuration audit', () => {
     expect(packageJson.scripts?.['build:linux:one-click']).toContain('scripts/build-linux.sh')
     expect(script).toContain('can only run on Linux')
     expect(script).toContain('--china-mirror')
+    expect(script).toContain('if ! command_exists rustup; then')
     expect(script).toContain('run_npm run build:linux')
     expect(script).toContain('package:verify -- linux-appimage')
     expect(script).toContain('package:verify -- linux-deb')
