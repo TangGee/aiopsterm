@@ -145,12 +145,19 @@ describe('package configuration audit', () => {
     expect(script).toContain('Get-VisualStudioInstallationPath')
   })
 
-  it('keeps the local Linux one-click build entrypoint available', () => {
+  it('keeps the local Linux one-click build entrypoint available', async () => {
     const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts?: Record<string, string> }
     const script = readFileSync('scripts/build-linux.sh', 'utf8')
+    const help = await execFileAsync('bash', ['scripts/build-linux.sh', '--help'], { cwd: process.cwd() })
+    await expect(execFileAsync('bash', ['scripts/build-linux.sh', '--npm-registry'], { cwd: process.cwd() })).rejects.toMatchObject({
+      code: 2,
+      stderr: expect.stringContaining('--npm-registry requires a URL')
+    })
     expect(packageJson.scripts?.['build:linux:one-click']).toContain('scripts/build-linux.sh')
+    expect(help.stdout).toContain('--npm-registry URL')
     expect(script).toContain('can only run on Linux')
     expect(script).toContain('--china-mirror')
+    expect(script).toContain('export npm_config_registry="${npm_registry}"')
     expect(script).toContain('if ! command_exists rustup; then')
     expect(script).toContain('local -a system_required=(curl python3 git pkg-config musl-gcc clang ld.lld dpkg-deb xvfb-run)')
     expect(script).toContain('run_npm run build:linux')

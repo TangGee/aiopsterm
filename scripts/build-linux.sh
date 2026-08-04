@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 APP_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
 
 china_mirror=0
+npm_registry=''
 skip_setup=0
 skip_dependencies=0
 run_tests=0
@@ -20,6 +21,7 @@ Build and verify the Linux AppImage and deb packages on a native Linux host.
 
 Options:
   --china-mirror       Use process-local npm, Electron, and Rust mirrors.
+  --npm-registry URL   Override the process-local npm registry.
   --skip-setup         Do not install missing system prerequisites.
   --skip-dependencies  Reuse the existing node_modules directory.
   --run-tests          Run the full Vitest suite before packaging.
@@ -34,6 +36,14 @@ EOF
 while (($#)); do
   case "$1" in
     --china-mirror) china_mirror=1 ;;
+    --npm-registry)
+      if (($# < 2)) || [[ "$2" == --* ]]; then
+        echo '[aiopsterm] --npm-registry requires a URL.' >&2
+        exit 2
+      fi
+      npm_registry="$2"
+      shift
+      ;;
     --skip-setup) skip_setup=1 ;;
     --skip-dependencies) skip_dependencies=1 ;;
     --run-tests) run_tests=1 ;;
@@ -94,6 +104,9 @@ configure_sources() {
     export npm_config_registry='https://registry.npmjs.org/'
     export npm_config_disturl='https://nodejs.org/dist'
     export AIOPSTERM_ELECTRON_HEADERS_URL='https://artifacts.electronjs.org/headers/dist'
+  fi
+  if [[ -n "${npm_registry}" ]]; then
+    export npm_config_registry="${npm_registry}"
   fi
 }
 

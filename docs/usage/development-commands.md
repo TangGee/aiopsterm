@@ -139,12 +139,14 @@ Useful options for an existing Linux toolchain or a restricted network:
 ```bash
 bash scripts/build-linux.sh --skip-setup --skip-dependencies
 bash scripts/build-linux.sh --china-mirror
+bash scripts/build-linux.sh --npm-registry https://repo.huaweicloud.com/repository/npm/
+bash scripts/build-linux.sh --china-mirror --npm-registry https://repo.huaweicloud.com/repository/npm/
 bash scripts/build-linux.sh --appimage-only
 bash scripts/build-linux.sh --deb-only
 bash scripts/build-linux.sh --setup-only
 ```
 
-The script is Linux-only. It uses the local package manager (`apt`, `dnf`, `yum`, or `pacman`) only when required commands are missing, and keeps mirror settings process-local.
+The script is Linux-only. It uses the local package manager (`apt`, `dnf`, `yum`, or `pacman`) only when required commands are missing, and keeps mirror settings process-local. `--npm-registry <URL>` overrides only the npm registry. Combine it with `--china-mirror` to keep the mainland China Electron and Rust mirrors while using a custom npm registry such as Huawei Cloud.
 
 Build only the Linux AppImage package:
 
