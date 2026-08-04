@@ -1,6 +1,7 @@
 import { computed, ref, watch, type Ref } from 'vue'
 import type { ModuleKey } from '@/config/navigation'
 import type { UiFocusCause } from '@/services/app/uiFocusCoordinator'
+import { terminalPanelSwitchTelemetry } from '@/services/terminal/terminalPanelSwitchTelemetry'
 import {
   isWelcomeTerminalPanelPlaceholder,
   type TerminalPanel
@@ -154,6 +155,10 @@ export const createWorkspacePanelNavigationRuntime = (state: WorkspacePanelNavig
   }
 
   const openRecentPanels = () => {
+    terminalPanelSwitchTelemetry.pickerRequested({
+      activePanelId: state.activePanelId.value,
+      panelCount: currentEligiblePanels().length
+    })
     if (!recentPanelsOpen.value) recentPanelsCloseReason.value = 'restore'
     recentPanelsOpen.value = true
     recentPanelsFocusRequest.value += 1
@@ -166,7 +171,9 @@ export const createWorkspacePanelNavigationRuntime = (state: WorkspacePanelNavig
   }
 
   const activateRecentPanel = (panelId: string, cause: UiFocusCause = 'navigation') => {
+    const trace = terminalPanelSwitchTelemetry.requested('recent-panel', state.activePanelId.value, panelId)
     const activated = activatePanelSurface(panelId, { cause })
+    if (!activated) terminalPanelSwitchTelemetry.failed(trace, new Error('Recent panel activation was rejected.'))
     if (activated) closeRecentPanels('activate')
     return activated
   }
@@ -176,10 +183,16 @@ export const createWorkspacePanelNavigationRuntime = (state: WorkspacePanelNavig
     const targetIndex = panelNavigationIndex.value + offset
     if (targetIndex < 0 || targetIndex >= panelNavigationHistory.value.length) return false
     const targetPanelId = panelNavigationHistory.value[targetIndex]
+    const trace = terminalPanelSwitchTelemetry.requested(
+      offset < 0 ? 'history-back' : 'history-forward',
+      state.activePanelId.value,
+      targetPanelId
+    )
     historyTraversalPanelId = targetPanelId
     panelNavigationIndex.value = targetIndex
     closeRecentPanels('activate')
     if (activatePanelSurface(targetPanelId, { cause: 'keyboard' })) return true
+    terminalPanelSwitchTelemetry.failed(trace, new Error('History panel activation was rejected.'))
     historyTraversalPanelId = ''
     return false
   }

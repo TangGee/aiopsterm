@@ -10,6 +10,10 @@ import {
   type ManagedAiSessionTerminalSwitchTrace
 } from '@/services/ai/managedAiSessionTerminalSwitchTelemetry'
 import { terminalClient } from '@/services/terminal/terminalClient'
+import {
+  terminalPanelSwitchTelemetry,
+  type TerminalPanelSwitchTrace
+} from '@/services/terminal/terminalPanelSwitchTelemetry'
 import { createTerminalWorkspaceCommandRuntime, createTerminalWorkspaceCommandState } from '@/services/terminal/terminalWorkspaceCommandRuntime'
 import { createTerminalWorkspaceContextRuntime } from '@/services/terminal/terminalWorkspaceContextRuntime'
 import { createTerminalWorkspaceLayoutRuntime } from '@/services/terminal/terminalWorkspaceLayoutRuntime'
@@ -1116,15 +1120,73 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     }
   }
 
+  const reportTerminalPanelSwitchFrame = async (
+    panelId: string,
+    trace: TerminalPanelSwitchTrace,
+    baselineFrameSeq: number,
+    surfaceWasAttached: boolean
+  ) => {
+    try {
+      const frameWaitStartedAt = nowMs()
+      await nextAnimationFrame()
+      const view = terminalViews.get(panelId)
+      if (!view) throw new Error('Terminal view was not created after panel activation.')
+      const host = view.openedElement
+      if (!isThreadedTerminalHost(view.terminal)) {
+        terminalPanelSwitchTelemetry.completed(trace, {
+          terminalRenderer: 'legacy-xterm',
+          hostConnected: Boolean(host?.isConnected),
+          focused: Boolean(host?.contains(document.activeElement)),
+          frameWaitMs: Math.max(0, Math.round((nowMs() - frameWaitStartedAt) * 10) / 10)
+        })
+        return
+      }
+      let frame = view.terminal.debugInfo()
+      if (!frame.surfaceAttached || frame.lastFrameSeq <= baselineFrameSeq) {
+        await view.terminal.waitForNextRenderFrame(baselineFrameSeq, 2000)
+        frame = view.terminal.debugInfo()
+      }
+      if (!frame.surfaceAttached || !host?.isConnected) {
+        throw new Error('Threaded terminal surface was not connected after panel activation.')
+      }
+      terminalPanelSwitchTelemetry.completed(trace, {
+        terminalRenderer: 'threaded',
+        surfaceReused: surfaceWasAttached,
+        frameAdvanced: frame.lastFrameSeq > baselineFrameSeq,
+        surfaceWasAttached,
+        surfaceAttached: frame.surfaceAttached,
+        hostConnected: true,
+        hostWidth: host.clientWidth,
+        hostHeight: host.clientHeight,
+        focused: host.contains(document.activeElement),
+        frameSeq: frame.lastFrameSeq,
+        frameWaitMs: Math.max(0, Math.round((nowMs() - frameWaitStartedAt) * 10) / 10)
+      })
+    } catch (error) {
+      terminalPanelSwitchTelemetry.failed(trace, error, {
+        activePanelId: workspace.activePanelId,
+        targetActive: workspace.activePanelId === panelId
+      })
+    }
+  }
+
   watch(
     () => workspace.activePanelId,
     (panelId, previousPanelId) => {
+      const panelSwitchTrace = terminalPanelSwitchTelemetry.activeTraceForPanel(panelId)
       workspace.touchPanelActivity(panelId)
       const switchTrace = managedAiSessionTerminalSwitchTelemetry.activeTraceForPanel(panelId)
       const existingView = terminalViews.get(panelId)
       const existingThreadedInfo = existingView && isThreadedTerminalHost(existingView.terminal)
         ? existingView.terminal.debugInfo()
         : null
+      if (panelSwitchTrace) {
+        terminalPanelSwitchTelemetry.stage(panelSwitchTrace, 'renderer.terminal-panel-switch.state-committed', {
+          previousPanelId,
+          surfaceWasAttached: existingThreadedInfo?.surfaceAttached,
+          baselineFrameSeq: existingThreadedInfo?.lastFrameSeq || 0
+        })
+      }
       if (previousPanelId && previousPanelId !== panelId && workspace.panels.some((panel) => panel.id === previousPanelId)) {
         terminalControlSurface.recordLastActiveControlPanel(previousPanelId)
       }
@@ -1132,6 +1194,14 @@ export const useTerminalWorkspaceContainerRuntime = () => {
       nextTick(() => {
         scrollActiveTerminalTabIntoView()
         visibleTerminalPanels.value.filter((panel) => isTerminalWorkspacePanel(panel)).forEach((panel) => syncTerminalView(panel))
+        if (panelSwitchTrace) {
+          void reportTerminalPanelSwitchFrame(
+            panelId,
+            panelSwitchTrace,
+            existingThreadedInfo?.lastFrameSeq || 0,
+            Boolean(existingThreadedInfo?.surfaceAttached)
+          )
+        }
         if (switchTrace) {
           void reportManagedAiTerminalFrame(
             panelId,

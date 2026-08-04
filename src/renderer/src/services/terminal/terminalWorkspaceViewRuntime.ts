@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { mirrorTextToClipboardQuietly } from '@/services/app/clipboardRuntime'
 import { writeRendererRuntimeLog as writeRuntimeLog } from '@/services/app/runtimeLogClient'
+import { terminalPanelSwitchTelemetry } from '@/services/terminal/terminalPanelSwitchTelemetry'
 import { terminalClient } from '@/services/terminal/terminalClient'
 import { terminalThemeForAppTheme, type TerminalSurfaceMode } from '@/services/terminal/terminalThemeRuntime'
 import {
@@ -1251,14 +1252,24 @@ export const createTerminalWorkspaceViewRuntime = ({
 
   const setTerminalElement = (panelId: string, element: Element | ComponentPublicInstance | null) => {
     if (!(element instanceof HTMLElement)) {
+      const switchTrace = terminalPanelSwitchTelemetry.activeTraceForSource(panelId)
+      const detachStartedAt = nowMs()
       terminalElements.delete(panelId)
       const view = terminalViews.get(panelId)
       if (view) {
         if (isThreadedTerminalHost(view.terminal)) {
+          const surfaceWasAttached = view.terminal.debugInfo().surfaceAttached
           view.resizeObserver?.disconnect()
           view.resizeObserver = undefined
           view.openedElement = undefined
           view.terminal.detachSurface()
+          if (switchTrace) {
+            terminalPanelSwitchTelemetry.stage(switchTrace, 'renderer.terminal-panel-switch.surface-detached', {
+              detachMs: Math.max(0, Math.round((nowMs() - detachStartedAt) * 10) / 10),
+              surfaceWasAttached,
+              surfaceAttached: view.terminal.debugInfo().surfaceAttached
+            })
+          }
           return
         }
         disposeTerminalView(panelId, 'view-disposed')
@@ -1266,9 +1277,24 @@ export const createTerminalWorkspaceViewRuntime = ({
       return
     }
     terminalElements.set(panelId, element)
+    const switchTrace = terminalPanelSwitchTelemetry.activeTraceForPanel(panelId)
+    const mountStartedAt = nowMs()
     const panel = workspace.panels.find((item) => item.id === panelId)
     if (panel && isTerminalWorkspacePanel(panel)) {
       if (isTerminalWorkspaceVisible()) createTerminalView(panel, element)
+    }
+    if (switchTrace) {
+      const view = terminalViews.get(panelId)
+      const info = view && isThreadedTerminalHost(view.terminal) ? view.terminal.debugInfo() : null
+      terminalPanelSwitchTelemetry.stage(switchTrace, 'renderer.terminal-panel-switch.host-mounted', {
+        mountMs: Math.max(0, Math.round((nowMs() - mountStartedAt) * 10) / 10),
+        hostConnected: element.isConnected,
+        hostWidth: element.clientWidth,
+        hostHeight: element.clientHeight,
+        threaded: Boolean(info),
+        surfaceAttached: info?.surfaceAttached,
+        frameSeq: info?.lastFrameSeq
+      })
     }
   }
 

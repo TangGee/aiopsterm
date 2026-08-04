@@ -74,6 +74,7 @@ import { useI18n } from '@/i18n'
 import { useWorkspaceStore, type TerminalPanel } from '@/stores/workspace'
 import { matchesWorkspacePanelQuery } from '@/services/workspace/workspacePanelNavigationRuntime'
 import { captureUiFocus, restoreUiFocus, type UiFocusCause } from '@/services/app/uiFocusCoordinator'
+import { terminalPanelSwitchTelemetry } from '@/services/terminal/terminalPanelSwitchTelemetry'
 
 const workspace = useWorkspaceStore()
 const { t } = useI18n()
@@ -188,10 +189,21 @@ watch(
   () => workspace.recentPanelsOpen,
   (open) => {
     if (open) {
+      const pickerSequence = terminalPanelSwitchTelemetry.activePickerSequence()
       focusSnapshot = captureUiFocus()
       query.value = ''
       resetSelection()
       focusSearch()
+      nextTick(() => {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            terminalPanelSwitchTelemetry.pickerReady(pickerSequence, {
+              panelCount: filteredPanels.value.length,
+              searchFocused: document.activeElement === searchInput.value
+            })
+          })
+        })
+      })
       return
     }
     if (workspace.recentPanelsCloseReason === 'activate') {
