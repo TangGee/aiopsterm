@@ -66,13 +66,16 @@ const waitFor = async (predicate: () => boolean) => {
   throw new Error('condition was not met')
 }
 
-const startMcpScript = (socketPath: string) => {
+const startMcpScript = (socketPath: string, runtimeId?: string) => {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    AIOPSTERM_CODEX_BRIDGE_SOCKET: socketPath
+  }
+  if (runtimeId) env.AIOPSTERM_CODEX_RUNTIME_ID = runtimeId
+  else delete env.AIOPSTERM_CODEX_RUNTIME_ID
   const child = spawn(process.execPath, [join(process.cwd(), 'resources', 'codex-aiopsterm-mcp.js')], {
     cwd: process.cwd(),
-    env: {
-      ...process.env,
-      AIOPSTERM_CODEX_BRIDGE_SOCKET: socketPath
-    },
+    env,
     stdio: 'pipe'
   }) as ChildProcessWithoutNullStreams
   const pending = new Map<string, { resolve: (response: McpResponse) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>()
@@ -1015,6 +1018,80 @@ describe('Codex terminal bridge runtime', () => {
     expect(secondWrites).toEqual(['pwd\n'])
   })
 
+  it('does not allow an explicit session id to override a Codex runtime target', async () => {
+    const bridge = await loadBridge()
+    const localWrites: string[] = []
+    const sshWrites: string[] = []
+    bridge.registerCodexTerminalBridgeSession({
+      id: 'terminal-runtime-local',
+      kind: 'local',
+      cwd: '/home/operator',
+      window: {} as never,
+      write: (data: string | Buffer) => localWrites.push(String(data))
+    })
+    bridge.registerCodexTerminalBridgeSession({
+      id: 'terminal-runtime-ssh',
+      kind: 'ssh',
+      host: 'remote.internal',
+      cwd: '/root',
+      window: {} as never,
+      write: (data: string | Buffer) => sshWrites.push(String(data))
+    })
+    bridge.updateCodexTerminalBridgeRuntimeTarget('runtime-local', {
+      kind: 'local',
+      sessionId: 'terminal-runtime-local',
+      cwd: '/home/operator'
+    })
+
+    const response = await bridge.callCodexTerminalBridgeTool('run_command', {
+      __aiopstermCodexRuntimeId: 'runtime-local',
+      sessionId: 'terminal-runtime-ssh',
+      command: 'hostname',
+      mode: 'return_immediately'
+    })
+
+    expect(response).toEqual(expect.objectContaining({
+      ok: true,
+      target: expect.objectContaining({ sessionId: 'terminal-runtime-local', kind: 'local' })
+    }))
+    expect(localWrites).toEqual(['hostname\n'])
+    expect(sshWrites).toEqual([])
+  })
+
+  it('fails closed when a Codex runtime target is missing or disconnected', async () => {
+    const bridge = await loadBridge()
+    const fallbackWrites: string[] = []
+    bridge.registerCodexTerminalBridgeSession({
+      id: 'terminal-runtime-fallback',
+      kind: 'ssh',
+      host: 'fallback.internal',
+      cwd: '/root',
+      window: {} as never,
+      write: (data: string | Buffer) => fallbackWrites.push(String(data))
+    })
+    bridge.setCodexTerminalBridgePreferredSession('terminal-runtime-fallback')
+
+    const unknownRuntime = await bridge.callCodexTerminalBridgeTool('run_command', {
+      __aiopstermCodexRuntimeId: 'runtime-unknown',
+      command: 'hostname',
+      mode: 'return_immediately'
+    })
+    bridge.updateCodexTerminalBridgeRuntimeTarget('runtime-closed', {
+      kind: 'local',
+      sessionId: 'terminal-runtime-closed',
+      cwd: '/home/operator'
+    })
+    const closedTarget = await bridge.callCodexTerminalBridgeTool('run_command', {
+      __aiopstermCodexRuntimeId: 'runtime-closed',
+      command: 'hostname',
+      mode: 'return_immediately'
+    })
+
+    expect(unknownRuntime).toEqual(expect.objectContaining({ ok: false, errorCode: 'CODEX_RUNTIME_TARGET_UNAVAILABLE' }))
+    expect(closedTarget).toEqual(expect.objectContaining({ ok: false, errorCode: 'CODEX_RUNTIME_TARGET_UNAVAILABLE' }))
+    expect(fallbackWrites).toEqual([])
+  })
+
   it('keeps structured read-only tools isolated to each Codex runtime target', async () => {
     const bridge = await loadBridge()
     const firstWrites: string[] = []
@@ -1465,9 +1542,16 @@ describe('Codex terminal bridge runtime', () => {
         },
         write: (data: string | Buffer) => writes.push(String(data))
       })
-      bridge.setCodexTerminalBridgePreferredSession('terminal-mcp')
+      bridge.updateCodexTerminalBridgeRuntimeTarget('runtime-mcp', {
+        kind: 'ssh',
+        sessionId: 'terminal-mcp',
+        label: 'prod.internal',
+        host: 'prod.internal',
+        username: 'deploy',
+        cwd: '/srv/app'
+      })
       const socketPath = await bridge.ensureCodexTerminalBridgeServer(root)
-      mcp = startMcpScript(socketPath)
+      mcp = startMcpScript(socketPath, 'runtime-mcp')
 
       const listResponse = await mcp.request({ jsonrpc: '2.0', id: 0, method: 'tools/list' })
       expect(listResponse.result?.tools?.map((tool) => tool.name)).toEqual([
@@ -1518,14 +1602,14 @@ describe('Codex terminal bridge runtime', () => {
               execution: expect.objectContaining({
                 enum: ['terminal', 'background'],
                 description: expect.stringContaining('visible terminal is occupied')
-              }),
-              sessionId: expect.objectContaining({
-                description: expect.stringContaining('fails if the selected terminal is not connected')
               })
             })
           })
         })
       )
+      ;[runCommandTool, readTerminalOutputTool, readFileTool, globSearchTool, grepSearchTool, targetContextTool].forEach((tool) => {
+        expect((tool?.inputSchema as { properties?: Record<string, unknown> } | undefined)?.properties).not.toHaveProperty('sessionId')
+      })
       expect(targetContextTool).toEqual(
         expect.objectContaining({
           annotations: expect.objectContaining({
@@ -1635,6 +1719,46 @@ describe('Codex terminal bridge runtime', () => {
           })
         })
       )
+    } finally {
+      mcp?.child.kill()
+      bridge.closeCodexTerminalBridgeServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects embedded MCP terminal calls when the Codex runtime id is missing', async () => {
+    const bridge = await loadBridge()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-codex-mcp-runtime-'))
+    const writes: string[] = []
+    let mcp: ReturnType<typeof startMcpScript> | null = null
+    try {
+      bridge.registerCodexTerminalBridgeSession({
+        id: 'terminal-mcp-fallback',
+        kind: 'ssh',
+        host: 'fallback.internal',
+        cwd: '/root',
+        window: {} as never,
+        write: (data: string | Buffer) => writes.push(String(data))
+      })
+      bridge.setCodexTerminalBridgePreferredSession('terminal-mcp-fallback')
+      const socketPath = await bridge.ensureCodexTerminalBridgeServer(root)
+      mcp = startMcpScript(socketPath)
+
+      const response = await mcp.request({
+        jsonrpc: '2.0',
+        id: 'mcp-missing-runtime',
+        method: 'tools/call',
+        params: {
+          name: 'run_command',
+          arguments: { command: 'hostname' }
+        }
+      })
+
+      expect(response.result).toEqual(expect.objectContaining({
+        isError: true,
+        content: [expect.objectContaining({ text: expect.stringContaining('AIOPSTERM_CODEX_RUNTIME_ID is not configured') })]
+      }))
+      expect(writes).toEqual([])
     } finally {
       mcp?.child.kill()
       bridge.closeCodexTerminalBridgeServer()

@@ -259,6 +259,7 @@ const managedOwnedTablesBlock = (input: {
     'tool_timeout_sec = 180',
     'default_tools_approval_mode = "prompt"',
     'enabled_tools = ["list_terminals", "run_command", "read_terminal_output", "read_file", "glob_search", "grep_search", "target_context"]',
+    'env_vars = ["AIOPSTERM_CODEX_RUNTIME_ID"]',
     '',
     '[mcp_servers.aiopsterm_remote.tools.list_terminals]',
     'approval_mode = "approve"',

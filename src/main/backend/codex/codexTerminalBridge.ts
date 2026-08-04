@@ -716,11 +716,15 @@ const terminalSummaryForSession = (
 }
 
 const resolveTargetSession = (params: Record<string, unknown>): CodexTerminalBridgeSession | null => {
+  const runtimeSelection = targetSelectionForParams(params)
+  if (runtimeSelection) {
+    if (!runtimeSelection.sessionId) return null
+    return sessions.get(runtimeSelection.sessionId) || null
+  }
   const requestedSessionId = cleanText(params.sessionId)
   if (requestedSessionId) return sessions.get(requestedSessionId) || null
-  const runtimeSelection = targetSelectionForParams(params)
-  const selectedSessionId = runtimeSelection ? runtimeSelection.sessionId : preferredSessionId
-  const strict = runtimeSelection ? runtimeSelection.strict : preferredSessionStrict
+  const selectedSessionId = preferredSessionId
+  const strict = preferredSessionStrict
   if (selectedSessionId) {
     const preferred = sessions.get(selectedSessionId) || null
     if (preferred || strict) return preferred
@@ -728,6 +732,22 @@ const resolveTargetSession = (params: Record<string, unknown>): CodexTerminalBri
   if (strict) return null
   const candidates = [...sessions.values()].filter((session) => session.kind === 'ssh')
   return candidates[candidates.length - 1] || [...sessions.values()][0] || null
+}
+
+const unavailableTargetResponse = (params: Record<string, unknown>, fallbackMessage: string): CodexBridgeResponse => {
+  const runtimeId = cleanText(params[codexRuntimeIdParam])
+  if (runtimeId) {
+    return {
+      ok: false,
+      errorCode: 'CODEX_RUNTIME_TARGET_UNAVAILABLE',
+      errorMessage: 'The terminal bound to this embedded Codex runtime is unavailable. Rebind a connected terminal or restart the Codex session.'
+    }
+  }
+  return {
+    ok: false,
+    errorCode: 'NO_TERMINAL_SESSION',
+    errorMessage: fallbackMessage
+  }
 }
 
 const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
@@ -877,11 +897,7 @@ const runTerminalCommandInBackground = async (
 const runTerminalCommand = async (params: Record<string, unknown>): Promise<CodexBridgeResponse> => {
   const session = resolveTargetSession(params)
   if (!session) {
-    return {
-      ok: false,
-      errorCode: 'NO_TERMINAL_SESSION',
-      errorMessage: 'No connected aiopsterm terminal session is available. Select or connect a terminal before running remote commands.'
-    }
+    return unavailableTargetResponse(params, 'No connected aiopsterm terminal session is available. Select or connect a terminal before running remote commands.')
   }
   const command = cleanText(params.command)
   if (!command) {
@@ -1136,11 +1152,7 @@ const grepRemoteFiles = async (params: Record<string, unknown>): Promise<CodexBr
 const targetContext = (params: Record<string, unknown>): CodexBridgeResponse => {
   const session = resolveTargetSession(params)
   if (!session) {
-    return {
-      ok: false,
-      errorCode: 'NO_TERMINAL_SESSION',
-      errorMessage: 'No connected aiopsterm terminal session is available.'
-    }
+    return unavailableTargetResponse(params, 'No connected aiopsterm terminal session is available.')
   }
   return { ok: true, target: targetContextForSession(session) }
 }
@@ -1163,11 +1175,7 @@ const listTerminals = (params: Record<string, unknown>): CodexBridgeResponse => 
 const readTerminalOutput = (params: Record<string, unknown>): CodexBridgeResponse => {
   const session = resolveTargetSession(params)
   if (!session) {
-    return {
-      ok: false,
-      errorCode: 'NO_TERMINAL_SESSION',
-      errorMessage: 'No connected aiopsterm terminal session is available.'
-    }
+    return unavailableTargetResponse(params, 'No connected aiopsterm terminal session is available.')
   }
   const history = terminalOutputHistories.get(session.id) || newTerminalOutputHistory()
   const offset = normalizeInteger(params.offset, 0, 0, Number.MAX_SAFE_INTEGER)

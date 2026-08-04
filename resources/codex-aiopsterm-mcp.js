@@ -28,6 +28,10 @@ const textContent = (text) => ({ type: 'text', text: String(text || '') })
 
 const callBridge = (method, params) =>
   new Promise((resolve, reject) => {
+    if (!codexRuntimeId) {
+      reject(new Error('AIOPSTERM_CODEX_RUNTIME_ID is not configured. Restart the embedded Codex session from aiopsterm.'))
+      return
+    }
     if (!socketPath) {
       reject(new Error('AIOPSTERM_CODEX_BRIDGE_SOCKET is not configured.'))
       return
@@ -85,11 +89,6 @@ const runCommandSchema = {
       enum: ['terminal', 'background'],
       description:
         'Defaults to terminal. terminal writes into the visible aiopsterm terminal. background uses an independent execution channel and does not write to the visible terminal; use it only for parallel work or when the visible terminal is occupied by a foreground program. background currently supports mode wait only.'
-    },
-    sessionId: {
-      type: 'string',
-      description:
-        'Optional aiopsterm terminal session id. Omit to use the current selected terminal. The call fails if the selected terminal is not connected.'
     }
   },
   required: ['command'],
@@ -98,12 +97,7 @@ const runCommandSchema = {
 
 const targetContextSchema = {
   type: 'object',
-  properties: {
-    sessionId: {
-      type: 'string',
-      description: 'Optional aiopsterm terminal session id. Omit to inspect the current selected terminal.'
-    }
-  },
+  properties: {},
   additionalProperties: false
 }
 
@@ -123,10 +117,6 @@ const readTerminalOutputSchema = {
     limit: {
       type: 'number',
       description: 'Maximum number of visible terminal output lines to return. Defaults to 200 and is capped by aiopsterm.'
-    },
-    sessionId: {
-      type: 'string',
-      description: 'Optional aiopsterm terminal session id. Omit to read the current selected terminal.'
     }
   },
   additionalProperties: false
@@ -150,10 +140,6 @@ const readFileSchema = {
     timeoutMs: {
       type: 'number',
       description: 'Optional timeout in milliseconds.'
-    },
-    sessionId: {
-      type: 'string',
-      description: 'Optional aiopsterm terminal session id. Omit to use the current selected terminal.'
     }
   },
   required: ['path'],
@@ -183,10 +169,6 @@ const globSearchSchema = {
     timeoutMs: {
       type: 'number',
       description: 'Optional timeout in milliseconds.'
-    },
-    sessionId: {
-      type: 'string',
-      description: 'Optional aiopsterm terminal session id. Omit to use the current selected terminal.'
     }
   },
   required: ['pattern'],
@@ -223,10 +205,6 @@ const grepSearchSchema = {
     timeoutMs: {
       type: 'number',
       description: 'Optional timeout in milliseconds.'
-    },
-    sessionId: {
-      type: 'string',
-      description: 'Optional aiopsterm terminal session id. Omit to use the current selected terminal.'
     }
   },
   required: ['pattern'],

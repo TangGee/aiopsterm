@@ -295,6 +295,7 @@ describe('Codex CLI backend runtime', () => {
     expect(configToml).toContain('[mcp_servers.aiopsterm_remote]')
     expect(configToml).toContain('default_tools_approval_mode = "prompt"')
     expect(configToml).toContain('enabled_tools = ["list_terminals", "run_command", "read_terminal_output", "read_file", "glob_search", "grep_search", "target_context"]')
+    expect(configToml).toContain('env_vars = ["AIOPSTERM_CODEX_RUNTIME_ID"]')
     expect(configToml).toContain('[mcp_servers.aiopsterm_remote.tools.list_terminals]')
     expect(configToml).toContain('[mcp_servers.aiopsterm_remote.tools.target_context]')
     expect(configToml).toContain('approval_mode = "approve"')
