@@ -234,6 +234,8 @@ This script writes `src/renderer/src/assets/backgrounds/<id>.webp`. Keep `src/re
 
 ## Terminal Performance Verification
 
+The tracked `test-data/terminal-100000-lines.txt` and `test-data/single-long-line.txt` files are synthetic UTF-8 terminal fixtures for manual large-output and long-line checks. They contain generated host names and paths rather than production data; automated tests do not load them by default.
+
 Terminal renderer throughput changes must be validated with the threaded stress harness before claiming performance success. Use the short gates while iterating:
 
 ```bash
@@ -279,6 +281,14 @@ npm run build:mac:dir
 npm run build:win
 npm run build:win:dir
 ```
+
+Create a contributor-ready source archive with:
+
+```bash
+npm run package:source
+```
+
+The archive includes the main repository and local `codex/` repository Git metadata so the extracted source remains usable as a Git checkout. It must exclude the `external-reference/` reference tree, `control_compat/`, and `.git/modules/external-reference`; the packaging script fails if forbidden External reference source or Git objects are present. The generated archive and checksum are written below `release/source/` by default.
 
 Use the target wrappers when validating the four installable package outputs independently:
 

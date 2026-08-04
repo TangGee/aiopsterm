@@ -8,6 +8,7 @@ playwright-report/
 .DS_Store
 npm-debug.log*
 aiopsterm-state.db
+.aiopsterm-assets-credential.key
 .aiopsterm-data-sync-runtime.json
 .cache/
 /codex/

@@ -8,7 +8,7 @@ project_parent=$(dirname "$project_root")
 project_name=$(basename "$project_root")
 codex_root="$project_root/codex"
 
-if [[ ! -d "$codex_root/.git" ]]; then
+if [[ ! -e "$codex_root/.git" ]]; then
   echo "Codex source repository is missing: $codex_root" >&2
   exit 1
 fi
@@ -56,17 +56,33 @@ done < <(git -C "$project_root" ls-files -z --cached --others --exclude-standard
 
 append_repository_files "$codex_root" "$project_name/codex"
 
-tar -C "$project_parent" --null --files-from="$file_list" -czf "$archive_path"
+printf '%s\0' "$project_name/.git" >> "$file_list"
+printf '%s\0' "$project_name/codex/.git" >> "$file_list"
+
+tar \
+  -C "$project_parent" \
+  --exclude="$project_name/.git/modules/external-reference" \
+  --exclude="$project_name/.git/modules/external-reference/*" \
+  --null \
+  --files-from="$file_list" \
+  -czf "$archive_path"
 tar -tzf "$archive_path" > "$archive_list"
 
-if grep -Eq "^${project_name}/(external-reference|control_compat|\\.git)(/|$)" "$archive_list"; then
+if grep -Eq "^${project_name}/(external-reference|control_compat)(/|$)" "$archive_list"; then
   echo "Archive contains a forbidden source tree" >&2
+  exit 1
+fi
+
+if grep -Eq "^${project_name}/\\.git/modules/external-reference(/|$)" "$archive_list"; then
+  echo "Archive contains External reference Git objects" >&2
   exit 1
 fi
 
 for required_path in \
   "$project_name/package.json" \
   "$project_name/package-lock.json" \
+  "$project_name/.git/HEAD" \
+  "$project_name/codex/.git/HEAD" \
   "$project_name/codex/codex-rs/Cargo.toml" \
   "$project_name/codex/scripts/build_codex_package.py"; do
   if ! grep -Fxq "$required_path" "$archive_list"; then
