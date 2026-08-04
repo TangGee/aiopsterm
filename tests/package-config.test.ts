@@ -145,6 +145,17 @@ describe('package configuration audit', () => {
     expect(script).toContain('Get-VisualStudioInstallationPath')
   })
 
+  it('keeps the local Linux one-click build entrypoint available', () => {
+    const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts?: Record<string, string> }
+    const script = readFileSync('scripts/build-linux.sh', 'utf8')
+    expect(packageJson.scripts?.['build:linux:one-click']).toContain('scripts/build-linux.sh')
+    expect(script).toContain('can only run on Linux')
+    expect(script).toContain('--china-mirror')
+    expect(script).toContain('run_npm run build:linux')
+    expect(script).toContain('package:verify -- linux-appimage')
+    expect(script).toContain('package:verify -- linux-deb')
+  })
+
   it('loads the native runtime entrypoint before validating its target', async () => {
     await expect(execFileAsync(process.execPath, ['scripts/ensure-native-runtime.mjs', 'invalid'], {
       cwd: process.cwd()

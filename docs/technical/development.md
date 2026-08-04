@@ -276,6 +276,7 @@ Package scripts are platform entry points, not proof of support:
 npm run build:linux:appimage
 npm run build:linux
 npm run build:deb
+npm run build:linux:one-click
 npm run build:mac
 npm run build:mac:dir
 npm run build:win
@@ -304,6 +305,8 @@ npm run package:verify -- windows
 ```
 
 `package:build:matrix` builds the targets that belong to the current host platform by default. Each wrapper refuses to run a target on the wrong OS and clears that target's previous artifact/unpacked output before building, so Linux development can prove the Linux AppImage/deb scripts but cannot be used as evidence for macOS or Windows packages.
+
+The Linux one-click wrapper (`npm run build:linux:one-click`) is the maintainer entrypoint for a complete native Linux package pass. It checks or installs missing toolchain commands with the host package manager, runs `npm ci` by default, builds AppImage and deb packages, and verifies both targets. `scripts/build-linux.sh` supports `--skip-setup`, `--skip-dependencies`, `--run-tests`, `--run-e2e`, `--china-mirror`, `--appimage-only`, `--deb-only`, and `--setup-only`; mirror variables are scoped to child processes.
 
 `build:codex` is a Node dispatcher. Linux and macOS continue through the shell-based Codex package builder. Windows stays in the Node entrypoint and invokes Codex's Python package builder against the Windows MSVC target, so the default Windows flow builds `codex.exe`, `rg.exe`, `codex-command-runner.exe`, and `codex-windows-sandbox-setup.exe` from the local `codex/` source package inputs. `AIOPSTERM_CODEX_PACKAGE_DIR` and `AIOPSTERM_CODEX_BIN` remain cache/custom-package overrides; individual Windows helper overrides are `AIOPSTERM_CODEX_RG_BIN`, `AIOPSTERM_CODEX_COMMAND_RUNNER_BIN`, and `AIOPSTERM_CODEX_WINDOWS_SANDBOX_SETUP_BIN`.
 

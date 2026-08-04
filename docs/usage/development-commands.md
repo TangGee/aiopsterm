@@ -128,6 +128,24 @@ Build Linux packages:
 npm run build:linux
 ```
 
+Run the Linux one-click build from the repository root. It checks or installs the native release prerequisites, restores npm dependencies, builds both Linux packages, and runs the package verifier for each artifact:
+
+```bash
+npm run build:linux:one-click
+```
+
+Useful options for an existing Linux toolchain or a restricted network:
+
+```bash
+bash scripts/build-linux.sh --skip-setup --skip-dependencies
+bash scripts/build-linux.sh --china-mirror
+bash scripts/build-linux.sh --appimage-only
+bash scripts/build-linux.sh --deb-only
+bash scripts/build-linux.sh --setup-only
+```
+
+The script is Linux-only. It uses the local package manager (`apt`, `dnf`, `yum`, or `pacman`) only when required commands are missing, and keeps mirror settings process-local.
+
 Build only the Linux AppImage package:
 
 ```bash

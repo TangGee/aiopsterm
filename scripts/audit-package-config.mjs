@@ -44,6 +44,7 @@ const requiredScripts = [
   'build:mac:dir',
   'build:deb',
   'build:linux',
+  'build:linux:one-click',
   'build:win',
   'build:win:dir'
 ]
@@ -217,6 +218,7 @@ const codexPackagingRequirements = [
   { label: 'packaged SQLite Electron runtime probe', source: packagedAppAuditScript, text: 'Packaged Electron better-sqlite3 probe failed' },
   { label: 'packaged SQLite in-memory query', source: packagedAppAuditScript, text: "new Database(':memory:')" },
   { label: 'package build target entrypoint', source: packageScripts['package:build'], text: 'node scripts/build-package-target.mjs' },
+  { label: 'Linux one-click build entrypoint', source: packageScripts['build:linux:one-click'], text: 'scripts/build-linux.sh' },
   { label: 'package build matrix entrypoint', source: packageScripts['package:build:matrix'], text: 'node scripts/build-package-matrix.mjs' },
   { label: 'package verify target entrypoint', source: packageScripts['package:verify'], text: 'node scripts/verify-package-target.mjs' },
   { label: 'build-codex Windows source build gate', source: codexBuildEntrypoint, text: "process.platform === 'win32'" },
