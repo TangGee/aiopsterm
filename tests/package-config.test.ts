@@ -152,6 +152,7 @@ describe('package configuration audit', () => {
     expect(script).toContain('can only run on Linux')
     expect(script).toContain('--china-mirror')
     expect(script).toContain('if ! command_exists rustup; then')
+    expect(script).toContain('local -a system_required=(curl python3 git pkg-config musl-gcc clang ld.lld dpkg-deb xvfb-run)')
     expect(script).toContain('run_npm run build:linux')
     expect(script).toContain('package:verify -- linux-appimage')
     expect(script).toContain('package:verify -- linux-deb')

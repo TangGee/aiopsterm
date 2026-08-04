@@ -164,7 +164,7 @@ ensure_rustup() {
 }
 
 ensure_prerequisites() {
-  local -a system_required=(ca-certificates curl python3 git pkg-config musl-gcc clang ld.lld dpkg-deb xvfb-run)
+  local -a system_required=(curl python3 git pkg-config musl-gcc clang ld.lld dpkg-deb xvfb-run)
   local missing=0 command_name
   for command_name in "${system_required[@]}"; do
     if ! command_exists "${command_name}"; then
