@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events'
+import { basename, dirname, normalize } from 'path'
 import { PassThrough } from 'stream'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type {
@@ -1206,7 +1207,10 @@ describe('ssh terminal backend runtime', () => {
         'ops@relay.example'
       ])
     )
-    expect(spawn.args).toContainEqual(expect.stringMatching(/^ControlPath=\/tmp\/aiopsterm-ssh-control-vitest-created\/cm-[a-f0-9]{24}$/))
+    const controlPath = spawn.args.find((arg) => arg.startsWith('ControlPath='))?.slice('ControlPath='.length)
+    expect(controlPath).toBeDefined()
+    expect(dirname(controlPath!)).toBe(normalize('/tmp/aiopsterm-ssh-control-vitest-created'))
+    expect(basename(controlPath!)).toMatch(/^cm-[a-f0-9]{24}$/)
     expect(spawn.options).toEqual(
       expect.objectContaining({
         name: 'linux',

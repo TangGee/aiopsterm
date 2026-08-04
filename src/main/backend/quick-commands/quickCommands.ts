@@ -43,6 +43,7 @@ type SqliteStatement = {
 
 type SqliteDatabase = {
   exec(sql: string): void
+  close?(): void
   prepare(sql: string): SqliteStatement
   transaction<T extends (...args: never[]) => unknown>(fn: T): T
 }
@@ -634,6 +635,10 @@ class SqliteQuickCommandStore {
     const current = this.get()
     return this.save(reorderQuickCommandSnapshot(current, input))
   }
+
+  close(): void {
+    this.db.close?.()
+  }
 }
 
 let quickCommandStore: FallbackQuickCommandStore | SqliteQuickCommandStore | null = null
@@ -696,6 +701,7 @@ export const planQuickCommandScript = (input: QuickCommandScriptPlanInput): Quic
   })
 
 export const configureQuickCommandBackendRuntime = (config: QuickCommandBackendRuntimeConfig = {}) => {
+  if (quickCommandStore instanceof SqliteQuickCommandStore) quickCommandStore.close()
   runtimeConfig = {
     databasePath: config.databasePath ? (isAbsolute(config.databasePath) ? config.databasePath : resolve(config.databasePath)) : defaultQuickCommandDatabasePath(),
     useSeedData: config.useSeedData ?? defaultQuickCommandSeedMode(),
@@ -705,5 +711,6 @@ export const configureQuickCommandBackendRuntime = (config: QuickCommandBackendR
 }
 
 export const resetQuickCommandsForTests = () => {
+  if (quickCommandStore instanceof SqliteQuickCommandStore) quickCommandStore.close()
   quickCommandStore = null
 }

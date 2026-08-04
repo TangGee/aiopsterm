@@ -1,12 +1,16 @@
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  electronRebuildInvocation,
+  electronHeadersUrl,
   lockOwnedBy,
   mergeNativeManifest,
+  npmRebuildInvocation,
   parseLockOwner,
   parseNativeManifest,
   sanitizeNativeRebuildEnvironment,
   shadowBindingPaths,
+  shouldRebuildPty,
   shouldRecoverLock
 } from '../scripts/native-runtime-helpers.mjs'
 
@@ -19,6 +23,61 @@ const lockOwner = (overrides: Record<string, unknown> = {}) => ({
 })
 
 describe('native runtime helpers', () => {
+  it('forces node-pty rebuilds only for the requested target runtime', () => {
+    expect(shouldRebuildPty({ force: true, target: 'electron', runtime: 'electron', probeStatus: 0 })).toBe(true)
+    expect(shouldRebuildPty({ force: true, target: 'electron', runtime: 'node', probeStatus: 0 })).toBe(false)
+    expect(shouldRebuildPty({ force: false, target: 'electron', runtime: 'electron', probeStatus: 0 })).toBe(false)
+    expect(shouldRebuildPty({ force: false, target: 'electron', runtime: 'node', probeStatus: 1 })).toBe(true)
+  })
+
+  it('limits electron-rebuild to the requested native modules', () => {
+    expect(electronRebuildInvocation({
+      cliPath: 'C:\\project\\node_modules\\@electron\\rebuild\\lib\\cli.js',
+      modules: ['better-sqlite3'],
+      electronVersion: '31.7.7',
+      headersUrl: 'http://127.0.0.1:48177'
+    })).toEqual({
+      commandArgs: [
+        'C:\\project\\node_modules\\@electron\\rebuild\\lib\\cli.js',
+        '-f',
+        '-o',
+        'better-sqlite3',
+        '-v',
+        '31.7.7',
+        '-d',
+        'http://127.0.0.1:48177'
+      ]
+    })
+  })
+
+  it('keeps Electron runtime mirrors separate from native headers', () => {
+    expect(electronHeadersUrl({
+      npm_config_electron_mirror: 'https://npmmirror.com/mirrors/electron/',
+      ELECTRON_MIRROR: 'https://fallback.invalid/',
+      AIOPSTERM_ELECTRON_HEADERS_URL: 'http://127.0.0.1:48177'
+    })).toBe('http://127.0.0.1:48177')
+    expect(electronHeadersUrl({
+      npm_config_electron_mirror: 'https://npmmirror.com/mirrors/electron/'
+    })).toBe('https://artifacts.electronjs.org/headers/dist')
+  })
+
+  it('runs npm rebuild through Node instead of a Windows cmd shim', () => {
+    expect(npmRebuildInvocation({
+      platform: 'win32',
+      nodeExecutable: 'C:\\node\\node.exe',
+      npmExecPath: 'C:\\node\\node_modules\\npm\\bin\\npm-cli.js',
+      modules: ['better-sqlite3', 'node-pty']
+    })).toEqual({
+      command: 'C:\\node\\node.exe',
+      args: [
+        'C:\\node\\node_modules\\npm\\bin\\npm-cli.js',
+        'rebuild',
+        'better-sqlite3',
+        'node-pty'
+      ]
+    })
+  })
+
   it('treats damaged or non-object native manifests as absent', () => {
     expect(parseNativeManifest('{"schemaVersion":')).toBeNull()
     expect(parseNativeManifest('null')).toBeNull()

@@ -19,6 +19,7 @@ type SqliteStatement = {
 
 type SqliteDatabase = {
   exec(sql: string): void
+  close?(): void
   prepare(sql: string): SqliteStatement
   transaction<T extends (...args: never[]) => unknown>(fn: T): T
 }
@@ -184,6 +185,7 @@ class SqliteTerminalSuggestionStore implements TerminalSuggestionStore {
   private readonly queryStatement: SqliteStatement
   private readonly flushTransaction: (rows: PendingSuggestionRecord[]) => void
   private readonly pending = new Map<string, PendingSuggestionRecord>()
+  private readonly exitFlush = () => this.flush()
   private flushTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(
@@ -227,7 +229,7 @@ class SqliteTerminalSuggestionStore implements TerminalSuggestionStore {
         this.upsertStatement.run(row.command, row.host, row.count, row.firstUsedAt, row.lastUsedAt, row.lastUsedAt)
       }
     })
-    suggestionExitFlushes.add(() => this.flush())
+    suggestionExitFlushes.add(this.exitFlush)
     installSuggestionExitFlushHook()
   }
 
@@ -275,6 +277,12 @@ class SqliteTerminalSuggestionStore implements TerminalSuggestionStore {
     const rows = this.queryStatement.all(normalized) as TerminalSuggestionHistoryRow[]
     return queryTerminalSuggestionHistoryRows(rows, normalized, normalizeHost(host), limit, this.nowSeconds())
   }
+
+  close(): void {
+    suggestionExitFlushes.delete(this.exitFlush)
+    this.flush()
+    this.db.close?.()
+  }
 }
 
 export function createTerminalSuggestionHistoryRuntime(getConfig: () => TerminalSuggestionRuntimeConfig): TerminalSuggestionHistoryRuntime {
@@ -299,6 +307,7 @@ export function createTerminalSuggestionHistoryRuntime(getConfig: () => Terminal
       return storeInstance
     },
     reset() {
+      if (storeInstance instanceof SqliteTerminalSuggestionStore) storeInstance.close()
       storeInstance = null
     }
   }

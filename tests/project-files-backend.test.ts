@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -80,7 +80,7 @@ describe('project files backend', () => {
 
     const context = await projectFiles.getProjectFileContext({ source: 'codex', sessionId: 'session-1' })
     expect(context.ok).toBe(true)
-    expect(context.data?.projectRoot).toBe(projectRoot)
+    expect(context.data?.projectRoot).toBe(await realpath(projectRoot))
     expect(context.data?.recent).toEqual([
       expect.objectContaining({ path: 'app.ts', kind: 'modified', origin: 'adapter' })
     ])

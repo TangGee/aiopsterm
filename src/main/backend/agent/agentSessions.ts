@@ -131,6 +131,7 @@ const maxEventsPerSession = 200
 const maxDecisionsPerSession = 40
 
 let server: Server | null = null
+let serverClosePromise: Promise<void> | null = null
 let socketPath = ''
 let eventSink: AgentSessionEventSink | null = null
 let sessions = new Map<string, ManagedAiSessionRecord>()
@@ -1666,6 +1667,10 @@ export const ensureAiAgentSessionServer = async ({ userDataPath, emit }: AgentSe
   eventSink = emit
   await configureAiAgentSessionStore(userDataPath)
   if (server && socketPath) return socketPath
+  if (serverClosePromise) {
+    await serverClosePromise
+    serverClosePromise = null
+  }
   socketPath = agentSessionSocketPathFor(userDataPath)
   if (process.platform !== 'win32') {
     await mkdir(join(userDataPath, 'agent-sessions'), { recursive: true })
@@ -1709,7 +1714,7 @@ export const closeAiAgentSessionServer = () => {
   flushPersistSnapshotNow()
   const existing = server
   server = null
-  if (existing) existing.close()
+  if (existing) serverClosePromise = new Promise((resolve) => existing.close(() => resolve()))
   if (socketPath && process.platform !== 'win32' && existsSync(socketPath)) rmSync(socketPath, { force: true })
   socketPath = ''
   eventSink = null

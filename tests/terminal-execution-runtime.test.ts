@@ -39,8 +39,8 @@ describe('terminalExecutionRuntime', () => {
       execution: {
         command: 'uptime',
         panelIds: ['panel-1'],
-        inputText: 'uptime\n',
-        shellText: 'uptime\n',
+        inputText: 'uptime\r',
+        shellText: 'uptime\r',
         writeToShell: true,
         source: 'agent'
       }
@@ -143,8 +143,8 @@ describe('terminalExecutionRuntime', () => {
       execution: expect.objectContaining({
         command: 'hostname',
         panelIds: ['panel-1', 'panel-2'],
-        inputText: 'hostname\n',
-        shellText: 'hostname\n',
+        inputText: 'hostname\r',
+        shellText: 'hostname\r',
         writeToShell: true,
         source: 'global'
       })

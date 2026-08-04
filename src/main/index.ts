@@ -398,6 +398,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', (event) => {
+  terminalRuntime.killAllSessions()
   void shutdownExtensions()
   void closeProjectFilesRuntime()
   closeControlSocketServer()

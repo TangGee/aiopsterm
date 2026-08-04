@@ -1421,7 +1421,7 @@ describe('AppShell', () => {
       await rowFor('Restore session').trigger('dblclick')
       await flushPromises()
       expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local', cwd: '/work/restore', title: 'Restore session' }))
-      expect(window.aiops.writeTerminal).toHaveBeenCalledWith('test-session-local', "cd '/work/restore' && codex resume 'codex-restore-1'\n")
+      expect(window.aiops.writeTerminal).toHaveBeenCalledWith('test-session-local', "cd '/work/restore' && codex resume 'codex-restore-1'\r")
       expect(store.activeModule).toBe('aiSessions')
     } finally {
       wrapper?.unmount()
@@ -6551,7 +6551,7 @@ describe('AppShell', () => {
     await wrapper.find('[data-testid="ai-command-audit-run"]').trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-testid="ai-command-audit-dialog"]').exists()).toBe(false)
-    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-panel', 'uptime -p\n')
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-panel', 'uptime -p\r')
     expect(store.chatMessages.find((message) => message.id === 'command-assistant')?.contentParts?.find((part) => part.type === 'chip' && part.chipType === 'command')?.ref.command).toBe('uptime -p')
     expect(store.chatMessages.find((message) => message.id === 'command-assistant')?.executedCommand).toBe('uptime -p')
     expect(store.chatMessages.find((message) => message.id === 'command-assistant')?.commandExecutionStatus).toBe('succeeded')
@@ -6578,7 +6578,7 @@ describe('AppShell', () => {
     await wrapper.find('[data-testid="ai-command-audit-input"]').setValue('uptime -s')
     await wrapper.find('[data-testid="ai-command-audit-run"]').trigger('click')
     await flushPromises()
-    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-panel', 'uptime -s\n')
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-panel', 'uptime -s\r')
     expect(store.chatMessages.find((message) => message.id === 'command-assistant')?.executedCommand).toBe('uptime -s')
     expect(store.chatMessages.find((message) => message.id === 'command-assistant')?.commandExecutionStatus).toBe('succeeded')
 
@@ -8906,8 +8906,8 @@ describe('AppShell', () => {
       1,
       expect.objectContaining({ kind: 'local', title: 'Codex 1', cwd: '/work/project', terminalType: expect.any(String) })
     )
-    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('team-terminal-1', "cd '/work/project' && codex 'review this repo'\n")
-    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('team-terminal-2', "cd '/work/project' && codex 'review this repo'\n")
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('team-terminal-1', "cd '/work/project' && codex 'review this repo'\r")
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('team-terminal-2', "cd '/work/project' && codex 'review this repo'\r")
     expect(store.panels.filter((panel) => panel.title.startsWith('Codex'))).toHaveLength(2)
     expect(response?.data?.snapshot.workspaceGroups).toEqual([expect.objectContaining({ name: 'Review Team', memberCount: 2, active: true })])
     expect(store.topNotice).toBe('已创建 2 个 Codex Team 会话')
@@ -8999,12 +8999,12 @@ describe('AppShell', () => {
     expect(trustedPreview.data.candidates[0]).toEqual(expect.objectContaining({ ready: true, trusted: true, reason: 'ready' }))
     const trustedAutorun = await invokeControlHandler({ id: 'resume-autorun-trusted', method: 'surface.resume.autorun', params: { panelId: store.activePanelId } })
     expect(trustedAutorun.data).toEqual(expect.objectContaining({ ranCount: 1, readyCount: 1 }))
-    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('resume-terminal-1', 'tmux attach -t work\n')
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('resume-terminal-1', 'tmux attach -t work\r')
     vi.mocked(window.aiops.writeTerminal).mockClear()
 
     const runResponse = await invokeControlHandler({ id: 'resume-run', method: 'surface.resume.run', params: { panelId: store.activePanelId } })
     expect(runResponse).toEqual(expect.objectContaining({ ok: true }))
-    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('resume-terminal-1', 'tmux attach -t work\n')
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('resume-terminal-1', 'tmux attach -t work\r')
 
     const clearResponse = await invokeControlHandler({
       id: 'resume-clear',
@@ -9153,7 +9153,7 @@ describe('AppShell', () => {
     const response = await invokeControlHandler({ id: 'respawn-pane', method: 'surface.respawn', params: { panelId, command: 'exec bash -l' } })
 
     expect(response).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ command: 'exec bash -l', decision: expect.objectContaining({ status: 'allow' }) }) }))
-    expect(window.aiops.writeTerminal).toHaveBeenCalledWith(sessionId, 'exec bash -l\n')
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith(sessionId, 'exec bash -l\r')
 
     vi.mocked(window.aiops.writeTerminal).mockClear()
     const approval = await invokeControlHandler({ id: 'respawn-danger', method: 'surface.respawn', params: { panelId, command: 'rm /tmp/file' } })
@@ -11194,7 +11194,7 @@ describe('AppShell', () => {
     expect(store.panels.every((panel) => !panel.output.includes('[aiopsterm] broadcast queued without live sessions: uptime'))).toBe(true)
     expect(window.aiops.writeTerminal).toHaveBeenCalledTimes(globalTerminalSessionIds.length)
     globalTerminalSessionIds.forEach((sessionId) => {
-      expect(window.aiops.writeTerminal).toHaveBeenCalledWith(sessionId, 'uptime\n')
+      expect(window.aiops.writeTerminal).toHaveBeenCalledWith(sessionId, 'uptime\r')
     })
     expect(store.topNotice).toBe('')
     expect((wrapper.find('.terminal-global-command input').element as HTMLInputElement).value).toBe('')
@@ -11319,7 +11319,7 @@ describe('AppShell', () => {
     await wrapper.find('.command-line input').setValue('whoami')
     await wrapper.find('.command-line input').trigger('keydown', { key: 'Enter' })
     await flushPromises()
-    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('test-session-local', 'whoami\n')
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('test-session-local', 'whoami\r')
     expect(store.activePanel.output).not.toContain('whoami')
     expect(wrapper.find('.command-line input').exists()).toBe(false)
 

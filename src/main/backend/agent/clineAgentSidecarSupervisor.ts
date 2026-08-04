@@ -92,7 +92,7 @@ export const resolveClineAgentSidecarLaunch = (input: {
   const useBuilt = String(env.AIOPSTERM_CLINE_USE_BUILT_SIDECAR || '').trim() === '1'
   if (useBuilt && built) return built
   const bun = process.platform === 'win32'
-    ? join(input.appPath, 'node_modules', '.bin', 'bun.cmd')
+    ? join(input.appPath, 'node_modules', 'bun', 'bin', 'bun.exe')
     : join(input.appPath, 'node_modules', '.bin', 'bun')
   const entry = join(input.appPath, 'src', 'sidecar', 'clineAgentSidecar.ts')
   if (existsSync(bun) && existsSync(entry)) return { command: bun, args: ['run', entry], source: 'bun-source' }

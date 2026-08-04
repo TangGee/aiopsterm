@@ -191,7 +191,15 @@ const resolveProjectPath = async (
   const pathText = cleanText(pathInput)
   if (!pathText || pathText.includes('\0')) return null
   const cwd = cleanText(cwdInput)
-  const base = cwd && isAbsolute(cwd) ? cwd : projectRoot
+  let base = projectRoot
+  if (!isAbsolute(pathText) && cwd && isAbsolute(cwd)) {
+    try {
+      base = await realpath(cwd)
+    } catch {
+      return null
+    }
+    if (!withinRoot(projectRoot, base)) return null
+  }
   const absolutePath = resolve(isAbsolute(pathText) ? pathText : join(base, pathText))
   if (!withinRoot(projectRoot, absolutePath)) return null
   try {

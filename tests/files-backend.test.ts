@@ -1,5 +1,6 @@
 import { generateKeyPairSync } from 'crypto'
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'fs/promises'
+import { constants } from 'fs'
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -2132,7 +2133,11 @@ describe('files backend content boundary', () => {
           status: 'success'
         })
       )
-      expect((await listFiles(dir, { kind: 'local', sessionId: 'local' })).find((entry) => entry.name === 'renamed.txt')?.mode).toBe('-600')
+      if (process.platform === 'win32') {
+        await expect(access(renamedPath, constants.R_OK | constants.W_OK)).resolves.toBeUndefined()
+      } else {
+        expect((await listFiles(dir, { kind: 'local', sessionId: 'local' })).find((entry) => entry.name === 'renamed.txt')?.mode).toBe('-600')
+      }
 
       const deleted = await mutateFileEntry({ kind: 'delete', path: renamedPath }, { kind: 'local', sessionId: 'local' })
       expect(deleted.ok).toBe(true)

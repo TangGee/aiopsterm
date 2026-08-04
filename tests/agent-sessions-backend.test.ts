@@ -1,5 +1,5 @@
-import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'fs/promises'
-import { join } from 'path'
+import { mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from 'fs/promises'
+import { join, resolve } from 'path'
 import { tmpdir } from 'os'
 import { createConnection } from 'net'
 import { describe, expect, it, vi } from 'vitest'
@@ -177,7 +177,7 @@ describe('agent session backend', () => {
         panelId: 'panel-1',
         terminalSessionId: 'terminal-1',
         cwd: '/work/project',
-        canonicalCwd: '/work/project',
+        canonicalCwd: resolve('/work/project'),
         summary: 'Approve shell command',
         requestKind: 'permission',
         decisionMode: 'local',
@@ -430,11 +430,12 @@ describe('agent session backend', () => {
     )
 
     const response = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+    const canonicalProject = await realpath(realProject)
     expect(response.data?.sessions?.[0]).toEqual(
       expect.objectContaining({
         id: 'codex-canonical-1',
         cwd: linkedProject,
-        canonicalCwd: realProject
+        canonicalCwd: canonicalProject
       })
     )
   })
@@ -1689,6 +1690,7 @@ describe('agent session backend', () => {
       },
       null
     )
+    const canonicalProjectRoot = await realpath(projectRoot)
     await expect(projectFiles.getProjectFileContext({
       source: 'codex',
       sessionId: 'codex-restored'
@@ -1744,7 +1746,7 @@ describe('agent session backend', () => {
       data: expect.objectContaining({
         source: 'codex',
         sessionId: 'codex-restored',
-        projectRoot
+        projectRoot: canonicalProjectRoot
       })
     }))
     configureManagedAiSessionTerminalLiveness()

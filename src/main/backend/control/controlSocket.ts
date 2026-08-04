@@ -123,6 +123,7 @@ type ControlSocketRequest = {
 }
 
 let server: Server | null = null
+let serverClosePromise: Promise<void> | null = null
 let socketPath = ''
 let runtime: ControlSocketRuntime = {}
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
@@ -645,6 +646,10 @@ export const registerControlSocketIpc = (ipcMain: IpcMain) => {
 
 export const ensureControlSocketServer = async (userDataPath: string) => {
   if (server && socketPath) return socketPath
+  if (serverClosePromise) {
+    await serverClosePromise
+    serverClosePromise = null
+  }
   socketPath = socketPathFor(userDataPath)
   runtime = { ...runtime, userDataPath }
   configureControlSocketRendererRuntime({ ...runtime, socketPath })
@@ -717,8 +722,9 @@ export const closeControlSocketServer = () => {
   resetControlSocketSidebarMetadataRuntime()
   resetControlSocketTerminalTools()
   resetAgentVaultRuntimeState()
-  server?.close()
+  const existingServer = server
   server = null
+  if (existingServer) serverClosePromise = new Promise((resolve) => existingServer.close(() => resolve()))
   if (socketPath && process.platform !== 'win32' && existsSync(socketPath)) rmSync(socketPath, { force: true })
   socketPath = ''
   configureControlSocketRendererRuntime({ socketPath })

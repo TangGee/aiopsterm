@@ -1,7 +1,7 @@
 import { spawn } from 'child_process'
 import { mkdtemp, rm, writeFile } from 'fs/promises'
 import { homedir, tmpdir } from 'os'
-import { join } from 'path'
+import { extname, join } from 'path'
 import type {
   KubernetesAgentProxyConfig,
   KubernetesClusterRecord,
@@ -83,6 +83,13 @@ export const stripAnsi = (value: string) =>
     .replace(/\u001b[@-Z\\-_]/g, '')
 
 const resolveKubectlCommand = () => process.env.AIOPSTERM_KUBECTL_PATH?.trim() || 'kubectl'
+
+const resolveKubectlInvocation = (args: string[], env: NodeJS.ProcessEnv) => {
+  const command = resolveKubectlCommand()
+  return ['.js', '.cjs', '.mjs'].includes(extname(command).toLowerCase())
+    ? { command: process.execPath, args: [command, ...args], env: { ...env, ELECTRON_RUN_AS_NODE: '1' } }
+    : { command, args, env }
+}
 
 // kubectl 输出收集上限：超限截断并在输出尾部标记，避免大结果集撑爆主进程内存。
 const kubectlOutputMaxLength = 10 * 1024 * 1024
@@ -286,8 +293,9 @@ export const runLocalKubectl = async (
   const { env, cleanup } = await createKubectlEnvironment(cluster, options)
   try {
     return await new Promise((resolve) => {
-      const child = spawn(resolveKubectlCommand(), argsResult.args, {
-        env,
+      const invocation = resolveKubectlInvocation(argsResult.args, env)
+      const child = spawn(invocation.command, invocation.args, {
+        env: invocation.env,
         cwd: homedir(),
         windowsHide: true
       })

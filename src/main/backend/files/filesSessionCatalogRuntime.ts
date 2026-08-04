@@ -17,6 +17,7 @@ type FileSessionCatalogStoreShape = FileSessionCatalog
 
 export type SqliteDatabase = {
   exec(sql: string): void
+  close?(): void
   prepare(sql: string): {
     all(...args: unknown[]): unknown[]
     get(...args: unknown[]): unknown
@@ -80,6 +81,7 @@ let filesSessionCatalogRuntimeConfig: FilesSessionCatalogRuntimeState = {
 }
 
 export const configureFilesSessionCatalogRuntime = (config: FilesSessionCatalogRuntimeConfig = {}) => {
+  if (fileSessionCatalogStore instanceof SqliteFileSessionCatalogStore) fileSessionCatalogStore.close()
   filesSessionCatalogRuntimeConfig = {
     databasePath: config.databasePath ? (isAbsolute(config.databasePath) ? config.databasePath : resolve(config.databasePath)) : defaultFileSessionDatabasePath(),
     useSeedData: config.useSeedData ?? defaultFileSessionSeedMode(),
@@ -474,6 +476,10 @@ class SqliteFileSessionCatalogStore {
 
   reset(): FileSessionCatalog {
     return this.save(defaultFileSessionCatalog())
+  }
+
+  close(): void {
+    this.db.close?.()
   }
 }
 

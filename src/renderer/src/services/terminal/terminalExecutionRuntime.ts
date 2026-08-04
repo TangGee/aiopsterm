@@ -38,6 +38,13 @@ export type TerminalExecutionPrepareOptions = {
 
 export type TerminalCommandExecutionOptions = Partial<Pick<TerminalSecurityExecution, 'inputText' | 'shellText' | 'writeToShell' | 'source'>>
 
+export const terminalSubmitText = (text: string) => {
+  const value = String(text || '')
+  if (value.endsWith('\r')) return value
+  if (value.endsWith('\n')) return `${value.slice(0, -1)}\r`
+  return `${value}\r`
+}
+
 export const terminalExecutionUnavailable = (
   command: string,
   panelIds: string[] = [],
@@ -116,8 +123,8 @@ export const createTerminalSecurityExecution = (
     execution: {
       command: text,
       panelIds: [panelId],
-      inputText: options.inputText ?? `${text}\n`,
-      shellText: options.shellText ?? `${text}\n`,
+      inputText: options.inputText ?? terminalSubmitText(text),
+      shellText: options.shellText ?? terminalSubmitText(text),
       writeToShell,
       source: options.source ?? 'direct'
     }
@@ -138,8 +145,8 @@ export const createGlobalTerminalSecurityExecution = (
     execution: {
       command: text,
       panelIds: writablePanelIds,
-      inputText: `${text}\n`,
-      shellText: `${text}\n`,
+      inputText: terminalSubmitText(text),
+      shellText: terminalSubmitText(text),
       writeToShell: true,
       source: 'global'
     }

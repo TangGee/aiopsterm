@@ -271,33 +271,55 @@ const launchStressApp = async () => {
 
 const createRealCatFixture = async (userDataDir: string) => {
   const filePath = path.join(userDataDir, 'terminal-stress-100000-lines.txt')
-  const scriptPath = path.join(userDataDir, 'terminal-stress-cat.sh')
+  const scriptPath = path.join(userDataDir, process.platform === 'win32' ? 'terminal-stress-cat.cjs' : 'terminal-stress-cat.sh')
   const payload = 'x'.repeat(232)
   const content = Array.from({ length: 100_000 }, (_item, index) =>
     `${String(index + 1).padStart(6, '0')} ${payload}\n`
   ).join('')
-  const script = [
-    'input_file=$1',
-    'duration_seconds=$2',
-    'terminal_index=$3',
-    'deadline=$(( $(date +%s) + duration_seconds ))',
-    'iteration=0',
-    'while [ "$(date +%s)" -lt "$deadline" ]; do',
-    '  cat -- "$input_file" || exit 31',
-    '  iteration=$((iteration + 1))',
-    '  printf "\\n__AIOPSTERM_CAT_ITER_%s_%s__\\n" "$terminal_index" "$iteration"',
-    'done',
-    'printf "__AIOPSTERM_CAT_DONE_%s_%s__\\n" "$terminal_index" "$iteration"',
-    ''
-  ].join('\n')
+  const script = process.platform === 'win32'
+    ? [
+        "const fs = require('fs')",
+        'const [inputFile, durationSeconds, terminalIndex] = process.argv.slice(2)',
+        'const content = fs.readFileSync(inputFile)',
+        'const deadline = Date.now() + Number(durationSeconds) * 1000',
+        'let iteration = 0',
+        'const run = () => {',
+        '  if (Date.now() >= deadline) { process.stdout.write(`__AIOPSTERM_CAT_DONE_${terminalIndex}_${iteration}__\\n`); return }',
+        '  iteration += 1',
+        '  const next = () => { process.stdout.write(`\\n__AIOPSTERM_CAT_ITER_${terminalIndex}_${iteration}__\\n`); setImmediate(run) }',
+        "  if (!process.stdout.write(content)) process.stdout.once('drain', next)",
+        '  else next()',
+        '}',
+        'run()'
+      ].join('\n')
+    : [
+        'input_file=$1',
+        'duration_seconds=$2',
+        'terminal_index=$3',
+        'deadline=$(( $(date +%s) + duration_seconds ))',
+        'iteration=0',
+        'while [ "$(date +%s)" -lt "$deadline" ]; do',
+        '  cat -- "$input_file" || exit 31',
+        '  iteration=$((iteration + 1))',
+        '  printf "\\n__AIOPSTERM_CAT_ITER_%s_%s__\\n" "$terminal_index" "$iteration"',
+        'done',
+        'printf "__AIOPSTERM_CAT_DONE_%s_%s__\\n" "$terminal_index" "$iteration"',
+        ''
+      ].join('\n')
   await Promise.all([
     writeFile(filePath, content, 'utf8'),
     writeFile(scriptPath, script, 'utf8')
   ])
+  const quoteCommandArg = (value: string) => process.platform === 'win32'
+    ? `"${value.replaceAll('"', '\\"')}"`
+    : `'${value.replaceAll("'", "'\\''")}'`
   return {
     filePath,
     scriptPath,
-    fileBytes: Buffer.byteLength(content, 'utf8')
+    fileBytes: Buffer.byteLength(content, 'utf8'),
+    commands: process.platform === 'win32'
+      ? Array.from({ length: 5 }, (_item, index) => [process.execPath, scriptPath, filePath, '$DURATION', String(index)].map(quoteCommandArg).join(' '))
+      : undefined
   }
 }
 
@@ -313,9 +335,10 @@ const injectStressHarness = async (
     catScriptPath: string
     catFileBytes: number
     catTerminalCount: number
+    catCommands?: string[]
   }
 ) =>
-  page.evaluate(async ({ foreground, background, durationMs, switchIntervalMs, profile, catFilePath, catScriptPath, catFileBytes, catTerminalCount }) => {
+  page.evaluate(async ({ foreground, background, durationMs, switchIntervalMs, profile, catFilePath, catScriptPath, catFileBytes, catTerminalCount, catCommands }) => {
     const harness = (window as any).__AIOPSTERM_TERMINAL_STRESS__
     if (!harness?.run) throw new Error('Terminal stress harness is unavailable.')
     const result = await harness.run({
@@ -327,7 +350,8 @@ const injectStressHarness = async (
       catFilePath,
       catScriptPath,
       catFileBytes,
-      catTerminalCount
+      catTerminalCount,
+      catCommands: catCommands?.map((command) => command.replace('$DURATION', String(Math.max(1, Math.ceil(durationMs / 1000)))))
     })
     ;(window as any).__AIOPSTERM_TERMINAL_STRESS_RESULT__ = result
     return result
@@ -611,7 +635,8 @@ test('threaded terminal renderer keeps foreground frames healthy under 10 foregr
       catFilePath: catFixture.filePath,
       catScriptPath: catFixture.scriptPath,
       catFileBytes: catFixture.fileBytes,
-      catTerminalCount: 5
+      catTerminalCount: 5,
+      catCommands: catFixture.commands
     })
     result.flow = await readTerminalFlowSummary(
       userDataDir,

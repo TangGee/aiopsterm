@@ -1519,7 +1519,7 @@ describe('workspace store', () => {
         cwd: '/work/history-project'
       })
     )
-    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('test-session-local', "cd '/work/history-project' && codex resume 'codex-history-1'\n")
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('test-session-local', "cd '/work/history-project' && codex resume 'codex-history-1'\r")
     expect(window.aiops.bindManagedAiSessionTerminal).toHaveBeenCalledWith({
       source: 'codex',
       sessionId: 'codex-history-1',
@@ -2873,7 +2873,7 @@ describe('workspace store', () => {
     const decision = await store.runActiveTerminalCommand(store.chatMessages[0].commandExecution!.command, 'agent')
 
     expect(decision?.status).toBe('allow')
-    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-session', 'uptime\n')
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-session', 'uptime\r')
   })
 
   it('writes a large manual paste once without applying command security', async () => {
@@ -7350,7 +7350,7 @@ describe('workspace store', () => {
     vi.mocked(window.aiops.writeTerminal).mockClear()
     const terminalDecision = await store.runActiveTerminalCommand('echo ai-message')
     expect(terminalDecision?.status).toBe('allow')
-    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-ai-message', 'echo ai-message\n')
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-ai-message', 'echo ai-message\r')
     expect(store.activePanel.output).toBe(outputBeforeLiveTerminalCommand)
     expect(store.activePanel.outputSegments).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ text: expect.stringContaining('echo ai-message') })])
@@ -7423,8 +7423,8 @@ describe('workspace store', () => {
       expect(globalDecision.panelIds).toEqual(['panel-main', secondPanelId])
     }
     expect(window.aiops.writeTerminal).toHaveBeenCalledTimes(2)
-    expect(window.aiops.writeTerminal).toHaveBeenNthCalledWith(1, 'terminal-write-main', 'hostname\n')
-    expect(window.aiops.writeTerminal).toHaveBeenNthCalledWith(2, 'terminal-write-second', 'hostname\n')
+    expect(window.aiops.writeTerminal).toHaveBeenNthCalledWith(1, 'terminal-write-main', 'hostname\r')
+    expect(window.aiops.writeTerminal).toHaveBeenNthCalledWith(2, 'terminal-write-second', 'hostname\r')
     expect(firstPanel.output).not.toContain('hostname')
     expect(store.activePanel.output).not.toContain('hostname')
     expect(store.recordedCommands).toEqual([])

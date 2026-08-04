@@ -80,6 +80,7 @@ const connections = new Map<string, ExternalConnectionRecord>()
 const pendingCommands = new Map<string, PendingCommand>()
 
 let server: Server | null = null
+let serverClosePromise: Promise<void> | null = null
 let socketPath = ''
 let runtimeConfig: ExternalCodexMcpRuntimeConfig = {}
 
@@ -824,6 +825,10 @@ export const ensureExternalCodexMcpBridgeServer = async (config: ExternalCodexMc
   configureExternalCodexMcpBridgeRuntime(config)
   if (!isEnabled()) return ''
   if (server && socketPath) return socketPath
+  if (serverClosePromise) {
+    await serverClosePromise
+    serverClosePromise = null
+  }
   socketPath = bridgeSocketPath()
   if (process.platform !== 'win32') {
     await mkdir(dirname(socketPath), { recursive: true })
@@ -882,8 +887,9 @@ export const closeExternalCodexMcpBridgeServer = () => {
     } catch {}
   }
   connections.clear()
-  server?.close()
+  const existingServer = server
   server = null
+  if (existingServer) serverClosePromise = new Promise((resolve) => existingServer.close(() => resolve()))
   if (socketPath && process.platform !== 'win32' && existsSync(socketPath)) rmSync(socketPath, { force: true })
   socketPath = ''
 }

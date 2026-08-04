@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, rmSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 
 export const packageTargets = {
   'linux-appimage': {
@@ -52,9 +52,21 @@ export const cleanPackageTargetOutput = (targetName, version, cwd = process.cwd(
   }
 }
 
+export const npmScriptInvocation = ({ platform, nodeExecutable, npmExecPath, script, args = [] }) => {
+  if (platform !== 'win32') return { command: 'npm', args: ['run', script, ...args] }
+  const npmCli = npmExecPath || resolve(dirname(nodeExecutable), 'node_modules', 'npm', 'bin', 'npm-cli.js')
+  return { command: nodeExecutable, args: [npmCli, 'run', script, ...args] }
+}
+
 export const runNpmScript = (script, args = []) => {
-  const executable = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-  return spawnSync(executable, ['run', script, ...args], {
+  const invocation = npmScriptInvocation({
+    platform: process.platform,
+    nodeExecutable: process.execPath,
+    npmExecPath: process.env.npm_execpath,
+    script,
+    args
+  })
+  return spawnSync(invocation.command, invocation.args, {
     stdio: 'inherit',
     env: process.env
   })

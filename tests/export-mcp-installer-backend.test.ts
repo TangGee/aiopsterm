@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { basename, join } from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ExportMcpClientSource, ExportMcpServerId } from '../src/shared/contracts/exportMcp'
 
@@ -35,6 +35,8 @@ vi.mock('../src/main/backend/codex/externalCodexMcpBridge', () => ({
 }))
 
 const cleanupDirs: string[] = []
+const tomlString = (value: string) => JSON.stringify(value)
+const tomlLiteral = (value: string) => `'${value}'`
 
 const loadBackend = async () => {
   const modulePath = '../src/main/backend/codex/exportMcpInstaller'
@@ -97,13 +99,13 @@ describe('Export MCP installer backend', () => {
     await writeFile(
       join(codexHome, 'config.toml'),
       `[mcp_servers.aiopsterm_hosts]
-command = "${runtimePath}"
-args = ["${scriptPath}"]
+command = ${tomlString(runtimePath)}
+args = [${tomlLiteral(scriptPath)}]
 
 [mcp_servers.aiopsterm_hosts.env]
 ELECTRON_RUN_AS_NODE = "1"
-AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET = "${socketPath}"
-AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN = "${token}"
+AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET = ${tomlLiteral(socketPath)}
+AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN = ${tomlLiteral(token)}
 AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE = "hosts"
 `,
       'utf-8'
@@ -146,13 +148,13 @@ AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE = "hosts"
     await writeFile(
       join(codexHome, 'config.toml'),
       `[mcp_servers.aiopsterm_hosts]
-command = "${runtimePath}"
-args = ["${scriptPath}"]
+command = ${tomlString(runtimePath)}
+args = [${tomlLiteral(scriptPath)}]
 
 [mcp_servers.aiopsterm_hosts.env]
 ELECTRON_RUN_AS_NODE = "1"
-AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET = "${staleSocketPath}"
-AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN = "${token}"
+AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET = ${tomlLiteral(staleSocketPath)}
+AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN = ${tomlLiteral(token)}
 AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE = "hosts"
 `,
       'utf-8'
@@ -253,8 +255,8 @@ AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE = "hosts"
         scriptPath
       ]
     ])
-    expect(calls[0].file).toContain('/codex')
-    expect(calls[2].file).toContain('/claude')
+    expect(basename(calls[0].file)).toBe('codex')
+    expect(basename(calls[2].file)).toBe('claude')
 
     await expect(installer.uninstallExportMcp({ source: 'codex', serverId: 'databases' })).resolves.toEqual(expect.objectContaining({ ok: true }))
     expect(calls.at(-1)?.args).toEqual(['mcp', 'remove', 'aiopsterm_databases'])

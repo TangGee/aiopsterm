@@ -1,0 +1,3 @@
+* text=auto eol=lf
+*.cmd text eol=crlf
+resources/licenses/cline-sidecar/node-22.20.0-LICENSE whitespace=-space-before-tab

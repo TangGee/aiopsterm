@@ -106,6 +106,7 @@ describe('quick commands backend boundary', () => {
   })
 
   afterEach(async () => {
+    backend.resetQuickCommandsForTests()
     if (originalQuickCommandsSeedEnv === undefined) {
       delete process.env.AIOPSTERM_QUICK_COMMANDS_ENABLE_SEED
     } else {

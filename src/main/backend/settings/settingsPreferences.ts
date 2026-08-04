@@ -37,6 +37,7 @@ type SqliteStatement = {
 
 type SqliteDatabase = {
   exec(sql: string): void
+  close?(): void
   prepare(sql: string): SqliteStatement
 }
 
@@ -268,11 +269,16 @@ class SqliteSettingsPreferencesStore {
     this.cache = normalized
     return clonePreferences(normalized)
   }
+
+  close(): void {
+    this.db.close?.()
+  }
 }
 
 let settingsPreferencesStore: FallbackSettingsPreferencesStore | SqliteSettingsPreferencesStore | null = null
 
 export const configureSettingsPreferencesBackendRuntime = (config: SettingsPreferencesRuntimeConfig = {}) => {
+  if (settingsPreferencesStore instanceof SqliteSettingsPreferencesStore) settingsPreferencesStore.close()
   runtimeConfig = {
     useSeedData: config.useSeedData ?? defaultSettingsPreferencesSeedMode()
   }
@@ -283,7 +289,13 @@ const createStore = () => {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const Database = require('better-sqlite3') as new (path: string) => SqliteDatabase
-    return new SqliteSettingsPreferencesStore(new Database(join(app.getPath('userData'), 'aiopsterm-state.db')))
+    const database = new Database(join(app.getPath('userData'), 'aiopsterm-state.db'))
+    try {
+      return new SqliteSettingsPreferencesStore(database)
+    } catch (error) {
+      database.close?.()
+      throw error
+    }
   } catch {
     return new FallbackSettingsPreferencesStore()
   }

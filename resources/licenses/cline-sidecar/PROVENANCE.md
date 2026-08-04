@@ -12,3 +12,7 @@ notices and records the evidence path in the CycloneDX SBOM.
   `@simple-git/argv-parser@1.1.1`, retrieved from commit
   `01bb7ceae698831e9abd9310f7d61484970ab53c`,
   SHA-256 `3a31277abe4e0a30eb17dad52addace2fd73580fd9d79d40590e69785fdf71d5`.
+- `node-22.20.0-LICENSE`: fallback license and third-party notices for the
+  `node-win-x64@22.20.0` and `node-win-arm64@22.20.0` packages, whose published
+  tarballs contain the executable and package metadata but no license file.
+  SHA-256 `e991d81497a85bb24fc6bffae0a3637a6accd6c6bc5ce1f2c5698bd555cf9d49`.

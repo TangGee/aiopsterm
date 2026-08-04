@@ -1,3 +1,5 @@
+import { homedir } from 'node:os'
+import { join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   buildManagedAiActiveScopeLabel,
@@ -218,6 +220,11 @@ describe('aiSessionsPanelViewRuntime', () => {
   })
 
   it('groups symlink aliases by canonical project path before adding duplicate markers', () => {
+    const home = process.env.HOME || homedir()
+    const projectPath = join(home, 'sdd', 'work', 'learn_ai', 'aiopsterm')
+    const linkedProjectPath = join(home, 'sdd', 'links', 'aiopsterm')
+    const otherProjectPath = join(home, 'zzz-other', 'aiopsterm')
+    const compactProjectPath = process.env.HOME ? `~/${relative(process.env.HOME, projectPath)}` : projectPath
     const aliasedProjectSessions = [
       makeSession({
         id: 'codex-real-aiopsterm',
@@ -225,8 +232,8 @@ describe('aiSessionsPanelViewRuntime', () => {
         title: 'Real cwd',
         state: 'idle',
         lastActivityAt: 500,
-        cwd: '/home/tlinux/sdd/work/learn_ai/aiopsterm',
-        canonicalCwd: '/home/tlinux/sdd/work/learn_ai/aiopsterm',
+        cwd: projectPath,
+        canonicalCwd: projectPath,
         requestKind: 'telemetry',
         decisionMode: 'telemetry'
       }),
@@ -236,8 +243,8 @@ describe('aiSessionsPanelViewRuntime', () => {
         title: 'Link cwd',
         state: 'idle',
         lastActivityAt: 490,
-        cwd: '/home/tlinux/sdd/links/aiopsterm',
-        canonicalCwd: '/home/tlinux/sdd/work/learn_ai/aiopsterm',
+        cwd: linkedProjectPath,
+        canonicalCwd: projectPath,
         requestKind: 'telemetry',
         decisionMode: 'telemetry'
       }),
@@ -247,8 +254,8 @@ describe('aiSessionsPanelViewRuntime', () => {
         title: 'Other cwd',
         state: 'idle',
         lastActivityAt: 480,
-        cwd: '/tmp/other/aiopsterm',
-        canonicalCwd: '/tmp/other/aiopsterm',
+        cwd: otherProjectPath,
+        canonicalCwd: otherProjectPath,
         requestKind: 'telemetry',
         decisionMode: 'telemetry'
       })
@@ -259,7 +266,7 @@ describe('aiSessionsPanelViewRuntime', () => {
     expect(managedAiProjectDisplayLabel(aliasedProjectSessions[1], projectLabels, 'Unknown project')).toBe('aiopsterm ①')
     expect(managedAiProjectDisplayLabel(aliasedProjectSessions[2], projectLabels, 'Unknown project')).toBe('aiopsterm ②')
     expect(managedAiProjectDisplayLabelSet(aliasedProjectSessions[0], projectLabels, 'Unknown project').candidates).toEqual([
-      '~/sdd/work/learn_ai/aiopsterm ①',
+      `${compactProjectPath} ①`,
       'work/learn_ai/aiopsterm ①',
       'learn_ai/aiopsterm ①',
       'aiopsterm ①'

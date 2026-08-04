@@ -17,6 +17,7 @@ import type {
   ControlWorkspaceSnapshot
 } from '@shared/contracts/control'
 import type { TerminalFocusReason } from '@/services/terminal/terminalWorkspaceViewRuntime'
+import { terminalSubmitText } from '@/services/terminal/terminalExecutionRuntime'
 
 type TerminalControlSurfaceOperationDependencies = {
   workspace: WorkspaceStore
@@ -522,7 +523,7 @@ export const createTerminalControlSurfaceOperationHandlers = ({
       if (!isTerminalWorkspacePanel(panel)) return controlFail('WORKSPACE_PROMPT_TERMINAL_REQUIRED', 'Prompt submit requires a terminal surface.')
       const message = controlText(params.message || params.prompt || params.text || params.body)
       if (!message) return controlFail('WORKSPACE_PROMPT_REQUIRED', 'Prompt submit requires message text.')
-      const shellText = message.endsWith('\n') ? message : `${message}\n`
+      const shellText = terminalSubmitText(message)
       const decision = await workspace.runTerminalCommand(panel.id, message, { source: 'agent', inputText: shellText, shellText, writeToShell: true })
       return controlOk({
         workspaceId: panel.id,

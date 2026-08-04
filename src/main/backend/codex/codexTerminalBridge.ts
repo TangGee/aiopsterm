@@ -86,6 +86,7 @@ const terminalOutputHistories = new Map<string, TerminalOutputHistory>()
 const runtimeTargetSelections = new Map<string, { sessionId: string; strict: boolean }>()
 
 let server: Server | null = null
+let serverClosePromise: Promise<void> | null = null
 let socketPath = ''
 let preferredSessionId = ''
 let preferredSessionStrict = false
@@ -1241,6 +1242,10 @@ const writeSocketResponse = (socket: Socket, id: string | undefined, response: C
 
 export const ensureCodexTerminalBridgeServer = async (userDataPath: string) => {
   if (server && socketPath) return socketPath
+  if (serverClosePromise) {
+    await serverClosePromise
+    serverClosePromise = null
+  }
   socketPath = bridgeSocketPathFor(userDataPath)
   if (process.platform !== 'win32') {
     await mkdir(dirname(socketPath), { recursive: true })
@@ -1314,8 +1319,9 @@ export const closeCodexTerminalBridgeServer = () => {
   sessions.clear()
   preferredSessionId = ''
   preferredSessionStrict = false
-  server?.close()
+  const existingServer = server
   server = null
+  if (existingServer) serverClosePromise = new Promise((resolve) => existingServer.close(() => resolve()))
   if (socketPath && process.platform !== 'win32' && existsSync(socketPath)) rmSync(socketPath, { force: true })
   socketPath = ''
 }

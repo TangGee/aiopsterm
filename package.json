@@ -29,6 +29,7 @@
     "build:mac:dir": "npm run generate:icons && npm run build:codex && npm run build:cline-sidecar && npm run build && npm run rebuild:native && electron-builder --mac --dir --config electron-builder.yml",
     "build:win": "npm run generate:icons && npm run build:codex && npm run build:cline-sidecar && npm run build && npm run rebuild:native && electron-builder --win --config electron-builder.yml",
     "build:win:dir": "npm run generate:icons && npm run build:codex && npm run build:cline-sidecar && npm run build && npm run rebuild:native && electron-builder --win --dir --config electron-builder.yml",
+    "build:windows:one-click": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1",
     "package:build": "node scripts/build-package-target.mjs",
     "package:build:matrix": "node scripts/build-package-matrix.mjs",
     "package:source": "bash scripts/package-source.sh",

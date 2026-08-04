@@ -24,6 +24,12 @@ const withFileSessionDatabase = async <T>(run: (databasePath: string, assetDatab
   try {
     return await run(join(dir, 'files.db'), join(dir, 'assets.db'))
   } finally {
+    const filesModulePath = '../src/main/backend/files/files'
+    const filesBackend = await import(filesModulePath)
+    filesBackend.configureFilesBackendRuntime({ forceFallbackStore: true })
+    const assetsModulePath = '../src/main/backend/assets/assets'
+    const assetsBackend = await import(assetsModulePath)
+    assetsBackend.configureAssetBackendRuntime({ forceFallbackStore: true })
     await rm(dir, { recursive: true, force: true })
   }
 }

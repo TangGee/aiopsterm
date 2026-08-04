@@ -100,11 +100,11 @@ describe('Cline Agent sidecar path resolution', () => {
     const runtimePath = join(outputDir, process.platform === 'win32' ? 'node.exe' : 'node')
     const bundlePath = join(outputDir, 'cline-agent-sidecar.cjs')
     const bunPath = process.platform === 'win32'
-      ? join(appPath, 'node_modules', '.bin', 'bun.cmd')
+      ? join(appPath, 'node_modules', 'bun', 'bin', 'bun.exe')
       : join(appPath, 'node_modules', '.bin', 'bun')
     const entryPath = join(appPath, 'src', 'sidecar', 'clineAgentSidecar.ts')
     mkdirSync(outputDir, { recursive: true })
-    mkdirSync(join(appPath, 'node_modules', '.bin'), { recursive: true })
+    mkdirSync(join(bunPath, '..'), { recursive: true })
     mkdirSync(join(appPath, 'src', 'sidecar'), { recursive: true })
     for (const file of [runtimePath, bundlePath, bunPath, entryPath]) writeFileSync(file, '')
 

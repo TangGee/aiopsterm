@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
 
@@ -10,6 +12,43 @@ const evalBuildCodexCliModule = async (source: string) => {
 }
 
 describe('package configuration audit', () => {
+  it('runs package target npm scripts through Node on Windows', async () => {
+    const stdout = await evalBuildCodexCliModule(`
+      import { npmScriptInvocation } from './scripts/package-targets.mjs'
+      console.log(JSON.stringify(npmScriptInvocation({
+        platform: 'win32',
+        nodeExecutable: 'C:\\\\node\\\\node.exe',
+        npmExecPath: 'C:\\\\node\\\\node_modules\\\\npm\\\\bin\\\\npm-cli.js',
+        script: 'audit:packaged-app',
+        args: ['--', 'windows']
+      })))
+    `)
+
+    expect(JSON.parse(stdout)).toEqual({
+      command: 'C:\\node\\node.exe',
+      args: [
+        'C:\\node\\node_modules\\npm\\bin\\npm-cli.js',
+        'run',
+        'audit:packaged-app',
+        '--',
+        'windows'
+      ]
+    })
+  })
+
+  it('kills active terminal sessions before asynchronous app shutdown work', () => {
+    const mainSource = readFileSync('src/main/index.ts', 'utf8')
+    const beforeQuitHandler = mainSource.slice(
+      mainSource.indexOf("app.on('before-quit'"),
+      mainSource.indexOf("app.on('before-quit'") + 800
+    )
+
+    expect(beforeQuitHandler).toContain('terminalRuntime.killAllSessions()')
+    expect(beforeQuitHandler.indexOf('terminalRuntime.killAllSessions()')).toBeLessThan(
+      beforeQuitHandler.indexOf('event.preventDefault()')
+    )
+  })
+
   it('keeps macOS and deb packaging entry points configured', async () => {
     const result = await execFileAsync(process.execPath, ['scripts/audit-package-config.mjs'], { cwd: process.cwd() })
     expect(`${result.stdout}${result.stderr}`).toContain('package-config-audit-ok')
@@ -47,5 +86,71 @@ describe('package configuration audit', () => {
       console.log(readCodexRustToolchainFromText('[toolchain]\\nchannel = "1.89.0"\\n'))
     `)
     expect(toolchain).toBe('1.89.0')
+  })
+
+  it('passes the packaged Codex binary to the runtime audit', async () => {
+    const stdout = await evalBuildCodexCliModule(`
+      import { buildCodexRuntimeAuditArgs } from './scripts/build-codex-cli.mjs'
+      console.log(JSON.stringify(buildCodexRuntimeAuditArgs(
+        'C:\\\\aiopsterm\\\\codex-package\\\\bin\\\\codex.exe',
+        'x86_64-pc-windows-msvc'
+      )))
+    `)
+    const args = JSON.parse(stdout) as string[]
+
+    expect(args).toEqual([
+      'C:\\aiopsterm\\codex-package\\bin\\codex.exe',
+      '--expected-target',
+      'x86_64-pc-windows-msvc'
+    ])
+  })
+
+  it('keeps a pinned Node license fallback for incomplete Windows runtime packages', () => {
+    const expectedHash = 'e991d81497a85bb24fc6bffae0a3637a6accd6c6bc5ce1f2c5698bd555cf9d49'
+    const buildSource = readFileSync('scripts/build-cline-sidecar.mjs', 'utf8')
+    const license = readFileSync('resources/licenses/cline-sidecar/node-22.20.0-LICENSE')
+
+    expect(buildSource).toContain('node-22.20.0-LICENSE')
+    expect(buildSource).toContain(expectedHash)
+    expect(createHash('sha256').update(license).digest('hex')).toBe(expectedHash)
+    expect(license.toString('utf8')).toMatch(/^Node\.js is licensed for use as follows:/)
+  })
+
+  it('runs the Bun executable directly when building the Windows sidecar', () => {
+    const buildSource = readFileSync('scripts/build-cline-sidecar.mjs', 'utf8')
+
+    expect(buildSource).toContain("join(root, 'node_modules', 'bun', 'bin', 'bun.exe')")
+    expect(buildSource).not.toContain("join(root, 'node_modules', '.bin', 'bun.cmd')")
+  })
+
+  it('uses the Node mirror for generic node-gyp rebuilds', () => {
+    const npmrc = readFileSync('.npmrc', 'utf8')
+
+    expect(npmrc).toContain('registry=https://registry.npmjs.org/')
+    expect(npmrc).toContain('disturl=https://nodejs.org/dist')
+    expect(npmrc).not.toContain('disturl=https://npmmirror.com/mirrors/electron/')
+  })
+
+  it('keeps the local Windows build entrypoints available without a remote CI service', () => {
+    const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts?: Record<string, string> }
+    const script = readFileSync('scripts/build-windows.ps1', 'utf8')
+    expect(packageJson.scripts?.['build:windows:one-click']).toContain('scripts/build-windows.ps1')
+    expect(readFileSync('scripts/build-windows.cmd', 'utf8')).toContain('build-windows.ps1')
+    expect(script).toContain('[switch]$ChinaMirror')
+    expect(script).toContain("@('run', 'package:build'")
+    expect(script).toContain("@('run', 'package:verify'")
+    expect(script).toContain('https://registry.npmjs.org/')
+    expect(script).toContain('https://registry.npmmirror.com/')
+    expect(script).toContain('function Update-ProcessPath')
+    expect(script).toContain('Get-VisualStudioInstallationPath')
+  })
+
+  it('loads the native runtime entrypoint before validating its target', async () => {
+    await expect(execFileAsync(process.execPath, ['scripts/ensure-native-runtime.mjs', 'invalid'], {
+      cwd: process.cwd()
+    })).rejects.toMatchObject({
+      code: 2,
+      stderr: expect.stringContaining('Usage: node scripts/ensure-native-runtime.mjs')
+    })
   })
 })

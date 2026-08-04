@@ -21,6 +21,25 @@ export interface NativeLockRecoveryOptions {
   isProcessAlive: (pid: number) => boolean
 }
 
+export const electronHeadersUrl: (env: Record<string, string | undefined>) => string
+export const electronRebuildInvocation: (options: {
+  cliPath: string
+  modules: string[]
+  electronVersion: string
+  headersUrl: string
+}) => { commandArgs: string[] }
+export const npmRebuildInvocation: (options: {
+  platform: string
+  nodeExecutable: string
+  npmExecPath?: string
+  modules: string[]
+}) => { command: string; args: string[] }
+export const shouldRebuildPty: (options: {
+  force: boolean
+  target: string
+  runtime: string
+  probeStatus: number | null
+}) => boolean
 export const parseNativeManifest: (raw: string) => Record<string, unknown> | null
 export const sanitizeNativeRebuildEnvironment: (
   source: Record<string, string | undefined>

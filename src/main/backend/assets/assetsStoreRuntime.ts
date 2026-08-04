@@ -65,6 +65,7 @@ const requireNative = createRequire(__filename)
 
 export type SqliteDatabase = {
   exec(sql: string): void
+  close?(): void
   prepare(sql: string): {
     all(...args: unknown[]): unknown[]
     get(...args: unknown[]): unknown
@@ -82,6 +83,7 @@ export type AssetStoreRuntimeConfig = {
 }
 
 export type AssetStore = {
+  close?(): void
   list(): AiopsAssetSnapshot
   getAsset(id: string): AiopsAssetRecord | null
   getSecret(id: string): AssetSecret
@@ -123,6 +125,7 @@ let runtimeConfig: AssetRuntimeState = {
 }
 
 export const configureAssetStoreRuntime = (config: AssetStoreRuntimeConfig = {}) => {
+  assetStore?.close?.()
   runtimeConfig = {
     databasePath: config.databasePath ? (isAbsolute(config.databasePath) ? config.databasePath : resolve(config.databasePath)) : defaultAssetDatabasePath(),
     credentialKeyPath: config.credentialKeyPath ? (isAbsolute(config.credentialKeyPath) ? config.credentialKeyPath : resolve(config.credentialKeyPath)) : defaultAssetCredentialKeyPath(),
@@ -371,6 +374,10 @@ class SqliteAssetStore {
     if (runtimeConfig.useSeedData) this.seed()
     else this.stripLegacySeedData()
     this.migratePlaintextSecrets()
+  }
+
+  close(): void {
+    this.db.close?.()
   }
 
   private invalidateSnapshot() {
@@ -648,16 +655,30 @@ const hasExistingSqliteDatabase = () => {
   }
 }
 
+const createSqliteStore = (Database: new (path: string) => SqliteDatabase): AssetStore => {
+  const database = new Database(runtimeConfig.databasePath)
+  try {
+    return new SqliteAssetStore(database)
+  } catch (error) {
+    try {
+      database.close?.()
+    } catch {
+      // Preserve the initialization error that made the store unusable.
+    }
+    throw error
+  }
+}
+
 const createStore = (): AssetStore => {
   if (runtimeConfig.sqliteFactory) {
-    return new SqliteAssetStore(new runtimeConfig.sqliteFactory(runtimeConfig.databasePath))
+    return createSqliteStore(runtimeConfig.sqliteFactory)
   }
   if (runtimeConfig.forceFallbackStore) return new FallbackAssetStore()
   try {
     // Native SQLite is preferred. If the Electron ABI has not been rebuilt yet,
     // the backend can use electron-store only before a SQLite database exists.
     const Database = runtimeConfig.sqliteFactory || (requireNative('better-sqlite3') as new (path: string) => SqliteDatabase)
-    return new SqliteAssetStore(new Database(runtimeConfig.databasePath))
+    return createSqliteStore(Database)
   } catch (error) {
     if (existsSync(runtimeConfig.databasePath) && hasExistingSqliteDatabase()) {
       const detail = error instanceof Error ? error.message : String(error || 'unknown error')

@@ -16,11 +16,15 @@ import { createRequire } from 'node:module'
 import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  electronRebuildInvocation,
+  electronHeadersUrl,
   lockOwnedBy,
   mergeNativeManifest,
+  npmRebuildInvocation,
   parseNativeManifest,
   sanitizeNativeRebuildEnvironment,
   shadowBindingPaths,
+  shouldRebuildPty,
   shouldRecoverLock
 } from './native-runtime-helpers.mjs'
 
@@ -231,25 +235,27 @@ const runRebuild = (runtime, modules) => {
   const env = sanitizeNativeRebuildEnvironment(process.env)
   let result
   if (runtime === 'node') {
-    const npmExecutable = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-    result = spawnSync(npmExecutable, ['rebuild', ...modules], {
+    const invocation = npmRebuildInvocation({
+      platform: process.platform,
+      nodeExecutable: process.execPath,
+      npmExecPath: process.env.npm_execpath,
+      modules
+    })
+    result = spawnSync(invocation.command, invocation.args, {
       cwd: projectRoot,
       env,
       stdio: 'inherit'
     })
   } else {
+    const invocation = electronRebuildInvocation({
+      cliPath: require.resolve('@electron/rebuild/lib/cli.js'),
+      modules,
+      electronVersion: electron().version,
+      headersUrl: electronHeadersUrl(process.env)
+    })
     result = spawnSync(
       process.execPath,
-      [
-        require.resolve('@electron/rebuild/lib/cli.js'),
-        '-f',
-        '-w',
-        modules.join(','),
-        '-v',
-        electron().version,
-        '-d',
-        'https://www.electronjs.org/headers'
-      ],
+      invocation.commandArgs,
       {
         cwd: projectRoot,
         env,
@@ -394,7 +400,7 @@ const prepareRuntimes = () => {
 
   for (const runtime of runtimeNames) {
     let result = probe(runtime)
-    if (result.status !== 0) {
+    if (shouldRebuildPty({ force, target, runtime, probeStatus: result.status })) {
       runRebuild(runtime, ['node-pty'])
       result = probe(runtime)
     }

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { join } from 'path'
 
 type RuntimeLogBackend = {
   configureRuntimeLog: (config?: {
@@ -31,9 +32,10 @@ describe('runtime log backend', () => {
     const appendFile = vi.fn(async (_path: string, content: string) => {
       appended.push(content)
     })
+    const logDir = '/tmp/aiopsterm/logs'
 
     runtimeLog.configureRuntimeLog({
-      getLogDir: () => '/tmp/aiopsterm/logs',
+      getLogDir: () => logDir,
       mkdir: mkdir as any,
       appendFile: appendFile as any,
       now: () => new Date('2026-06-13T01:02:03.000Z')
@@ -50,8 +52,8 @@ describe('runtime log backend', () => {
       skipped: undefined
     })
 
-    expect(mkdir).toHaveBeenCalledWith('/tmp/aiopsterm/logs', { recursive: true })
-    expect(appendFile).toHaveBeenCalledWith('/tmp/aiopsterm/logs/aiopsterm-runtime.log', expect.any(String), 'utf-8')
+    expect(mkdir).toHaveBeenCalledWith(logDir, { recursive: true })
+    expect(appendFile).toHaveBeenCalledWith(join(logDir, 'aiopsterm-runtime.log'), expect.any(String), 'utf-8')
     const line = JSON.parse(appended[0])
     expect(line).toEqual({
       at: '2026-06-13T01:02:03.000Z',

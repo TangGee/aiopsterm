@@ -166,9 +166,11 @@ describe('assets store data runtime', () => {
     expect(sanitizeAsset(assets[0], { password: 'pw' })).toEqual(expect.objectContaining({ hasPassword: true }))
     expect(sanitizeKeychain(seedKeychains()[0], { privateKey: 'pk', passphrase: 'pp' }, true)).toEqual(expect.objectContaining({ hasPrivateKey: true, privateKey: 'pk', passphrase: 'pp' }))
     expect(assetGroupName(assets[0])).toBe('未分组')
-    expect(listAssetGroupsFromAssets(assets, { assetTypes: ['person'] })).toEqual([
+    const groups = listAssetGroupsFromAssets(assets, { assetTypes: ['person'] })
+    const expectedGroups = [
       { key: 'group-DB', name: 'DB', count: 1 },
       { key: 'group-未分组', name: '未分组', count: 1 }
-    ])
+    ].sort((first, second) => first.name.localeCompare(second.name))
+    expect(groups).toEqual(expectedGroups)
   })
 })

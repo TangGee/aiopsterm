@@ -48,7 +48,9 @@ const launchApp = async (name: string, env: NodeJS.ProcessEnv = {}, options: { u
 
 const commandExists = async (command: string) => {
   return new Promise<boolean>((resolve) => {
-    const child = spawn('sh', ['-lc', `command -v ${command} >/dev/null 2>&1`], { stdio: 'ignore' })
+    const child = process.platform === 'win32'
+      ? spawn('where.exe', [command], { stdio: 'ignore', windowsHide: true })
+      : spawn('sh', ['-lc', `command -v ${command} >/dev/null 2>&1`], { stdio: 'ignore' })
     child.on('error', () => resolve(false))
     child.on('close', (code) => resolve(code === 0))
   })
@@ -106,9 +108,10 @@ const firstSocketFile = async (directory: string) => {
   return entries.find((entry) => entry.endsWith('.sock')) || ''
 }
 
-const controlSocketPathForUserData = (userDataDir: string) =>
+const controlSocketPathForUserData = (userDataDir: string, pid = process.pid) =>
   pollValue(
     async () => {
+      if (process.platform === 'win32') return `\\\\.\\pipe\\aiopsterm-control-${pid}`
       const socketFile = await firstSocketFile(path.join(userDataDir, 'control'))
       return socketFile ? path.join(userDataDir, 'control', socketFile) : ''
     },
@@ -263,10 +266,15 @@ const hookCommandFromConfig = (config: unknown, eventName: string) => {
 const createFakeKubectl = async () => {
   const dir = path.join(os.tmpdir(), `aiopsterm-e2e-kubectl-${Date.now()}`)
   await mkdir(dir, { recursive: true })
-  const filePath = path.join(dir, 'kubectl')
-  await writeFile(
-    filePath,
-    [
+  const filePath = path.join(dir, process.platform === 'win32' ? 'kubectl.cjs' : 'kubectl')
+  if (process.platform === 'win32') {
+    await writeFile(filePath, [
+      "const args = process.argv.slice(2)",
+      "if (args[0] === 'get' && args[1] === 'namespaces') process.stdout.write('NAME STATUS AGE\\ne2e Active 1d\\ndefault Active 1d\\n')",
+      "else { process.stderr.write(`unexpected kubectl args: ${args.join(' ')}\\n`); process.exitCode = 17 }"
+    ].join('\n'), 'utf-8')
+  } else {
+    await writeFile(filePath, [
       '#!/bin/sh',
       'set -eu',
       'case "$1:$2" in',
@@ -280,10 +288,9 @@ const createFakeKubectl = async () => {
       '    exit 17',
       '    ;;',
       'esac'
-    ].join('\n'),
-    'utf-8'
-  )
-  await chmod(filePath, 0o755)
+    ].join('\n'), 'utf-8')
+    await chmod(filePath, 0o755)
+  }
   return { dir, filePath }
 }
 
@@ -774,7 +781,9 @@ test('managed AI session notifications flow through real local terminal hooks', 
   })
   const runId = Date.now()
   const quoteShell = (value: string) => `'${value.replace(/'/g, "'\\''")}'`
-  const runInstalledHookCommand = (command: string, payload: Record<string, unknown>) => `printf "%s\\n" ${quoteShell(JSON.stringify(payload))} | ( ${command} )`
+  const runInstalledHookCommand = (command: string, payload: Record<string, unknown>) => process.platform === 'win32'
+    ? `(echo ${JSON.stringify(payload)}) | ${command}`
+    : `printf "%s\\n" ${quoteShell(JSON.stringify(payload))} | ( ${command} )`
 
   try {
     const page = await app.firstWindow()
@@ -926,7 +935,9 @@ test('managed AI session notifications flow through real local terminal hooks', 
 test('control socket and external Codex MCP expose automation without browser compatibility leaks', async () => {
   test.setTimeout(120_000)
   const userDataDir = e2eUserDataDir('automation')
-  const externalSocketPath = path.join(userDataDir, 'external-codex-mcp.sock')
+  const externalSocketPath = process.platform === 'win32'
+    ? `\\\\.\\pipe\\aiopsterm-e2e-external-${Date.now()}`
+    : path.join(userDataDir, 'external-codex-mcp.sock')
   const externalToken = `e2e-token-${Date.now()}`
   const app = await launchApp(
     'automation',
@@ -954,13 +965,7 @@ test('control socket and external Codex MCP expose automation without browser co
 
   try {
     const page = await app.firstWindow()
-    const controlSocket = await pollValue(
-      async () => {
-        const socketFile = await firstSocketFile(path.join(userDataDir, 'control'))
-        return socketFile ? path.join(userDataDir, 'control', socketFile) : ''
-      },
-      (value) => typeof value === 'string' && value.length > 0
-    )
+    const controlSocket = await controlSocketPathForUserData(userDataDir, app.process().pid)
 
     const ping = await socketJsonRequest(controlSocket, { id: 'e2e-ping', method: 'system.ping' })
     expect(ping).toEqual(expect.objectContaining({ id: 'e2e-ping', ok: true, data: expect.objectContaining({ pong: true }) }))
@@ -981,7 +986,7 @@ test('control socket and external Codex MCP expose automation without browser co
     const createdSurface = await socketJsonRequest(controlSocket, {
       id: 'e2e-surface-create',
       method: 'surface.create',
-      params: { title: 'E2E Control Surface', cwd: '/tmp', focus: true }
+      params: { title: 'E2E Control Surface', cwd: os.tmpdir(), focus: true }
     })
     expect(createdSurface).toEqual(
       expect.objectContaining({
@@ -1170,7 +1175,7 @@ test('settings background and terminal preferences persist after restart', async
     page = await app.firstWindow()
     await page.waitForLoadState('domcontentloaded')
     await disableE2eMotion(page)
-    const controlSocket = await controlSocketPathForUserData(userDataDir)
+    const controlSocket = await controlSocketPathForUserData(userDataDir, app.process().pid)
     await expect(page.locator('.app-shell')).toHaveClass(/has-app-background/)
     await expect(page.locator('.app-shell')).toHaveAttribute('style', /--app-bg-opacity: 0\.7/)
 
@@ -1193,7 +1198,7 @@ test('settings background and terminal preferences persist after restart', async
     await localRow.dblclick()
     await expect(page.locator('.terminal-tab').filter({ hasText: '127.0.0.1' })).toBeVisible()
     await expect(page.locator('.terminal-pane .xterm-host').last()).toBeVisible()
-    await sendTerminalCommand(page, 'printf "E2E_TERM=$TERM\\n"')
+    await sendTerminalCommand(page, process.platform === 'win32' ? 'echo E2E_TERM=%TERM%' : 'echo "E2E_TERM=$TERM"')
     await expectTerminalReplayToContain(controlSocket, 'E2E_TERM=vt100')
   } finally {
     await app.close()
@@ -2300,7 +2305,7 @@ test('terminal tab operations and visual baseline', async () => {
     const page = await app.firstWindow()
     await page.waitForLoadState('domcontentloaded')
     await disableE2eMotion(page)
-    const controlSocket = await controlSocketPathForUserData(userDataDir)
+    const controlSocket = await controlSocketPathForUserData(userDataDir, app.process().pid)
     const closeTabMenu = async () => {
       if ((await page.locator('.tab-menu').count()) === 0) return
       await page.locator('.terminal-grid').click({ position: { x: 10, y: 10 } })
@@ -2376,7 +2381,7 @@ test('terminal tab operations and visual baseline', async () => {
     await expect(page.locator('.terminal-toolbar')).toHaveCount(0)
     await expect(page.locator('.command-line input')).toHaveCount(0)
     const commandInput = await openFloatingCommandLine()
-    await commandInput.fill('printf "E2E_FLOATING_OK\\n"')
+    await commandInput.fill('echo E2E_FLOATING_OK')
     await commandInput.press('Enter')
     await expect(page.locator('.command-line input')).toHaveCount(0)
     await expectTerminalReplayToContain(controlSocket, 'E2E_FLOATING_OK')
@@ -2398,7 +2403,7 @@ test('terminal tab operations and visual baseline', async () => {
 
     await openTerminalContextAction('全局执行')
     await expect(page.locator('.terminal-global-command')).toBeVisible()
-    await page.locator('.terminal-global-command input').fill('printf "E2E_GLOBAL_OK\\n"')
+    await page.locator('.terminal-global-command input').fill('echo "E2E_GLOBAL_OK"')
     await page.locator('.terminal-global-command input').press('Enter')
     await expectTerminalReplayToContain(controlSocket, 'E2E_GLOBAL_OK')
     await page.locator('.terminal-global-command button[title="关闭"]').click()

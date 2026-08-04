@@ -185,8 +185,13 @@ const resolvePython = (env = process.env) => {
   throw new Error('[aiopsterm] Codex package build requires Python 3. Install Python, or set PYTHON to a Python 3 executable.')
 }
 
+export const buildCodexRuntimeAuditArgs = (binaryPath, targetTriple) => [binaryPath, '--expected-target', targetTriple]
+
 const runCodexRuntimeAudit = (projectDir = appRoot, targetTriple = codexTargetTriple(), env = process.env) =>
-  spawnSync(process.execPath, [join(projectDir, 'scripts', 'audit-codex-runtime.mjs'), '--expected-target', targetTriple], {
+  spawnSync(process.execPath, [
+    join(projectDir, 'scripts', 'audit-codex-runtime.mjs'),
+    ...buildCodexRuntimeAuditArgs(codexBuildPaths(projectDir, env).binaryPath, targetTriple)
+  ], {
     cwd: projectDir,
     stdio: 'inherit',
     env

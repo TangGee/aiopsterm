@@ -307,6 +307,8 @@ npm run package:verify -- windows
 
 `build:codex` is a Node dispatcher. Linux and macOS continue through the shell-based Codex package builder. Windows stays in the Node entrypoint and invokes Codex's Python package builder against the Windows MSVC target, so the default Windows flow builds `codex.exe`, `rg.exe`, `codex-command-runner.exe`, and `codex-windows-sandbox-setup.exe` from the local `codex/` source package inputs. `AIOPSTERM_CODEX_PACKAGE_DIR` and `AIOPSTERM_CODEX_BIN` remain cache/custom-package overrides; individual Windows helper overrides are `AIOPSTERM_CODEX_RG_BIN`, `AIOPSTERM_CODEX_COMMAND_RUNNER_BIN`, and `AIOPSTERM_CODEX_WINDOWS_SANDBOX_SETUP_BIN`.
 
+The repository does not require a remote Git host or hosted CI service for release verification. Native Windows verification can be run through `scripts/build-windows.ps1` (or its `.cmd` wrapper), while Linux and macOS use their existing native package commands. The Windows wrapper applies download-source overrides only to its child processes and leaves repository, user, and machine configuration unchanged.
+
 For package-facing changes, run at least:
 
 ```bash

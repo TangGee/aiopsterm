@@ -142,7 +142,8 @@ const clinePackagingFiles = [
   'resources/licenses/cline/ATTRIBUTION.txt',
   'resources/licenses/cline-sidecar/PROVENANCE.md',
   'resources/licenses/cline-sidecar/opencode-LICENSE',
-  'resources/licenses/cline-sidecar/simple-git-LICENSE'
+  'resources/licenses/cline-sidecar/simple-git-LICENSE',
+  'resources/licenses/cline-sidecar/node-22.20.0-LICENSE'
 ]
 const missingClinePackagingFiles = clinePackagingFiles.filter((file) => !existsSync(resolve(file)) || !statSync(resolve(file)).isFile())
 if (missingClinePackagingFiles.length) {

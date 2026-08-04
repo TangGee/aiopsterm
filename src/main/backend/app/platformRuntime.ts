@@ -1,4 +1,4 @@
-import { basename, join } from 'path'
+import { basename, posix } from 'path'
 
 export type PlatformRuntime = NodeJS.Platform
 
@@ -40,6 +40,5 @@ export const platformSocketPath = (
   const cleanNamespace = String(namespace || 'aiopsterm').replace(/[^a-zA-Z0-9_-]/g, '-')
   if (isWindowsPlatform(platform)) return `\\\\.\\pipe\\${cleanNamespace}-${pid}`
   const directory = options.directory || cleanNamespace
-  return join(userDataPath, directory, `${cleanNamespace}-${pid}.sock`)
+  return posix.join(userDataPath, directory, `${cleanNamespace}-${pid}.sock`)
 }
-

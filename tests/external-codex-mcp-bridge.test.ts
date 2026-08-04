@@ -7,6 +7,7 @@ import { join } from 'path'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DATABASE_MCP_TOOL_DEFINITIONS } from '../src/shared/databaseMcpRuntime'
+import { testSocketPath } from './helpers/testSocketPath'
 
 vi.mock('electron', () => ({
   app: {
@@ -1375,7 +1376,7 @@ describe('external Codex MCP bridge runtime', () => {
     const { assets, bridge } = await loadBackends()
     activeBridge = bridge
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-external-mcp-'))
-    const socketPath = join(root, 'external.sock')
+    const socketPath = testSocketPath('aiopsterm-external-mcp', root)
     const saved = assets.saveAsset({
       name: 'socket-host',
       title: 'Socket Host',
@@ -1529,7 +1530,7 @@ describe('external Codex MCP bridge runtime', () => {
       getConfig: () => ({ sshProxyConfigs: [], sshAgentKeys: [], terminal: { sshAgentsStatus: false } })
     })
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-external-mcp-disconnect-'))
-    const socketPath = join(root, 'external.sock')
+    const socketPath = testSocketPath('aiopsterm-external-mcp-disconnect', root)
     const saved = assets.saveAsset({
       name: 'disconnect-host',
       title: 'Disconnect Host',

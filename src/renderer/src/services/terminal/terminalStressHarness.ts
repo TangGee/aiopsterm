@@ -185,6 +185,7 @@ type TerminalStressHarnessOptions = {
   catScriptPath?: string
   catFileBytes?: number
   catTerminalCount?: number
+  catCommands?: string[]
 }
 
 export type TerminalStressHarnessResult = {
@@ -337,11 +338,14 @@ const startRealCatStress = async (
     scriptPath?: string
     fileBytes?: number
     terminalCount: number
+    commands?: string[]
   }
 ) => {
   const requested = Math.max(0, Math.min(options.terminalCount, candidates.length))
+  const commands = (options.commands || []).map((command) => command.trim()).filter(Boolean)
+  const hasLegacyFixture = Boolean(options.filePath && options.scriptPath)
   const summary: TerminalStressRealCatSummary = {
-    enabled: Boolean(requested && options.filePath && options.scriptPath),
+    enabled: Boolean(requested && (commands.length >= requested || hasLegacyFixture)),
     requested,
     started: 0,
     completed: 0,
@@ -351,8 +355,8 @@ const startRealCatStress = async (
     errors: []
   }
   const panelIds = new Set<string>()
-  if (!summary.enabled || !options.filePath || !options.scriptPath) {
-    if (requested) summary.errors.push('Real PTY cat fixture paths are unavailable.')
+  if (!summary.enabled) {
+    if (requested) summary.errors.push('Real PTY cat fixture commands are unavailable.')
     return {
       panelIds,
       summary,
@@ -411,18 +415,19 @@ const startRealCatStress = async (
     if (!state) return
     const data = event.data || ''
     state.result.bytes += textByteLength(data)
-    state.tail = `${state.tail}${data}`.slice(-2048)
+    const searchable = `${state.tail}${data}`
     const iterationPattern = new RegExp(`__AIOPSTERM_CAT_ITER_${state.result.terminalIndex}_(\\d+)__`, 'g')
     let iterationMatch: RegExpExecArray | null
-    while ((iterationMatch = iterationPattern.exec(state.tail))) {
+    while ((iterationMatch = iterationPattern.exec(searchable))) {
       state.result.iterations = Math.max(state.result.iterations, Number(iterationMatch[1]) || 0)
     }
     const donePattern = new RegExp(`__AIOPSTERM_CAT_DONE_${state.result.terminalIndex}_(\\d+)__`)
-    const doneMatch = state.tail.match(donePattern)
+    const doneMatch = searchable.match(donePattern)
     if (doneMatch) {
       state.result.iterations = Math.max(state.result.iterations, Number(doneMatch[1]) || 0)
       state.result.completed = true
     }
+    state.tail = searchable.slice(-2048)
   })
 
   const writeTerminal = terminalClient.writeTerminal()
@@ -431,13 +436,13 @@ const startRealCatStress = async (
   } else {
     const durationSeconds = Math.max(1, Math.ceil(options.durationMs / 1000))
     await Promise.all(live.map(async ({ sessionId, terminalIndex }) => {
-      const command = [
-        '/bin/sh',
-        quoteShellArgument(options.scriptPath || ''),
-        quoteShellArgument(options.filePath || ''),
-        String(durationSeconds),
-        String(terminalIndex)
-      ].join(' ')
+      const command = commands[terminalIndex] || [
+          '/bin/sh',
+          quoteShellArgument(options.scriptPath || ''),
+          quoteShellArgument(options.filePath || ''),
+          String(durationSeconds),
+          String(terminalIndex)
+        ].join(' ')
       try {
         const result = await writeTerminal(sessionId, `${command}\r`)
         if (!result?.ok) throw new Error(result?.errorMessage || `Real PTY cat command ${terminalIndex + 1} was rejected.`)
@@ -473,7 +478,7 @@ const startRealCatStress = async (
       state.tail = ''
       const startedAt = nowMs()
       try {
-        const result = await writeTerminal(terminal.sessionId, `printf '%s\\n' ${quoteShellArgument(marker)}\r`)
+        const result = await writeTerminal(terminal.sessionId, `echo ${marker}\r`)
         if (!result?.ok) throw new Error(result?.errorMessage || 'Final real PTY echo was rejected.')
         const deadline = nowMs() + 3000
         while (nowMs() < deadline && !state.tail.includes(marker)) {
@@ -927,7 +932,7 @@ const measureRealEchoLatency = async (input: TerminalStressHarnessInput, errors:
           window.clearTimeout(timeout)
           reject(new Error('Terminal data bridge unavailable.'))
         }
-        void writeTerminal(sessionId, `printf '${marker}\\n'\r`).then((result) => {
+        void writeTerminal(sessionId, `echo ${marker}\r`).then((result) => {
           if (result?.ok) return
           window.clearTimeout(timeout)
           unsubscribe?.()
@@ -1303,7 +1308,8 @@ const runTerminalStressHarness = async (
     filePath: stressOptions.catFilePath,
     scriptPath: stressOptions.catScriptPath,
     fileBytes: stressOptions.catFileBytes,
-    terminalCount: stressOptions.catTerminalCount ?? 5
+    terminalCount: stressOptions.catTerminalCount ?? 5,
+    commands: stressOptions.catCommands
   })
   const makeStressChunk = (prefix: string, panelIndex: number, burstIndex: number, lines: number, payloadBytes: number) => {
     const payload = 'x'.repeat(Math.max(1, payloadBytes))

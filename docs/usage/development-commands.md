@@ -6,7 +6,7 @@ Install dependencies:
 npm install
 ```
 
-The repo-local `.npmrc` points npm, Electron downloads, Electron headers, and electron-builder helper binaries at mirror endpoints so native rebuilds do not depend on the default Electron artifact host.
+The repo-local `.npmrc` uses the official npm registry and Node headers by default. The local Windows build script accepts `-ChinaMirror` to apply mainland China mirrors only to that process and its child processes; it does not edit `.npmrc` or user/machine environment variables.
 
 Start the desktop app in development mode:
 
@@ -169,6 +169,14 @@ npm run build:win:dir
 `build:mac` uses the same self-owned build output and electron-builder config, with `dmg` and `zip` targets matching the External reference-style desktop package split. Run it on macOS because macOS targets require the platform signing and packaging toolchain; Linux development machines should use `audit:package-config` to verify the macOS target configuration without attempting to produce a macOS package.
 
 `build:win` uses the same self-owned build output and electron-builder config, with the NSIS installer target. Run it on Windows. The Windows Codex build step does not run the POSIX shell builder; the Node `build:codex` dispatcher invokes Codex's Python package builder against `x86_64-pc-windows-msvc` or `aarch64-pc-windows-msvc`, using the Rust toolchain declared by `codex/codex-rs/rust-toolchain.toml`. The Windows runner needs Python 3, rustup, and the MSVC C++ build tools/Windows SDK. The generated Codex package includes `bin/codex.exe`, `codex-path/rg.exe`, `codex-resources/codex-command-runner.exe`, and `codex-resources/codex-windows-sandbox-setup.exe`. CI may still supply a complete cached package with `AIOPSTERM_CODEX_PACKAGE_DIR` / `AIOPSTERM_CODEX_BIN`, or individual helper overrides with `AIOPSTERM_CODEX_RG_BIN`, `AIOPSTERM_CODEX_COMMAND_RUNNER_BIN`, and `AIOPSTERM_CODEX_WINDOWS_SANDBOX_SETUP_BIN`.
+
+For a local Windows machine, use the one-click wrapper from the repository root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build-windows.ps1
+```
+
+It checks or installs Git, Node.js LTS, Python 3, rustup, and Visual Studio C++ Build Tools through `winget`, restores dependencies with `npm ci`, builds `package:build -- windows`, and runs `package:verify -- windows`. Use `-SetupOnly` for prerequisites only, `-SkipSetup` when the toolchain is already installed, `-SkipDependencies` to reuse `node_modules`, `-RunTests` for the full Vitest suite, and `-RunE2E` for Electron E2E. Add `-ChinaMirror` only when official endpoints are unreachable. The `.cmd` wrapper is suitable for double-click or command prompt use. The script never invokes Linux/macOS packaging and does not remove their artifacts.
 
 Target-level commands wrap those platform scripts and fail fast on the wrong host:
 

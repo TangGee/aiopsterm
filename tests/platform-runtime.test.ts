@@ -43,6 +43,9 @@ describe('platform runtime helpers', () => {
     expect(platformSocketPath('/home/user/.config/aiopsterm', 'aiopsterm-control', { platform: 'linux', pid: 42, directory: 'control' })).toBe(
       '/home/user/.config/aiopsterm/control/aiopsterm-control-42.sock'
     )
+    expect(platformSocketPath('/tmp/aiopsterm', 'aiopsterm-control', { platform: 'darwin', pid: 42, directory: 'control' })).toBe(
+      '/tmp/aiopsterm/control/aiopsterm-control-42.sock'
+    )
     expect(platformSocketPath('C:\\Users\\unit\\AppData\\Roaming\\aiopsterm', 'aiopsterm-control', { platform: 'win32', pid: 42 })).toBe(
       '\\\\.\\pipe\\aiopsterm-control-42'
     )

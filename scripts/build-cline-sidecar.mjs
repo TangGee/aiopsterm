@@ -16,6 +16,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const NODE_VERSION = '22.20.0'
+const NODE_LICENSE_SHA256 = 'e991d81497a85bb24fc6bffae0a3637a6accd6c6bc5ce1f2c5698bd555cf9d49'
 const REFERENCE_TREE_PREFIX = ['external-reference', ''].join('/')
 const NODE_RUNTIME_PACKAGES = {
   'linux:x64': 'node-linux-x64',
@@ -74,10 +75,12 @@ const runtimePackageDir = dirname(runtimePackageJsonPath)
 const runtimePackageJson = JSON.parse(readFileSync(runtimePackageJsonPath, 'utf8'))
 const runtimeLock = packageLock.packages?.[`node_modules/${runtimePackage}`]
 const bunPath = process.platform === 'win32'
-  ? join(root, 'node_modules', '.bin', 'bun.cmd')
+  ? join(root, 'node_modules', 'bun', 'bin', 'bun.exe')
   : join(root, 'node_modules', '.bin', 'bun')
 const sourceNodePath = join(runtimePackageDir, runtimePackageJson.bin?.node || `bin/${nodeName}`)
-const nodeLicense = join(runtimePackageDir, 'LICENSE')
+const runtimeNodeLicense = join(runtimePackageDir, 'LICENSE')
+const fallbackNodeLicense = join(root, 'resources', 'licenses', 'cline-sidecar', 'node-22.20.0-LICENSE')
+const nodeLicense = existsSync(runtimeNodeLicense) ? runtimeNodeLicense : fallbackNodeLicense
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex')
 const fileSha256 = (path) => sha256(readFileSync(path))
@@ -332,6 +335,9 @@ if (
 if (!existsSync(sourceNodePath)) throw new Error(`Pinned Node runtime is missing: ${sourceNodePath}`)
 if (!existsSync(nodeLicense) || !readFileSync(nodeLicense, 'utf8').startsWith('Node.js is licensed for use as follows:')) {
   throw new Error(`The Node runtime license and third-party notices are missing from ${runtimePackage}.`)
+}
+if (nodeLicense === fallbackNodeLicense && fileSha256(nodeLicense) !== NODE_LICENSE_SHA256) {
+  throw new Error('The pinned Node runtime license fallback changed without review.')
 }
 const nodeVersionResult = spawnSync(sourceNodePath, ['--version'], { encoding: 'utf8', shell: false })
 if (nodeVersionResult.status !== 0 || nodeVersionResult.stdout.trim() !== `v${NODE_VERSION}`) {

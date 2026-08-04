@@ -53,15 +53,17 @@ export const splitCommand = (command: string) => {
   const parts: string[] = []
   let current = ''
   let quote: string | null = null
-  let escaped = false
-  for (const char of command.trim()) {
-    if (escaped) {
-      current += char
-      escaped = false
-      continue
-    }
+  const input = command.trim()
+  for (let index = 0; index < input.length; index += 1) {
+    const char = input[index]
     if (char === '\\') {
-      escaped = true
+      const next = input[index + 1]
+      if (next && (/\s/.test(next) || next === '"' || next === "'")) {
+        current += next
+        index += 1
+      } else {
+        current += char
+      }
       continue
     }
     if (char === '"' || char === "'") {

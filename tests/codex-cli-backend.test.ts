@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events'
-import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
-import { dirname, join } from 'path'
+import { dirname, join, resolve } from 'path'
 import { PassThrough } from 'stream'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CodexSessionCreateOptions, CodexSessionThreadEvent } from '@shared/contracts/codexSessions'
@@ -134,12 +134,12 @@ const createConfigWithModelProvider = (patch: Partial<UserConfig> = {}): UserCon
     ...patch
   }) as UserConfig
 
-const CODEX_PACKAGE_ROOT = '/repo/codex/codex-rs/target/x86_64-unknown-linux-gnu/aiopsterm-codex-dev-package'
-const CODEX_PACKAGE_BINARY = `${CODEX_PACKAGE_ROOT}/bin/codex`
+const CODEX_PACKAGE_ROOT = resolve('/repo/codex/codex-rs/target/x86_64-unknown-linux-gnu/aiopsterm-codex-dev-package')
+const CODEX_PACKAGE_BINARY = join(CODEX_PACKAGE_ROOT, 'bin', process.platform === 'win32' ? 'codex.exe' : 'codex')
 const codexPackageExists = (path: string) =>
   path === CODEX_PACKAGE_BINARY ||
-  path === `${CODEX_PACKAGE_ROOT}/codex-package.json` ||
-  path === '/repo/resources/codex-aiopsterm-mcp.js'
+  path === join(CODEX_PACKAGE_ROOT, 'codex-package.json') ||
+  path === resolve('/repo/resources/codex-aiopsterm-mcp.js')
 
 const temporaryDirectories: string[] = []
 
@@ -177,8 +177,9 @@ describe('Codex CLI backend runtime', () => {
     })
     expect(first).toBe(same)
     expect(other).not.toBe(first)
-    expect(first).toMatch(/^\/tmp\/codex-home\/workspaces\/[a-z0-9._-]+$/)
-    expect(backend.codexWorkspaceDirectory(home, { target: { kind: 'local' } })).toBe('/tmp/codex-home/workspaces/local')
+    expect(dirname(first)).toBe(join(home, 'workspaces'))
+    expect(first.slice(dirname(first).length + 1)).toMatch(/^[a-z0-9._-]+$/)
+    expect(backend.codexWorkspaceDirectory(home, { target: { kind: 'local' } })).toBe(join(home, 'workspaces', 'local'))
   })
 
   afterEach(async () => {
@@ -247,24 +248,24 @@ describe('Codex CLI backend runtime', () => {
         id: 'codex-test-1',
         binaryPath: CODEX_PACKAGE_BINARY,
         cwd: expectedCwd,
-        codexHome: '/tmp/aiopsterm-user-data/codex-agent',
+        codexHome: join('/tmp/aiopsterm-user-data', 'codex-agent'),
         runtimeKind: 'pty'
       })
     )
     expect(mkdirCalls).toEqual([
-      '/tmp/aiopsterm-user-data/codex-agent',
+      join('/tmp/aiopsterm-user-data', 'codex-agent'),
       expectedCwd,
-      '/tmp/aiopsterm-user-data/codex-agent/aiopsterm-pending-context',
-      '/tmp/aiopsterm-user-data/codex-agent/aiopsterm-thread-info'
+      join('/tmp/aiopsterm-user-data', 'codex-agent', 'aiopsterm-pending-context'),
+      join('/tmp/aiopsterm-user-data', 'codex-agent', 'aiopsterm-thread-info')
     ])
     expect(writeFileCalls).toHaveLength(2)
     expect(writeFileCalls[0]).toEqual({
-      path: '/tmp/aiopsterm-user-data/codex-agent/aiopsterm-pending-context/codex-test-1.txt',
+      path: join('/tmp/aiopsterm-user-data', 'codex-agent', 'aiopsterm-pending-context', 'codex-test-1.txt'),
       content: ''
     })
     expect(writeFileCalls[1]).toEqual(
       expect.objectContaining({
-        path: '/tmp/aiopsterm-user-data/codex-agent/config.toml'
+        path: join('/tmp/aiopsterm-user-data', 'codex-agent', 'config.toml')
       })
     )
     const configToml = writeFileCalls[1].content
@@ -330,11 +331,11 @@ describe('Codex CLI backend runtime', () => {
           cols: 120,
           rows: 40,
           env: expect.objectContaining({
-            CODEX_HOME: '/tmp/aiopsterm-user-data/codex-agent',
+            CODEX_HOME: join('/tmp/aiopsterm-user-data', 'codex-agent'),
             CODEX_MANAGED_PACKAGE_ROOT: CODEX_PACKAGE_ROOT,
             AIOPSTERM_CODEX_API_KEY: 'ark-secret-token',
             AIOPSTERM_CODEX_FLAT_MCP_TOOLS: '1',
-            AIOPSTERM_CODEX_PENDING_CONTEXT_FILE: '/tmp/aiopsterm-user-data/codex-agent/aiopsterm-pending-context/codex-test-1.txt',
+            AIOPSTERM_CODEX_PENDING_CONTEXT_FILE: join('/tmp/aiopsterm-user-data', 'codex-agent', 'aiopsterm-pending-context', 'codex-test-1.txt'),
             TERM: 'xterm-256color',
             COLORTERM: 'truecolor'
           })
@@ -372,7 +373,7 @@ describe('Codex CLI backend runtime', () => {
         timeout: 120_000,
         env: {
           PATH: '/usr/bin',
-          CODEX_HOME: '/tmp/aiopsterm-user-data/codex-agent',
+          CODEX_HOME: join('/tmp/aiopsterm-user-data', 'codex-agent'),
           NO_COLOR: '1'
         }
       }
@@ -637,8 +638,7 @@ describe('Codex CLI backend runtime', () => {
     expect(spawnCalls[0].options.env).toEqual(expect.objectContaining({
       AIOPSTERM_CODEX_RUNTIME_ID: 'codex-resume-runtime',
       AIOPSTERM_CODEX_THREAD_REASON: 'resume',
-      AIOPSTERM_CODEX_THREAD_INFO_FILE:
-        '/tmp/aiopsterm-user-data/codex-agent/aiopsterm-thread-info/codex-resume-runtime.json'
+      AIOPSTERM_CODEX_THREAD_INFO_FILE: join('/tmp/aiopsterm-user-data', 'codex-agent', 'aiopsterm-thread-info', 'codex-resume-runtime.json')
     }))
     pty.emitExit(0)
 
@@ -670,14 +670,16 @@ describe('Codex CLI backend runtime', () => {
       writeFile(outsidePath, '{"type":"session_meta"}\n')
     ])
     backend.configureCodexCliRuntime({ getUserDataPath: () => userData })
+    const canonicalActivePath = await realpath(activePath)
+    const canonicalArchivedPath = await realpath(archivedPath)
 
-    await expect(backend.findCodexSavedSessionRolloutPath(activeThreadId, activePath)).resolves.toBe(activePath)
-    await expect(backend.findCodexSavedSessionRolloutPath(activeThreadId, activePath, { scanFallback: false })).resolves.toBe(activePath)
+    await expect(backend.findCodexSavedSessionRolloutPath(activeThreadId, activePath)).resolves.toBe(canonicalActivePath)
+    await expect(backend.findCodexSavedSessionRolloutPath(activeThreadId, activePath, { scanFallback: false })).resolves.toBe(canonicalActivePath)
     await expect(backend.findCodexSavedSessionRolloutPath(activeThreadId, undefined, { scanFallback: false })).resolves.toBeNull()
-    await expect(backend.findCodexSavedSessionRolloutPath(archivedThreadId)).resolves.toBe(archivedPath)
+    await expect(backend.findCodexSavedSessionRolloutPath(archivedThreadId)).resolves.toBe(canonicalArchivedPath)
     await expect(backend.findCodexSavedSessionRolloutPath(emptyThreadId, emptyPath)).resolves.toBeNull()
     await expect(backend.findCodexSavedSessionRolloutPath(outsideThreadId, outsidePath)).resolves.toBeNull()
-    await expect(backend.findCodexSavedSessionRolloutPath(archivedThreadId, activePath)).resolves.toBe(archivedPath)
+    await expect(backend.findCodexSavedSessionRolloutPath(archivedThreadId, activePath)).resolves.toBe(canonicalArchivedPath)
   })
 
   it('waits for a new Codex rollout to become durable before publishing thread info', async () => {
@@ -712,8 +714,9 @@ describe('Codex CLI backend runtime', () => {
 
     await mkdir(dirname(rolloutPath), { recursive: true })
     await writeFile(rolloutPath, '{"type":"session_meta"}\n')
+    const canonicalRolloutPath = await realpath(rolloutPath)
     await vi.waitFor(() => expect(events.thread).toEqual([
-      expect.objectContaining({ id: runtimeId, threadId, previousThreadId: null, reason: 'new', rolloutPath })
+      expect.objectContaining({ id: runtimeId, threadId, previousThreadId: null, reason: 'new', rolloutPath: canonicalRolloutPath })
     ]))
     canonicalTitle = 'Investigate deploy rollback'
     await vi.waitFor(() => expect(events.thread).toHaveLength(2), { timeout: 2500 })
@@ -721,7 +724,7 @@ describe('Codex CLI backend runtime', () => {
       id: runtimeId,
       threadId,
       title: 'Investigate deploy rollback',
-      rolloutPath
+      rolloutPath: canonicalRolloutPath
     }))
     pty.emitExit(0)
   })
@@ -813,7 +816,7 @@ describe('Codex CLI backend runtime', () => {
     expect(first).toEqual({ ok: true, data: { id: 'codex-pending-1', bytes: expect.any(Number), cleared: false } })
     expect(second.ok).toBe(true)
     expect(writeFileCalls.at(-1)).toEqual({
-      path: '/tmp/aiopsterm-user-data/codex-agent/aiopsterm-pending-context/codex-pending-1.txt',
+      path: join('/tmp/aiopsterm-user-data', 'codex-agent', 'aiopsterm-pending-context', 'codex-pending-1.txt'),
       content: '[aiopsterm target changed]\nCurrent target: second'
     })
     expect(missing).toEqual(
@@ -1105,12 +1108,12 @@ describe('Codex CLI backend runtime', () => {
     })
 
     expect(refreshed).toEqual({
-      codexHome: '/tmp/aiopsterm-user-data/codex-agent',
-      configPath: '/tmp/aiopsterm-user-data/codex-agent/config.toml'
+      codexHome: join('/tmp/aiopsterm-user-data', 'codex-agent'),
+      configPath: join('/tmp/aiopsterm-user-data', 'codex-agent', 'config.toml')
     })
-    expect(mkdirCalls).toEqual(['/tmp/aiopsterm-user-data/codex-agent'])
+    expect(mkdirCalls).toEqual([join('/tmp/aiopsterm-user-data', 'codex-agent')])
     expect(writeFileCalls).toHaveLength(1)
-    expect(writeFileCalls[0].path).toBe('/tmp/aiopsterm-user-data/codex-agent/config.toml')
+    expect(writeFileCalls[0].path).toBe(join('/tmp/aiopsterm-user-data', 'codex-agent', 'config.toml'))
     expect(writeFileCalls[0].content).toContain('[projects."/tmp/manual"]')
     expect(writeFileCalls[0].content).toContain('enabled_tools = ["list_terminals", "run_command", "read_terminal_output", "read_file", "glob_search", "grep_search", "target_context"]')
     expect(writeFileCalls[0].content).toContain('[mcp_servers.aiopsterm_remote.tools.read_terminal_output]')

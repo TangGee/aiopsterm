@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
+import { testSocketPath } from './helpers/testSocketPath'
 
 const helperPath = join(process.cwd(), 'resources', 'aiopsterm-agent-hook.js')
 
@@ -17,7 +18,7 @@ afterEach(async () => {
 const startSocketServer = async () => {
   const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-hook-'))
   cleanupDirs.push(dir)
-  const socketPath = join(dir, 'agent.sock')
+  const socketPath = testSocketPath('aiopsterm-agent-hook', dir)
   const received: unknown[] = []
   const server = createServer((socket) => {
     socket.setEncoding('utf8')
@@ -55,7 +56,7 @@ const startSocketServer = async () => {
 const startDecisionSocketServer = async (response: Record<string, unknown>) => {
   const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-hook-decision-'))
   cleanupDirs.push(dir)
-  const socketPath = join(dir, 'agent.sock')
+  const socketPath = testSocketPath('aiopsterm-agent-hook-decision', dir)
   const received: unknown[] = []
   const server = createServer((socket) => {
     socket.setEncoding('utf8')

@@ -4287,7 +4287,9 @@ socket.on('data', (chunk) => {
             process.stderr.write('pipe-pane requires --command <shell-command>\n')
             process.exit(2)
           }
-          const child = spawnSync(process.env.SHELL || '/bin/sh', ['-lc', command], {
+          const shell = process.platform === 'win32' ? process.env.COMSPEC || 'cmd.exe' : process.env.SHELL || '/bin/sh'
+          const shellArgs = process.platform === 'win32' ? ['/d', '/s', '/c', command] : ['-lc', command]
+          const child = spawnSync(shell, shellArgs, {
             input: typeof response.data?.text === 'string' ? response.data.text : '',
             encoding: 'utf8'
           })

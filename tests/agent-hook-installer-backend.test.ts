@@ -246,9 +246,10 @@ describe('agent hook installer backend', () => {
     }
   })
 
-  it('uses Codex-compatible fail-open hook commands and stable trust hashes', async () => {
+  it.each(['linux', 'darwin'] as const)('uses Codex-compatible fail-open hook commands and stable trust hashes on %s', async (platform) => {
     const backend = await loadBackend()
     backend.configureAgentHookInstallerRuntime({
+      getPlatform: () => platform,
       getJsRuntimeExecutable: () => '/opt/aiopsterm/aiopsterm'
     })
     try {
@@ -260,6 +261,21 @@ describe('agent hook installer backend', () => {
       )
       expect(command).not.toContain('printf')
       expect(codexHookHash('Stop', command, 5)).toBe('sha256:1f8728044e5ea2880e5c6069fbd69718aa139bbeb7319e4e579359f418df31df')
+    } finally {
+      backend.configureAgentHookInstallerRuntime()
+    }
+  })
+
+  it('uses cmd-compatible fail-open hook commands on Windows', async () => {
+    const backend = await loadBackend()
+    backend.configureAgentHookInstallerRuntime({
+      getPlatform: () => 'win32',
+      getJsRuntimeExecutable: () => 'C:\\Program Files\\aiopsterm\\aiopsterm.exe'
+    })
+    try {
+      expect(backend.agentHookCommandFor('codex', 'Stop', 'C:\\Program Files\\aiopsterm\\aiopsterm-agent-hook.js')).toBe(
+        'set ELECTRON_RUN_AS_NODE=1&& set AIOPSTERM_AGENT_HOOK_MARKER=aiopsterm-agent-hook-v1&& "C:\\Program Files\\aiopsterm\\aiopsterm.exe" "C:\\Program Files\\aiopsterm\\aiopsterm-agent-hook.js" --source "codex" --event "Stop" || echo {}'
+      )
     } finally {
       backend.configureAgentHookInstallerRuntime()
     }

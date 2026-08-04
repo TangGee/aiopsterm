@@ -24,6 +24,9 @@ const withAssetDatabase = async <T>(run: (databasePath: string) => Promise<T>) =
   try {
     return await run(join(dir, 'assets.db'))
   } finally {
+    const modulePath = '../src/main/backend/assets/assets'
+    const backend = await import(modulePath)
+    backend.configureAssetBackendRuntime({ forceFallbackStore: true })
     await rm(dir, { recursive: true, force: true })
   }
 }

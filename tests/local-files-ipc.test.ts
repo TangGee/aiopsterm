@@ -153,6 +153,7 @@ describe('local files IPC registrar', () => {
     const { registerLocalFilesIpc } = await loadBackend()
     const { ipcMain, handlers } = createIpcHarness()
     const input = createRegistrationInput({ shouldUseE2eDialogFixtures: vi.fn(() => true) })
+    const userDataPath = '/tmp/aiopsterm-user-data'
 
     registerLocalFilesIpc(ipcMain, input)
 
@@ -160,9 +161,10 @@ describe('local files IPC registrar', () => {
       properties: ['openFile'],
       filters: [{ name: 'Asset Import Files', extensions: ['json'] }]
     })
-    expect(assetResult).toEqual({ canceled: false, filePaths: ['/tmp/aiopsterm-user-data/e2e-external-reference-assets.json'] })
+    const assetPath = join(userDataPath, 'e2e-external-reference-assets.json')
+    expect(assetResult).toEqual({ canceled: false, filePaths: [assetPath] })
     expect(input.writeFixtureFile).toHaveBeenLastCalledWith(
-      '/tmp/aiopsterm-user-data/e2e-external-reference-assets.json',
+      assetPath,
       expect.stringContaining('e2e-imported-json'),
       'utf-8'
     )
@@ -171,22 +173,24 @@ describe('local files IPC registrar', () => {
       properties: ['openFile'],
       filters: [{ name: 'Images', extensions: ['png'] }]
     })
-    expect(imageResult).toEqual({ canceled: false, filePaths: ['/tmp/aiopsterm-user-data/e2e-background.png'] })
-    expect(input.writeFixtureFile).toHaveBeenLastCalledWith('/tmp/aiopsterm-user-data/e2e-background.png', expect.any(Buffer))
+    const imagePath = join(userDataPath, 'e2e-background.png')
+    expect(imageResult).toEqual({ canceled: false, filePaths: [imagePath] })
+    expect(input.writeFixtureFile).toHaveBeenLastCalledWith(imagePath, expect.any(Buffer))
 
     const yamlResult = await handlers.get('dialog:open-file')?.({}, {
       properties: ['openFile'],
       filters: [{ name: 'YAML Files', extensions: ['yaml'] }]
     })
-    expect(yamlResult).toEqual({ canceled: false, filePaths: ['/tmp/aiopsterm-user-data/e2e-kubeconfig.yaml'] })
+    const kubeconfigPath = join(userDataPath, 'e2e-kubeconfig.yaml')
+    expect(yamlResult).toEqual({ canceled: false, filePaths: [kubeconfigPath] })
     expect(input.writeFixtureFile).toHaveBeenLastCalledWith(
-      '/tmp/aiopsterm-user-data/e2e-kubeconfig.yaml',
+      kubeconfigPath,
       expect.stringContaining('current-context: e2e/admin'),
       'utf-8'
     )
 
     const directoryResult = await handlers.get('dialog:open-file')?.({}, { properties: ['openDirectory'] })
-    expect(directoryResult).toEqual({ canceled: false, filePaths: ['/tmp/aiopsterm-user-data/e2e-imported-note.md'] })
+    expect(directoryResult).toEqual({ canceled: false, filePaths: [join(userDataPath, 'e2e-imported-note.md')] })
     expect(input.showOpenDialog).not.toHaveBeenCalled()
   })
 
@@ -218,7 +222,7 @@ describe('local files IPC registrar', () => {
     registerLocalFilesIpc(fixtureHarness.ipcMain, fixtureInput)
     await expect(fixtureHarness.handlers.get('dialog:save-file')?.(event, saveOptions)).resolves.toEqual({
       canceled: false,
-      filePath: '/tmp/aiopsterm-downloads/query.sql'
+      filePath: join('/tmp/aiopsterm-downloads', 'query.sql')
     })
     expect(fixtureInput.showSaveDialog).not.toHaveBeenCalled()
   })

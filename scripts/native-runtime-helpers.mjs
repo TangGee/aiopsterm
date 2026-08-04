@@ -1,4 +1,4 @@
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 
 const nativeRebuildEnvironmentKeys = new Set([
   'npm_config_runtime',
@@ -14,6 +14,31 @@ const nativeRebuildEnvironmentKeys = new Set([
 ])
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+
+export const electronHeadersUrl = (env) =>
+  env.AIOPSTERM_ELECTRON_HEADERS_URL || 'https://artifacts.electronjs.org/headers/dist'
+
+export const electronRebuildInvocation = ({ cliPath, modules, electronVersion, headersUrl }) => ({
+  commandArgs: [
+    cliPath,
+    '-f',
+    '-o',
+    modules.join(','),
+    '-v',
+    electronVersion,
+    '-d',
+    headersUrl
+  ]
+})
+
+export const npmRebuildInvocation = ({ platform, nodeExecutable, npmExecPath, modules }) => {
+  if (platform !== 'win32') return { command: 'npm', args: ['rebuild', ...modules] }
+  const npmCli = npmExecPath || resolve(dirname(nodeExecutable), 'node_modules', 'npm', 'bin', 'npm-cli.js')
+  return { command: nodeExecutable, args: [npmCli, 'rebuild', ...modules] }
+}
+
+export const shouldRebuildPty = ({ force, target, runtime, probeStatus }) =>
+  probeStatus !== 0 || (force && runtime === target)
 
 export const parseNativeManifest = (raw) => {
   try {

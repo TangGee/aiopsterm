@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { pathToFileURL } from 'url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CustomBackgroundSaveResult, CustomNotificationSoundSaveResult } from '../src/shared/contracts/appRuntime'
 import type { LocalFileWriteResult } from '../src/shared/contracts/localFiles'
@@ -114,7 +115,7 @@ describe('local file write backend boundary', () => {
 
     expect(result).toEqual({
       filePath: expectedPath,
-      url: `file://${expectedPath}`,
+      url: pathToFileURL(expectedPath).href,
       name: 'settings-custom.webp',
       size: bytes.byteLength,
       bytes: bytes.byteLength,
@@ -159,7 +160,7 @@ describe('local file write backend boundary', () => {
 
     expect(result).toEqual({
       filePath: expectedPath,
-      url: `file://${expectedPath}`,
+      url: pathToFileURL(expectedPath).href,
       name: 'approval.wav',
       size: bytes.byteLength,
       bytes: bytes.byteLength,

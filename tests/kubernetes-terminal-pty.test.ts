@@ -17,7 +17,8 @@ import {
 } from '@shared/kubernetes'
 import type { KubernetesPtyProcess, KubernetesPtySpawnRequest } from '@shared/kubernetesTerminalRuntime'
 import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises'
-import { join } from 'path'
+import { execFileSync } from 'child_process'
+import { join, resolve } from 'path'
 import { tmpdir } from 'os'
 
 class FakePty implements KubernetesPtyProcess {
@@ -71,9 +72,21 @@ describe('kubernetes terminal PTY runtime', () => {
   const createFakeKubectl = async (scriptBody: string) => {
     const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-fake-kubectl-'))
     tempDirs.push(dir)
-    const filePath = join(dir, 'kubectl')
-    await writeFile(filePath, ['#!/bin/sh', 'set -eu', scriptBody].join('\n'), 'utf-8')
-    await chmod(filePath, 0o755)
+    const filePath = join(dir, process.platform === 'win32' ? 'kubectl.cjs' : 'kubectl')
+    if (process.platform === 'win32') {
+      const gitExecPath = execFileSync('git', ['--exec-path'], { encoding: 'utf-8' }).trim()
+      const shellPath = join(resolve(gitExecPath, '..', '..', '..'), 'bin', 'sh.exe')
+      const wrapper = [
+        "const { spawnSync } = require('child_process')",
+        `const result = spawnSync(${JSON.stringify(shellPath)}, ['-c', ${JSON.stringify(['set -eu', scriptBody].join('\n'))}, 'kubectl', ...process.argv.slice(2)], { env: process.env, stdio: 'inherit' })`,
+        "if (result.error) process.stderr.write(`${result.error.message}\\n`)",
+        'process.exit(result.status ?? 1)'
+      ].join('\n')
+      await writeFile(filePath, wrapper, 'utf-8')
+    } else {
+      await writeFile(filePath, ['#!/bin/sh', 'set -eu', scriptBody].join('\n'), 'utf-8')
+      await chmod(filePath, 0o755)
+    }
     process.env.AIOPSTERM_KUBECTL_PATH = filePath
     return filePath
   }

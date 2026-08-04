@@ -63,6 +63,18 @@ describe('mcpRuntimeNormalization', () => {
       command: 'custom command',
       args: ['--name=ops api']
     })
+    expect(splitCommand('D:\\build\\cline-sidecar\\node.exe')).toEqual({
+      command: 'D:\\build\\cline-sidecar\\node.exe',
+      args: []
+    })
+    expect(splitCommand('"C:\\Program Files\\nodejs\\node.exe" --version')).toEqual({
+      command: 'C:\\Program Files\\nodejs\\node.exe',
+      args: ['--version']
+    })
+    expect(splitCommand('\\\\server\\share\\node.exe')).toEqual({
+      command: '\\\\server\\share\\node.exe',
+      args: []
+    })
     expect(splitCommand('')).toEqual({ command: '', args: [] })
   })
 

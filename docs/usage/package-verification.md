@@ -125,3 +125,5 @@ npm run build:win:dir
 ```
 
 Run those commands on Windows so the native Windows Codex package, native modules, and NSIS target are built on the correct platform. Linux development machines can audit the Windows target configuration with `npm run audit:package-config`, but they should not be treated as successful Windows packaging runners.
+
+On a Windows machine without remote CI, `scripts/build-windows.ps1` is the supported local orchestration entrypoint. It uses official sources by default, accepts `-ChinaMirror` as a process-local opt-in, and finishes with the same `package:build -- windows` and `package:verify -- windows` gates documented above.
