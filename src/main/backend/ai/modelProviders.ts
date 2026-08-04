@@ -10,7 +10,7 @@ import type {
   ModelProviderUserConfig,
   ModelSettingsUserConfig
 } from '@shared/contracts/appRuntime'
-import { resolveModelProviderEndpoint } from '@shared/modelProviderEndpoint'
+import { appendModelProviderPath, resolveModelProviderEndpoint } from '@shared/modelProviderEndpoint'
 
 const defaultSettingsModelOptions: ModelOptionUserConfig[] = []
 
@@ -117,23 +117,6 @@ const buildModelCatalog = (input: AiModelCatalogInput = {}): AiModelCatalog => {
 
 export const listAiModels = async (input: AiModelCatalogInput = {}): Promise<AiModelCatalog> => cloneModelCatalog(buildModelCatalog(input))
 
-const appendEndpointPath = (baseUrl: string, path: string) => {
-  try {
-    const parsed = new URL(baseUrl)
-    const segments = parsed.pathname.split('/').filter(Boolean)
-    const pathSegments = path.split('/').filter(Boolean)
-    const hasTrailingPath = pathSegments.length > 0 && pathSegments.every((segment, index) => segments[segments.length - pathSegments.length + index] === segment)
-    if (!hasTrailingPath) {
-      parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/${pathSegments.join('/')}`
-    }
-    parsed.search = ''
-    parsed.hash = ''
-    return parsed.toString().replace(/\/$/, '')
-  } catch {
-    return baseUrl
-  }
-}
-
 const validateUrl = (value: string, field: string): string | null => {
   if (!value) return `${field} is required.`
   try {
@@ -161,7 +144,7 @@ const endpointFor = (provider: ModelProviderCheckKey, config: ModelProviderUserC
       config.awsEndpointSelected && normalizeText(config.awsBedrockEndpoint)
         ? normalizeText(config.awsBedrockEndpoint)
         : `https://bedrock-runtime.${region}.amazonaws.com`
-    return appendEndpointPath(baseEndpoint, `model/${encodeURIComponent(normalizeText(config.modelId))}/invoke`)
+    return appendModelProviderPath(baseEndpoint, `model/${encodeURIComponent(normalizeText(config.modelId))}/invoke`)
   }
   return resolveModelProviderEndpoint(provider, config).endpoint
 }

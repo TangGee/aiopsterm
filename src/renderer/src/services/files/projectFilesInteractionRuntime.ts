@@ -12,9 +12,16 @@ export const joinProjectRelativePath = (directory: string, name: string) =>
 export const projectAbsolutePath = (projectRoot: string, relativePath: string) => {
   const windowsStyle = projectRoot.includes('\\')
   const separator = windowsStyle ? '\\' : '/'
-  const root = projectRoot.replace(/[\\/]+$/, '')
+  const windowsDriveRoot = windowsStyle && /^[A-Za-z]:\\+$/.test(projectRoot)
+  const root = windowsDriveRoot
+    ? `${projectRoot.slice(0, 2)}\\`
+    : windowsStyle
+      ? projectRoot.replace(/\\+$/, '') || projectRoot
+      : projectRoot === '/' ? '/' : projectRoot.replace(/\/+$/, '') || '/'
   const relative = normalizedParts(relativePath).join(separator)
-  return relative ? `${root}${separator}${relative}` : root
+  if (!relative) return root
+  const rootSeparator = root.endsWith(separator) ? '' : separator
+  return `${root}${rootSeparator}${relative}`
 }
 
 export const projectMoveTargetPath = (entry: ProjectDirectoryEntry, targetDirectory: string) =>

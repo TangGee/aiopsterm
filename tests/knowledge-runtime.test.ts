@@ -23,6 +23,7 @@ import {
   type KnowledgeImportJob
 } from '@/services/knowledge/knowledgeRuntime'
 import type { KnowledgeNode } from '@shared/contracts/knowledgeBase'
+import { joinKnowledgeRelPath, knowledgeRelPathContains, knowledgeRelPathParent, normalizeKnowledgeRelPath } from '@/services/knowledge/knowledgePathRuntime'
 
 const tree: KnowledgeNode[] = [
   {
@@ -70,6 +71,14 @@ const tree: KnowledgeNode[] = [
 ]
 
 describe('knowledgeRuntime', () => {
+  it('normalizes and composes relative paths consistently', () => {
+    expect(normalizeKnowledgeRelPath('\\commands//./diagnose/../fix.md')).toBe('commands/fix.md')
+    expect(knowledgeRelPathParent('commands/fix.md')).toBe('commands')
+    expect(joinKnowledgeRelPath('/commands/', 'fix.md')).toBe('commands/fix.md')
+    expect(knowledgeRelPathContains('commands', 'commands/fix.md')).toBe(true)
+    expect(knowledgeRelPathContains('commands', 'commandments/fix.md')).toBe(false)
+  })
+
   it('clones, converts, finds, and filters knowledge tree nodes without aliasing inputs', () => {
     const cloned = cloneKnowledgeNodes(tree)
     cloned[0].children![0].title = 'changed.md'

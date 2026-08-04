@@ -1362,6 +1362,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     editingClusterId?: typeof k8sEditingClusterId.value
     addMode?: typeof k8sAddMode.value
     testResult?: typeof k8sTestResult.value
+    clusterNotice?: string
     agentCommandDraft?: string
     searchQuery?: string
     resourceQuery?: string
@@ -1373,6 +1374,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if ('editingClusterId' in patch) k8sEditingClusterId.value = patch.editingClusterId!
     if (patch.addMode !== undefined) k8sAddMode.value = patch.addMode
     if ('testResult' in patch) k8sTestResult.value = patch.testResult!
+    if (patch.clusterNotice !== undefined) k8sClusterNotice.value = patch.clusterNotice
     if (patch.agentCommandDraft !== undefined) k8sAgentCommandDraft.value = patch.agentCommandDraft
     if (patch.searchQuery !== undefined) k8sSearchQuery.value = patch.searchQuery
     if (patch.resourceQuery !== undefined) k8sResourceQuery.value = patch.resourceQuery

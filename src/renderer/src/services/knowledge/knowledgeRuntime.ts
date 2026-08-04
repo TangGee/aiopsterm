@@ -1,5 +1,10 @@
 import type { KnowledgeBaseEntry, KnowledgeBaseTransferProgress, KnowledgeNode } from '@shared/contracts/knowledgeBase'
-import { createKbRelPath } from '@/services/settings/workspaceConfigRuntime'
+import {
+  joinKnowledgeRelPath,
+  knowledgeRelPathContains as containsKnowledgeRelPath,
+  knowledgeRelPathParent,
+  normalizeKnowledgeRelPath
+} from '@/services/knowledge/knowledgePathRuntime'
 
 export type KbClipboard = { mode: 'copy' | 'cut'; sources: string[] } | null
 export type KnowledgeImportJob = { id: string; destRelPath: string; percent: number }
@@ -50,12 +55,10 @@ export const selectKnowledgeNodeKeys = (selectedKeys: string[], relPath: string,
 }
 
 export const getKnowledgeParent = (relPath: string) => {
-  const parts = relPath.split('/').filter(Boolean)
-  if (parts.length <= 1) return ''
-  return parts.slice(0, -1).join('/')
+  return knowledgeRelPathParent(relPath)
 }
 
-export const knowledgePathContains = (relPath: string, candidate: string) => candidate === relPath || candidate.startsWith(`${relPath}/`)
+export const knowledgePathContains = containsKnowledgeRelPath
 
 export const missingKnowledgeRelPaths = (nodes: KnowledgeNode[], candidateRelPaths: string[]) =>
   [...new Set(candidateRelPaths.filter(Boolean))].filter((relPath) => !findKnowledgeNode(nodes, relPath))
@@ -70,7 +73,7 @@ export const pruneKnowledgeUiState = (
 })
 
 export const knowledgeRelPathParentMatches = (relPath: string, expectedParentRelDir: string) =>
-  getKnowledgeParent(relPath.trim()) === expectedParentRelDir.trim().replace(/^\/+|\/+$/g, '')
+  getKnowledgeParent(relPath) === normalizeKnowledgeRelPath(expectedParentRelDir)
 
 export const resolveKnowledgePasteTarget = (targetRelDir: string, destination: KnowledgeNode | null | undefined) =>
   destination?.type === 'file' ? getKnowledgeParent(destination.relPath) : targetRelDir
@@ -128,7 +131,7 @@ export const uniqueKnowledgeFileName = (nodes: KnowledgeNode[], parentRelDir: st
   const ext = dotIndex >= 0 ? fileName.slice(dotIndex) : ''
   let candidate = fileName
   let index = 1
-  while (findKnowledgeNode(nodes, createKbRelPath(parentRelDir, candidate))) {
+  while (findKnowledgeNode(nodes, joinKnowledgeRelPath(parentRelDir, candidate))) {
     candidate = `${base}-${index}${ext}`
     index += 1
   }

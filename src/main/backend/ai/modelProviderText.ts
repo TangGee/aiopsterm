@@ -1,7 +1,7 @@
 import { createHash, createHmac } from 'crypto'
 import type { UserConfig } from '@shared/contracts/userConfig'
 import type { AiPreferencesUserConfig, ModelProviderCheckKey, ModelProviderUserConfig } from '@shared/contracts/appRuntime'
-import { resolveModelProviderEndpoint } from '@shared/modelProviderEndpoint'
+import { appendModelProviderPath, resolveModelProviderEndpoint } from '@shared/modelProviderEndpoint'
 
 export type AiProviderResolvedConfig = {
   provider: ModelProviderCheckKey
@@ -68,22 +68,6 @@ export function resolveModelProvider(config: UserConfig, requestedModel?: string
       ...providerConfig,
       modelId: normalizeText(providerConfig.modelId) || modelName
     }
-  }
-}
-
-function appendEndpointPath(baseUrl: string, path: string): string {
-  try {
-    const parsed = new URL(baseUrl)
-    const existing = parsed.pathname.split('/').filter(Boolean)
-    const segments = path.split('/').filter(Boolean)
-    if (!segments.every((segment, index) => existing[existing.length - segments.length + index] === segment)) {
-      parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/${segments.join('/')}`
-    }
-    parsed.search = ''
-    parsed.hash = ''
-    return parsed.toString().replace(/\/$/, '')
-  } catch {
-    return baseUrl
   }
 }
 
@@ -209,7 +193,7 @@ export function createProviderTextRequest(
       input.config.awsEndpointSelected && normalizeText(input.config.awsBedrockEndpoint)
         ? normalizeText(input.config.awsBedrockEndpoint)
         : `https://bedrock-runtime.${region}.amazonaws.com`
-    const endpoint = appendEndpointPath(baseEndpoint, `model/${encodeURIComponent(model)}/invoke`)
+    const endpoint = appendModelProviderPath(baseEndpoint, `model/${encodeURIComponent(model)}/invoke`)
     const body = jsonStringify({
       anthropic_version: 'bedrock-2023-05-31',
       max_tokens: maxTokens,

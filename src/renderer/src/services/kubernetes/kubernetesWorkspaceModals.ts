@@ -77,7 +77,7 @@ export const K8sAddClusterModal = defineComponent({
       if (!result || result.canceled || !result.filePaths.length) return
       form.kubeconfigPath = result.filePaths[0]
       importing.value = true
-      store.k8sTestResult = null
+      store.updateK8sUiState({ testResult: null })
       const importResult = await store.importK8sKubeconfigFile(form.kubeconfigPath)
       importing.value = false
       if (!importResult.success) {
@@ -89,8 +89,7 @@ export const K8sAddClusterModal = defineComponent({
     }
 
     const switchAddMode = (mode: 'import' | 'manual') => {
-      store.k8sAddMode = mode
-      store.k8sTestResult = null
+      store.updateK8sUiState({ addMode: mode, testResult: null })
       formError.value = ''
       if (mode === 'import') {
         const context = store.k8sImportContexts[0]
@@ -129,15 +128,13 @@ export const K8sAddClusterModal = defineComponent({
     const testConnection = async () => {
       formError.value = ''
       if (!(await hydrateManualKubeconfig())) {
-        store.k8sTestResult = false
-        store.k8sClusterNotice = formError.value
+        store.updateK8sUiState({ testResult: false, clusterNotice: formError.value })
         return
       }
       const error = validateForm()
       if (error) {
         formError.value = error
-        store.k8sTestResult = false
-        store.k8sClusterNotice = error
+        store.updateK8sUiState({ testResult: false, clusterNotice: error })
         return
       }
       testing.value = true
@@ -155,12 +152,12 @@ export const K8sAddClusterModal = defineComponent({
 
     const submit = async () => {
       if (!(await hydrateManualKubeconfig())) {
-        store.k8sClusterNotice = formError.value
+        store.updateK8sUiState({ clusterNotice: formError.value })
         return
       }
       formError.value = validateForm()
       if (formError.value) {
-        store.k8sClusterNotice = formError.value
+        store.updateK8sUiState({ clusterNotice: formError.value })
         return
       }
       saving.value = true
@@ -188,7 +185,7 @@ export const K8sAddClusterModal = defineComponent({
               {
                 title: '关闭',
                 onClick: () => {
-                  store.k8sAddModalOpen = false
+                  store.updateK8sUiState({ addModalOpen: false })
                 }
               },
               [h(X)]
@@ -301,7 +298,7 @@ export const K8sAddClusterModal = defineComponent({
               : h('span', { class: store.k8sTestResult ? 'success' : 'error' }, store.k8sTestResult ? '连接成功' : '连接失败')
           ]),
           h('footer', [
-            h('button', { onClick: () => (store.k8sAddModalOpen = false) }, '取消'),
+            h('button', { onClick: () => store.updateK8sUiState({ addModalOpen: false }) }, '取消'),
             h('button', { class: 'primary', disabled: importing.value || saving.value, onClick: submit }, saving.value ? '保存中' : '保存')
           ])
         ])
@@ -353,7 +350,7 @@ export const K8sEditClusterModal = defineComponent({
                   {
                     title: '关闭',
                     onClick: () => {
-                      store.k8sEditModalOpen = false
+                      store.updateK8sUiState({ editModalOpen: false })
                     }
                   },
                   [h(X)]
@@ -418,7 +415,7 @@ export const K8sEditClusterModal = defineComponent({
                 h('div', { class: 'k8s-form-status' }, [h('span', '连接状态'), h(K8sStatusTag, { status: cluster.value.connection_status as KubernetesConnectionStatus })])
               ]),
               h('footer', [
-                h('button', { onClick: () => (store.k8sEditModalOpen = false) }, '取消'),
+                h('button', { onClick: () => store.updateK8sUiState({ editModalOpen: false }) }, '取消'),
                 h('button', { class: 'primary', onClick: submit }, '保存')
               ])
             ])

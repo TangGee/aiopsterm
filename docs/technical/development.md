@@ -4,6 +4,12 @@ This document captures maintainer-facing repository structure and verification e
 
 For architecture rules, see [Architecture Design Principles](architecture-principles.md).
 
+## Path And State Ownership Rules
+
+Use the domain path runtime for each path semantic: filesystem paths use Node/Electron path APIs, project and Knowledge paths use their dedicated relative-path runtimes, remote SFTP paths use POSIX normalization, and provider URL paths use `src/shared/modelProviderEndpoint.ts`. Do not add a second normalizer for an existing semantic.
+
+Renderer state that participates in a cross-module workflow must be changed through its owner action. In particular, Kubernetes modal state is updated through `workspace.updateK8sUiState`; components and modal renderers should not assign the store fields directly. The state ownership audit protects these fields and should be extended when a new shared workflow state is introduced.
+
 ## Repository Structure
 
 - `src/main`: Electron main-process bootstrap, runtime composition, IPC registration, and backend integrations.

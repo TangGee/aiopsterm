@@ -10,6 +10,7 @@ import type {
   KnowledgeBaseTransferProgress,
   KnowledgeBaseWriteResult
 } from '@shared/contracts/knowledgeBase'
+import { joinKnowledgeRelPath, knowledgeRelPathBasename, knowledgeRelPathParent, normalizeKnowledgeRelPath } from '@/services/knowledge/knowledgePathRuntime'
 
 export const malformedKnowledgeBackendResultMessage = '知识库服务返回数据无效'
 
@@ -146,16 +147,15 @@ export const isKnowledgeReindexResultData = (value: unknown): value is { files: 
 export const isKnowledgeTransferProgressData = (value: unknown): value is KnowledgeBaseTransferProgress =>
   isRecord(value) && isNonEmptyString(value.jobId) && isNonEmptyString(value.destRelPath) && isNonNegativeNumber(value.transferred) && isNonNegativeNumber(value.total)
 
-export const expectedKnowledgeRelPath = (relDir: string, name: string) => [relDir.trim().replace(/^\/+|\/+$/g, ''), name.trim()].filter(Boolean).join('/')
+export const expectedKnowledgeRelPath = (relDir: string, name: string) => joinKnowledgeRelPath(relDir, name)
 
 export const isKnowledgeRelPathInParentWithRequestedName = (relPath: string, relDir: string, requestedName: string) => {
-  const parent = relDir.trim().replace(/^\/+|\/+$/g, '')
-  const normalizedRelPath = relPath.trim().replace(/^\/+|\/+$/g, '')
+  const parent = normalizeKnowledgeRelPath(relDir)
+  const normalizedRelPath = normalizeKnowledgeRelPath(relPath)
   const normalizedName = requestedName.trim()
   if (!normalizedRelPath || !normalizedName) return false
-  const parts = normalizedRelPath.split('/').filter(Boolean)
-  const resultName = parts.at(-1) || ''
-  if (parts.slice(0, -1).join('/') !== parent) return false
+  const resultName = knowledgeRelPathBasename(normalizedRelPath)
+  if (knowledgeRelPathParent(normalizedRelPath) !== parent) return false
   if (resultName === normalizedName) return true
   const dotIndex = normalizedName.lastIndexOf('.')
   const base = dotIndex >= 0 ? normalizedName.slice(0, dotIndex) : normalizedName

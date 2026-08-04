@@ -39,7 +39,7 @@ const operationPathFor = (provider: ModelProviderCheckKey, config: ModelProvider
 
 const removeTrailingSlash = (value: string) => value.replace(/\/+$/, '')
 
-const appendPath = (baseUrl: string, path: string) => {
+export const appendModelProviderPath = (baseUrl: string, path: string) => {
   if (!path) return removeTrailingSlash(baseUrl)
   try {
     const parsed = new URL(baseUrl)
@@ -47,6 +47,7 @@ const appendPath = (baseUrl: string, path: string) => {
     const segments = path.split('/').filter(Boolean)
     const matches = segments.length > 0 && segments.every((segment, index) => existing[existing.length - segments.length + index]?.toLowerCase() === segment.toLowerCase())
     if (!matches) parsed.pathname = `${removeTrailingSlash(parsed.pathname)}/${segments.join('/')}`
+    parsed.search = ''
     parsed.hash = ''
     return removeTrailingSlash(parsed.toString())
   } catch {
@@ -106,6 +107,7 @@ export const suggestModelProviderEndpoint = (
   const parsed = parseHttpUrl(candidate)
   if (!parsed) return null
   if (stripKnownOperationPath(parsed)) reasons.push('operation-path')
+  parsed.search = ''
   parsed.hash = ''
   const hadTrailingSlash = parsed.pathname.length > 1 && parsed.pathname.endsWith('/')
   parsed.pathname = removeTrailingSlash(parsed.pathname) || '/'
@@ -168,6 +170,7 @@ export const resolveModelProviderEndpoint = (
   }
 
   stripKnownOperationPath(parsed)
+  parsed.search = ''
   parsed.hash = ''
   parsed.pathname = removeTrailingSlash(parsed.pathname) || '/'
   const pathMode = legacySkipVersion ? 'none' : config.apiPathMode || 'auto'
@@ -178,7 +181,7 @@ export const resolveModelProviderEndpoint = (
   const baseUrl = removeTrailingSlash(parsed.toString())
   return {
     baseUrl,
-    endpoint: appendPath(baseUrl, operationPath),
+    endpoint: appendModelProviderPath(baseUrl, operationPath),
     operationPath,
     valid: true,
     errorMessage: ''

@@ -28,6 +28,11 @@ describe('project files interaction runtime', () => {
     expect(joinProjectRelativePath('src/nested', 'app.ts')).toBe('src/nested/app.ts')
     expect(projectAbsolutePath('/work/project/', 'src/app.ts')).toBe('/work/project/src/app.ts')
     expect(projectAbsolutePath('C:\\work\\project\\', 'src/app.ts')).toBe('C:\\work\\project\\src\\app.ts')
+    expect(projectAbsolutePath('/', '')).toBe('/')
+    expect(projectAbsolutePath('C:\\', '')).toBe('C:\\')
+    expect(projectAbsolutePath('C:\\', 'src/app.ts')).toBe('C:\\src\\app.ts')
+    expect(projectAbsolutePath('\\\\server\\share\\', '')).toBe('\\\\server\\share')
+    expect(projectAbsolutePath('\\\\server\\share\\', 'src/app.ts')).toBe('\\\\server\\share\\src\\app.ts')
   })
 
   it('derives move targets and rejects no-op and recursive directory moves', () => {

@@ -1,22 +1,16 @@
+import {
+  joinKnowledgeRelPath,
+  knowledgeRelPathParent,
+  normalizeKnowledgeRelPath
+} from '@/services/knowledge/knowledgePathRuntime'
+
 export const getKnowledgeEditorParentRelDir = (path: string) => {
-  const parts = path.split('/').filter(Boolean)
-  return parts.length <= 1 ? '' : parts.slice(0, -1).join('/')
+  return knowledgeRelPathParent(path)
 }
 
-export const createKnowledgeEditorRelPath = (parentRelDir: string, name: string) => [parentRelDir, name].filter(Boolean).join('/')
+export const createKnowledgeEditorRelPath = (parentRelDir: string, name: string) => joinKnowledgeRelPath(parentRelDir, name)
 
-export const normalizeKnowledgeEditorRelPath = (path: string) => {
-  const output: string[] = []
-  for (const part of path.replace(/\\/g, '/').split('/')) {
-    if (!part || part === '.') continue
-    if (part === '..') {
-      output.pop()
-      continue
-    }
-    output.push(part)
-  }
-  return output.join('/')
-}
+export const normalizeKnowledgeEditorRelPath = normalizeKnowledgeRelPath
 
 export const knowledgeEditorLanguageFromPath = (path: string) => {
   const lower = path.toLowerCase()

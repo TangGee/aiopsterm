@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  appendModelProviderPath,
   resolveEquivalentClientBaseUrl,
   resolveModelProviderEndpoint,
   suggestModelProviderEndpoint
@@ -16,6 +17,13 @@ const openAiConfig = (baseUrl: string, overrides: Record<string, unknown> = {}) 
 })
 
 describe('model provider endpoint resolution', () => {
+  it('appends paths with one canonical case-insensitive suffix and no base query', () => {
+    expect(appendModelProviderPath('https://gateway.example/API?token=legacy#fragment', 'api')).toBe('https://gateway.example/API')
+    expect(appendModelProviderPath('https://gateway.example/base?token=legacy', 'models/list')).toBe(
+      'https://gateway.example/base/models/list'
+    )
+  })
+
   it('suggests a visible canonical URL for a host-only value', () => {
     const suggestion = suggestModelProviderEndpoint('openai', openAiConfig('api.openai.com'))
 

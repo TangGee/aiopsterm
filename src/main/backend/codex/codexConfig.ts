@@ -2,7 +2,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
 import type { UserConfig } from '@shared/contracts/userConfig'
-import { resolveEquivalentClientBaseUrl } from '@shared/modelProviderEndpoint'
+import { resolveEquivalentClientBaseUrl, resolveModelProviderEndpoint } from '@shared/modelProviderEndpoint'
 import { resolveModelProvider } from '../ai/modelProviderText'
 
 const codexOpenAiProviderId = 'aiopsterm_openai_responses'
@@ -307,40 +307,18 @@ export type AiopstermCodexProviderConfig = {
   env?: Record<string, string>
 }
 
-const normalizeOpenAiBaseUrl = (baseUrl: string) => {
-  if (!baseUrl) return ''
-  const skipVersionPrefix = baseUrl.endsWith('#')
-  const normalizedBaseUrl = skipVersionPrefix ? baseUrl.slice(0, -1) : baseUrl
-  try {
-    const parsed = new URL(normalizedBaseUrl)
-    const hasVersionSegment = parsed.pathname.split('/').filter(Boolean).some((segment) => /^v\d+$/i.test(segment))
-    if (!skipVersionPrefix && !hasVersionSegment) parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/v1`
-    parsed.search = ''
-    parsed.hash = ''
-    return parsed.toString().replace(/\/$/, '')
-  } catch {
-    return normalizedBaseUrl
-  }
-}
-
 export const normalizeCodexResponsesBaseUrl = (baseUrl: string) => {
-  const normalized = normalizeOpenAiBaseUrl(baseUrl)
-  if (!normalized) return ''
-  try {
-    const parsed = new URL(normalized)
-    const segments = parsed.pathname.split('/').filter(Boolean)
-    if (segments[segments.length - 1] === 'responses') {
-      parsed.pathname = `/${segments.slice(0, -1).join('/')}`
-      return parsed.toString().replace(/\/$/, '')
-    }
-    if (segments[segments.length - 2] === 'chat' && segments[segments.length - 1] === 'completions') {
-      parsed.pathname = `/${segments.slice(0, -2).join('/')}`
-      return parsed.toString().replace(/\/$/, '')
-    }
-  } catch {
-    // Keep the normalized raw value if URL parsing failed above.
-  }
-  return normalized
+  const raw = normalizeText(baseUrl)
+  if (!raw) return ''
+  const legacySkipVersion = raw.endsWith('#')
+  const resolution = resolveModelProviderEndpoint('openai', {
+    baseUrl: legacySkipVersion ? raw.slice(0, -1) : raw,
+    apiKey: '',
+    modelId: '',
+    apiFormat: 'responses',
+    apiPathMode: legacySkipVersion ? 'none' : 'auto'
+  })
+  return resolution.baseUrl || (legacySkipVersion ? raw.slice(0, -1) : raw)
 }
 
 const normalizeCodexOssBaseUrl = (baseUrl: string, fallback: string) => {
