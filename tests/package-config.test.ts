@@ -148,12 +148,15 @@ describe('package configuration audit', () => {
   it('keeps the local Linux one-click build entrypoint available', async () => {
     const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts?: Record<string, string> }
     const script = readFileSync('scripts/build-linux.sh', 'utf8')
+    const fastScript = readFileSync('scripts/build-linux-fast.sh', 'utf8')
     const help = await execFileAsync('bash', ['scripts/build-linux.sh', '--help'], { cwd: process.cwd() })
     await expect(execFileAsync('bash', ['scripts/build-linux.sh', '--npm-registry'], { cwd: process.cwd() })).rejects.toMatchObject({
       code: 2,
       stderr: expect.stringContaining('--npm-registry requires a URL')
     })
     expect(packageJson.scripts?.['build:linux:one-click']).toContain('scripts/build-linux.sh')
+    expect(packageJson.scripts?.['build:linux:fast']).toContain('scripts/build-linux-fast.sh')
+    expect(fastScript).toContain('build-linux.sh" --skip-dependencies "$@"')
     expect(help.stdout).toContain('--npm-registry URL')
     expect(script).toContain('can only run on Linux')
     expect(script).toContain('--china-mirror')

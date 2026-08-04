@@ -25,6 +25,7 @@
     "build:linux:appimage": "npm run generate:icons && npm run build:codex && npm run build:cline-sidecar && npm run build && npm run rebuild:native && electron-builder --linux AppImage --config electron-builder.yml",
     "build:linux": "npm run generate:icons && npm run build:codex && npm run build:cline-sidecar && npm run build && npm run rebuild:native && electron-builder --linux --config electron-builder.yml",
     "build:linux:one-click": "bash scripts/build-linux.sh",
+    "build:linux:fast": "bash scripts/build-linux-fast.sh",
     "build:deb": "npm run generate:icons && npm run build:codex && npm run build:cline-sidecar && npm run build && npm run rebuild:native && electron-builder --linux deb --config electron-builder.yml",
     "build:mac": "npm run generate:icons && npm run build:codex && npm run build:cline-sidecar && npm run build && npm run rebuild:native && electron-builder --mac --config electron-builder.yml",
     "build:mac:dir": "npm run generate:icons && npm run build:codex && npm run build:cline-sidecar && npm run build && npm run rebuild:native && electron-builder --mac --dir --config electron-builder.yml",
