@@ -63,6 +63,21 @@ describe('workspacePanelNavigationRuntime', () => {
     scope.stop()
   })
 
+  it('cycles through the current tab-bar order independently of history', () => {
+    const { scope, state, runtime } = createHarness()
+    const panels = [terminalPanel('a'), terminalPanel('b'), terminalPanel('c')]
+    state.panels.value = panels
+    state.activePanelId.value = 'b'
+    state.activePanelId.value = 'c'
+
+    expect(runtime.navigatePanelByOrderForward()).toBe(true)
+    expect(state.activePanelId.value).toBe('a')
+    expect(runtime.navigatePanelByOrderBack()).toBe(true)
+    expect(state.activePanelId.value).toBe('c')
+    expect(runtime.panelNavigationHistory.value).toEqual(['b', 'c', 'a', 'c'])
+    scope.stop()
+  })
+
   it('excludes the welcome placeholder and caps navigation data at fifty entries', () => {
     const { scope, state, runtime } = createHarness()
     expect(runtime.recentWorkspacePanels.value).toEqual([])

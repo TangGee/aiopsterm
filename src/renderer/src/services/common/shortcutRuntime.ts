@@ -20,7 +20,13 @@ type ShortcutBinding = {
 
 const modifierTokens = new Set(['ctrl', 'control', 'shift', 'alt', 'option', 'cmd', 'command', 'meta'])
 const modifierEventKeys = new Set(['control', 'alt', 'shift', 'meta', 'command'])
-const workspacePanelNavigationActionIds = new Set(['recentPanels', 'navigatePanelBack', 'navigatePanelForward'])
+const workspacePanelNavigationActionIds = new Set([
+  'recentPanels',
+  'navigatePanelBack',
+  'navigatePanelForward',
+  'navigatePanelByOrderBack',
+  'navigatePanelByOrderForward'
+])
 const specialKeyAliases: Record<string, string> = {
   ',': 'comma',
   '.': 'period',

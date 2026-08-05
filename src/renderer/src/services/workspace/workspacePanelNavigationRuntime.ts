@@ -200,6 +200,17 @@ export const createWorkspacePanelNavigationRuntime = (state: WorkspacePanelNavig
   const navigatePanelBack = () => navigatePanelHistory(-1)
   const navigatePanelForward = () => navigatePanelHistory(1)
 
+  const navigatePanelByOrder = (offset: -1 | 1) => {
+    const panels = currentEligiblePanels()
+    if (panels.length <= 1) return false
+    const currentIndex = panels.findIndex((panel) => panel.id === state.activePanelId.value)
+    const target = panels[(Math.max(0, currentIndex) + offset + panels.length) % panels.length]
+    return target ? activatePanelSurface(target.id, { cause: 'keyboard' }) : false
+  }
+
+  const navigatePanelByOrderBack = () => navigatePanelByOrder(-1)
+  const navigatePanelByOrderForward = () => navigatePanelByOrder(1)
+
   const canNavigatePanelBack = computed(() => panelNavigationIndex.value > 0)
   const canNavigatePanelForward = computed(
     () => panelNavigationIndex.value >= 0 && panelNavigationIndex.value < panelNavigationHistory.value.length - 1
@@ -245,6 +256,8 @@ export const createWorkspacePanelNavigationRuntime = (state: WorkspacePanelNavig
     activatePanelSurface,
     activateRecentPanel,
     navigatePanelBack,
-    navigatePanelForward
+    navigatePanelForward,
+    navigatePanelByOrderBack,
+    navigatePanelByOrderForward
   }
 }

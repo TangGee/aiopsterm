@@ -38,6 +38,8 @@ type WorkspaceShellControllerDeps = {
   openRecentPanels: () => boolean
   navigatePanelBack: () => boolean
   navigatePanelForward: () => boolean
+  navigatePanelByOrderBack: () => boolean
+  navigatePanelByOrderForward: () => boolean
 }
 
 export const createWorkspaceShellController = (
@@ -65,7 +67,9 @@ export const createWorkspaceShellController = (
     activatePanelSurface,
     openRecentPanels,
     navigatePanelBack,
-    navigatePanelForward
+    navigatePanelForward,
+    navigatePanelByOrderBack,
+    navigatePanelByOrderForward
   } = deps
 
   const switchToTerminalPanelIndex = (digit: number) => {
@@ -110,6 +114,8 @@ export const createWorkspaceShellController = (
     if (actionId === 'recentPanels') return openRecentPanels()
     if (actionId === 'navigatePanelBack') return navigatePanelBack()
     if (actionId === 'navigatePanelForward') return navigatePanelForward()
+    if (actionId === 'navigatePanelByOrderBack') return navigatePanelByOrderBack()
+    if (actionId === 'navigatePanelByOrderForward') return navigatePanelByOrderForward()
     return false
   }
 

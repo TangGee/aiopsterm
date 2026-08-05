@@ -70,13 +70,17 @@ describe('ShortcutRuntime', () => {
     const recentPanels = vi.fn()
     const navigatePanelBack = vi.fn()
     const navigatePanelForward = vi.fn()
+    const navigatePanelByOrderBack = vi.fn()
+    const navigatePanelByOrderForward = vi.fn()
     runtime.install(
       [
         { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+Tab' },
         { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
-        { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' }
+        { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' },
+        { id: 'navigatePanelByOrderBack', action: '按标签栏顺序切换到左侧面板', shortcut: 'Ctrl+Shift+Left' },
+        { id: 'navigatePanelByOrderForward', action: '按标签栏顺序切换到右侧面板', shortcut: 'Ctrl+Shift+Right' }
       ],
-      { recentPanels, navigatePanelBack, navigatePanelForward }
+      { recentPanels, navigatePanelBack, navigatePanelForward, navigatePanelByOrderBack, navigatePanelByOrderForward }
     )
     const terminal = document.createElement('div')
     terminal.className = 'xterm-host'
@@ -89,6 +93,10 @@ describe('ShortcutRuntime', () => {
     expect(recentPanels).toHaveBeenCalledTimes(1)
     expect(navigatePanelBack).toHaveBeenCalledTimes(1)
     expect(navigatePanelForward).toHaveBeenCalledTimes(1)
+    expect(dispatchShortcutFrom(terminal, 'ArrowLeft', { ctrlKey: true, shiftKey: true })).toBe(true)
+    expect(dispatchShortcutFrom(terminal, 'ArrowRight', { ctrlKey: true, shiftKey: true })).toBe(true)
+    expect(navigatePanelByOrderBack).toHaveBeenCalledTimes(1)
+    expect(navigatePanelByOrderForward).toHaveBeenCalledTimes(1)
     terminal.remove()
   })
 

@@ -171,7 +171,9 @@ export const createWorkspaceStoreState = () => {
     closeCurrentPanel: () => shellShortcutAction?.('closeCurrentPanel') ?? false,
     recentPanels: () => shellShortcutAction?.('recentPanels') ?? false,
     navigatePanelBack: () => shellShortcutAction?.('navigatePanelBack') ?? false,
-    navigatePanelForward: () => shellShortcutAction?.('navigatePanelForward') ?? false
+    navigatePanelForward: () => shellShortcutAction?.('navigatePanelForward') ?? false,
+    navigatePanelByOrderBack: () => shellShortcutAction?.('navigatePanelByOrderBack') ?? false,
+    navigatePanelByOrderForward: () => shellShortcutAction?.('navigatePanelByOrderForward') ?? false
   }
 
   const selectedConversationId = ref('')

@@ -1315,7 +1315,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       activatePanelSurface: panelNavigationRuntime.activatePanelSurface,
       openRecentPanels: panelNavigationRuntime.openRecentPanels,
       navigatePanelBack: panelNavigationRuntime.navigatePanelBack,
-      navigatePanelForward: panelNavigationRuntime.navigatePanelForward
+      navigatePanelForward: panelNavigationRuntime.navigatePanelForward,
+      navigatePanelByOrderBack: panelNavigationRuntime.navigatePanelByOrderBack,
+      navigatePanelByOrderForward: panelNavigationRuntime.navigatePanelByOrderForward
     }
   )
   setShellShortcutAction(triggerShortcutAction)
