@@ -146,7 +146,7 @@ bash scripts/build-linux.sh --deb-only
 bash scripts/build-linux.sh --setup-only
 ```
 
-The script is Linux-only. It uses the local package manager (`apt`, `dnf`, `yum`, or `pacman`) only when required commands are missing, and keeps mirror settings process-local. `--npm-registry <URL>` overrides only the npm registry. Combine it with `--china-mirror` to keep the mainland China Electron and Rust mirrors while using a custom npm registry such as Huawei Cloud.
+The script is Linux-only. It uses the local package manager (`apt`, `dnf`, `yum`, or `pacman`) only when required commands are missing, and keeps mirror settings process-local. `--npm-registry <URL>` overrides only the npm registry. Combine it with `--china-mirror` to keep the mainland China Electron and Rust mirrors while using a custom npm registry such as Huawei Cloud. Linux AppImages use electron-builder's static `1.0.3` runtime and therefore do not require the target system to install `libfuse.so.2`; build native modules on the oldest supported Linux baseline to keep their glibc requirements compatible.
 
 Build only the Linux AppImage package:
 

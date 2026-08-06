@@ -1,5 +1,7 @@
 appId: app.aiopsterm.desktop
 productName: aiopsterm
+toolsets:
+  appimage: "1.0.3"
 directories:
   buildResources: resources
 files:
@@ -65,6 +67,8 @@ linux:
     - name: aiopsterm
       schemes:
         - aiopsterm
+appImage:
+  compression: zstd
 win:
   target:
     - nsis

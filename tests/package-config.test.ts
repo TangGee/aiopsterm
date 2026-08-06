@@ -54,6 +54,21 @@ describe('package configuration audit', () => {
     expect(`${result.stdout}${result.stderr}`).toContain('package-config-audit-ok')
   })
 
+  it('keeps the static AppImage runtime configured', () => {
+    const builderConfig = readFileSync('electron-builder.yml', 'utf8')
+    const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as { devDependencies?: Record<string, string> }
+
+    expect(packageJson.devDependencies?.['electron-builder']).toBe('^26.11.1')
+    expect(builderConfig).toContain('appimage: "1.0.3"')
+    expect(builderConfig).toContain('compression: zstd')
+  })
+
+  it('resolves the exported electron-rebuild executable from package metadata', () => {
+    const script = readFileSync('scripts/ensure-native-runtime.mjs', 'utf8')
+    expect(script).toContain("resolvePackageBin('@electron/rebuild', 'electron-rebuild')")
+    expect(script).not.toContain("require.resolve('@electron/rebuild/lib/cli.js')")
+  })
+
   it('keeps Windows Codex package builder arguments wired to source build helpers', async () => {
     const stdout = await evalBuildCodexCliModule(`
       import { buildCodexPackageArgs } from './scripts/build-codex-cli.mjs'
