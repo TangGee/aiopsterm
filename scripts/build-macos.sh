@@ -114,11 +114,19 @@ configure_sources() {
 
 refresh_tool_paths() {
   local brew_prefix=''
+  local supported_node_bin=''
+  if node_is_supported; then
+    supported_node_bin="$(dirname "$(command -v node)")"
+  fi
   if command_exists brew; then
     brew_prefix="$(brew --prefix)"
     export PATH="${brew_prefix}/bin:${brew_prefix}/sbin:${PATH}"
   fi
   export PATH="${HOME}/.cargo/bin:${PATH}"
+  if [[ -n "${supported_node_bin}" ]]; then
+    export PATH="${supported_node_bin}:${PATH}"
+  fi
+  hash -r
 }
 
 ensure_command_line_tools() {

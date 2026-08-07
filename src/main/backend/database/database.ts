@@ -45,6 +45,7 @@ type DatabaseBackendRuntimeConfig = {
   timeoutMs?: number
   stateFilePath?: string
   credentialKeyPath?: string
+  credentialStorageBackend?: 'system' | 'local'
   useSeedData?: boolean
   runClineAgentTurn?: (input: ClineAgentRunInput) => ReturnType<typeof runClineAgentTurn>
   abortClineAgentTask?: typeof abortClineAgentTask
@@ -235,6 +236,7 @@ export function configureDatabaseBackendRuntime(config?: DatabaseBackendRuntimeC
       ? {
           ...(config.stateFilePath ? { stateFilePath: config.stateFilePath } : {}),
           ...(config.credentialKeyPath ? { credentialKeyPath: config.credentialKeyPath } : {}),
+          ...(config.credentialStorageBackend ? { credentialStorageBackend: config.credentialStorageBackend } : {}),
           ...(config.mysqlDriver ? { mysqlDriver: config.mysqlDriver } : {}),
           ...(config.postgresDriver ? { postgresDriver: config.postgresDriver } : {}),
           ...('oracleDriver' in config ? { oracleDriver: config.oracleDriver } : {}),

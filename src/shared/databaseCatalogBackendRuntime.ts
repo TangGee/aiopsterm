@@ -46,7 +46,9 @@ import {
 } from './databaseConnectionTestRuntime'
 import {
   configureDatabaseCredentialStorage,
-  encryptDatabaseCredentialForStorage
+  decryptDatabaseCredentialFromStorage,
+  encryptDatabaseCredentialForStorage,
+  type SafeStorageLike
 } from './databaseCredentialStorage'
 import {
   clickHouseCatalogsForConnection,
@@ -118,10 +120,13 @@ export type DatabaseRuntimeConfig = {
   oracleDriverName?: string
   stateFilePath?: string
   credentialKeyPath?: string
+  credentialStorageBackend?: 'system' | 'local'
+  safeStorage?: SafeStorageLike | null
 }
 
 let databaseRuntimeConfig: DatabaseRuntimeConfig = {}
 const databaseConnectionSecrets = new Map<string, string>()
+const databaseStoredConnectionSecrets = new Map<string, string>()
 const databaseVerifiedConnections = new Set<string>()
 
 export function configureDatabaseRuntime(config?: DatabaseRuntimeConfig) {
@@ -129,7 +134,9 @@ export function configureDatabaseRuntime(config?: DatabaseRuntimeConfig) {
   databaseLoadedStateFilePath = ''
   configureDatabaseCredentialStorage({
     stateFilePath: databaseRuntimeConfig.stateFilePath,
-    credentialKeyPath: databaseRuntimeConfig.credentialKeyPath
+    credentialKeyPath: databaseRuntimeConfig.credentialKeyPath,
+    storageBackend: databaseRuntimeConfig.credentialStorageBackend,
+    ...(Object.prototype.hasOwnProperty.call(databaseRuntimeConfig, 'safeStorage') ? { safeStorage: databaseRuntimeConfig.safeStorage } : {})
   })
   resetDatabaseRelationalRuntime()
   resetDatabaseSqliteRuntime()
@@ -137,13 +144,37 @@ export function configureDatabaseRuntime(config?: DatabaseRuntimeConfig) {
 
 const shouldUseDatabaseSeedData = () => databaseRuntimeConfig.useSeedData ?? runtimeShouldUseDatabaseSeedData()
 
+const databaseConnectionPassword = (connectionId: string) => {
+  const cached = databaseConnectionSecrets.get(connectionId)
+  if (cached) return cached
+  const stored = databaseStoredConnectionSecrets.get(connectionId)
+  if (!stored) return ''
+  const password = decryptDatabaseCredentialFromStorage(stored)
+  if (password) databaseConnectionSecrets.set(connectionId, password)
+  return password
+}
+
+const hasDatabaseConnectionSecret = (connectionId: string) =>
+  databaseConnectionSecrets.has(connectionId) || databaseStoredConnectionSecrets.has(connectionId)
+
+const setDatabaseConnectionSecret = (connectionId: string, password: string) => {
+  databaseStoredConnectionSecrets.delete(connectionId)
+  if (password) databaseConnectionSecrets.set(connectionId, password)
+  else databaseConnectionSecrets.delete(connectionId)
+}
+
+const deleteDatabaseConnectionSecret = (connectionId: string) => {
+  databaseConnectionSecrets.delete(connectionId)
+  databaseStoredConnectionSecrets.delete(connectionId)
+}
+
 const connectionTestInputFromSaved = (connection: DatabaseConnectionInfo): DatabaseConnectionTestInput => ({
   dbType: connection.dbType,
   name: connection.name,
   host: connection.host,
   port: connection.port,
   user: connection.user,
-  password: databaseConnectionSecrets.get(connection.id) || '',
+  password: databaseConnectionPassword(connection.id),
   database: connection.database,
   filePath: connection.filePath,
   readonly: connection.readonly,
@@ -242,8 +273,9 @@ const applyPersistedDatabaseState = (state: DatabasePersistedState) => {
   databaseGroupParents = { ...state.groupParents }
   databaseConnections = state.connections.map(cloneDatabaseConnection)
   databaseConnectionSecrets.clear()
+  databaseStoredConnectionSecrets.clear()
   Object.entries(state.secrets).forEach(([connectionId, secret]) => {
-    if (secret.password) databaseConnectionSecrets.set(connectionId, secret.password)
+    if (secret.password) databaseStoredConnectionSecrets.set(connectionId, secret.password)
   })
   if (state.aiPaneState) replaceDatabaseAiPaneState(state.aiPaneState)
 }
@@ -283,7 +315,15 @@ const persistDatabaseState = () => {
       groupParents: { ...databaseGroupParents },
       connections: visibleDatabaseConnections().map(cloneDatabaseConnection),
       secrets: Object.fromEntries(
-        Array.from(databaseConnectionSecrets.entries()).map(([connectionId, password]) => [connectionId, { password: encryptDatabaseCredentialForStorage(password) }])
+        databaseConnections.flatMap((connection) => {
+          const plaintext = databaseConnectionSecrets.get(connection.id)
+          const stored = databaseStoredConnectionSecrets.get(connection.id)
+          const password = plaintext || stored
+          if (!password) return []
+          const encrypted = encryptDatabaseCredentialForStorage(password)
+          databaseStoredConnectionSecrets.set(connection.id, encrypted)
+          return [[connection.id, { password: encrypted }]]
+        })
       ),
       aiPaneState: getDatabaseAiPaneStateSnapshot()
     }
@@ -303,7 +343,7 @@ const visibleDatabaseConnections = () =>
     shouldUseSeedData: shouldUseDatabaseSeedData(),
     seedConnectionIds: databaseConnectionSeedIds,
     isVerifiedConnection: (connectionId) => databaseVerifiedConnections.has(connectionId),
-    hasConnectionSecret: (connectionId) => databaseConnectionSecrets.has(connectionId)
+    hasConnectionSecret: hasDatabaseConnectionSecret
   })
 
 type DatabaseAiCatalogTableMetadata = {
@@ -410,6 +450,7 @@ export function resetDatabaseBackendSeed() {
   databaseLoadedStateFilePath = ''
   databaseReadOnlyStateFilePath = ''
   databaseConnectionSecrets.clear()
+  databaseStoredConnectionSecrets.clear()
   databaseVerifiedConnections.clear()
   resetDatabaseSeedTableRuntime()
   databaseGroups = databaseGroupSeed.map((group) => ({ ...group }))
@@ -578,7 +619,7 @@ export async function removeDatabaseConnection(connectionId: string): Promise<Da
     return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
   }
   databaseConnections = databaseConnections.filter((connection) => connection.id !== id)
-  databaseConnectionSecrets.delete(id)
+  deleteDatabaseConnectionSecret(id)
   databaseVerifiedConnections.delete(id)
   persistDatabaseState()
   return {
@@ -767,7 +808,7 @@ export async function saveDatabaseConnection(input: DatabaseConnectionSaveInput)
   const connectionSecret = trim(input.connection.password)
   const validationConnection =
     input.mode === 'edit' && !connectionSecret && existing?.hasPassword
-      ? { ...input.connection, password: databaseConnectionSecrets.get(existing.id) || '' }
+      ? { ...input.connection, password: databaseConnectionPassword(existing.id) }
       : input.connection
   const testResult = await testDatabaseConnection(validationConnection)
   if (!testResult.ok) {
@@ -806,8 +847,8 @@ export async function saveDatabaseConnection(input: DatabaseConnectionSaveInput)
               })
     }
     databaseConnections[existingIndex] = saved
-    if (connectionSecret) databaseConnectionSecrets.set(saved.id, connectionSecret)
-    if (!connectionSecret && !saved.hasPassword) databaseConnectionSecrets.delete(saved.id)
+    if (connectionSecret) setDatabaseConnectionSecret(saved.id, connectionSecret)
+    if (!connectionSecret && !saved.hasPassword) deleteDatabaseConnectionSecret(saved.id)
     databaseVerifiedConnections.delete(saved.id)
     persistDatabaseState()
     return {
@@ -829,7 +870,7 @@ export async function saveDatabaseConnection(input: DatabaseConnectionSaveInput)
   }
   saved.catalogs = await defaultCatalogsForSavedConnectionAsync(saved)
   databaseConnections.push(saved)
-  if (connectionSecret) databaseConnectionSecrets.set(saved.id, connectionSecret)
+  if (connectionSecret) setDatabaseConnectionSecret(saved.id, connectionSecret)
   persistDatabaseState()
 
   return {

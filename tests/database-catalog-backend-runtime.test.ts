@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PostgresDriver } from '@shared/databaseRelationalEngines'
 import {
   configureDatabaseRuntime,
@@ -155,6 +155,63 @@ describe('database catalog backend runtime', () => {
     ])
     expect(restored.data?.connections[0]?.catalogs[0]?.schemas?.[0]?.tables[0]).toMatchObject({ name: 'orders', primaryKey: ['id'] })
     expect(state.configs.at(-1)).toMatchObject({ password })
+  })
+
+  it('restores system-encrypted passwords without decrypting until the connection is opened', async () => {
+    const { driver, state } = createPostgresCatalogDriverDouble()
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-db-lazy-credential-'))
+    tempDirs.push(dir)
+    const stateFilePath = join(dir, 'database-workspace.json')
+    const credentialKeyPath = join(dir, 'database-credential.key')
+    configureDatabaseRuntime({ useSeedData: false, postgresDriver: driver, stateFilePath, credentialKeyPath, credentialStorageBackend: 'local' })
+
+    const saved = await saveDatabaseConnection({
+      mode: 'create',
+      connection: {
+        dbType: 'postgresql',
+        name: 'lazy-credential-postgres',
+        host: '127.0.0.1',
+        port: 5432,
+        user: 'ops',
+        password: 'initial-password',
+        database: 'orders',
+        env: 'Production',
+        groupId: 'default-group',
+        authentication: 'UserAndPassword'
+      }
+    })
+    expect(saved.ok).toBe(true)
+
+    const persisted = JSON.parse(await readFile(stateFilePath, 'utf-8')) as {
+      secrets: Record<string, { password: string }>
+    }
+    persisted.secrets['conn-lazy-credential-postgres'].password = `ds1:${Buffer.from('sealed:lazy-database-password').toString('base64')}`
+    await writeFile(stateFilePath, JSON.stringify(persisted, null, 2), 'utf-8')
+
+    const safeStorage = {
+      isEncryptionAvailable: vi.fn(() => true),
+      encryptString: vi.fn((plain: string) => Buffer.from(`sealed:${plain}`, 'utf-8')),
+      decryptString: vi.fn((cipher: Buffer) => cipher.toString('utf-8').replace(/^sealed:/, ''))
+    }
+    resetDatabaseBackendSeed()
+    state.configs.length = 0
+    configureDatabaseRuntime({
+      useSeedData: false,
+      postgresDriver: driver,
+      stateFilePath,
+      credentialKeyPath,
+      credentialStorageBackend: 'system',
+      safeStorage
+    })
+
+    const restored = await listDatabaseCatalog()
+    expect(restored.data?.connections).toContainEqual(expect.objectContaining({ id: 'conn-lazy-credential-postgres', hasPassword: true }))
+    expect(safeStorage.decryptString).not.toHaveBeenCalled()
+
+    const connected = await connectDatabaseConnection('conn-lazy-credential-postgres')
+    expect(connected.ok).toBe(true)
+    expect(safeStorage.decryptString).toHaveBeenCalledTimes(1)
+    expect(state.configs.at(-1)).toEqual(expect.objectContaining({ password: 'lazy-database-password' }))
   })
 
   it('marks live relational refresh failures on the catalog connection state', async () => {

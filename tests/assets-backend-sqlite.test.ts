@@ -4,13 +4,20 @@ import { createRequire } from 'module'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
+const electronSafeStorage = vi.hoisted(() => ({
+  isEncryptionAvailable: vi.fn(() => true),
+  encryptString: vi.fn((plain: string) => Buffer.from(plain, 'utf-8')),
+  decryptString: vi.fn((cipher: Buffer) => cipher.toString('utf-8'))
+}))
+
 const requireNative = createRequire(__filename)
 const Database = requireNative('better-sqlite3')
 
 vi.mock('electron', () => ({
   app: {
     getPath: () => '/tmp/aiopsterm-assets-sqlite-test'
-  }
+  },
+  safeStorage: electronSafeStorage
 }))
 
 const loadBackend = async () => {
@@ -48,6 +55,7 @@ const readSqliteStorageArtifacts = async (databasePath: string) => {
 describe('assets sqlite backend seed boundary', () => {
   beforeEach(() => {
     vi.resetModules()
+    electronSafeStorage.decryptString.mockClear()
   })
 
   it('starts non-seed SQLite asset runtime with only the local shell system asset', async () => {
@@ -185,6 +193,70 @@ describe('assets sqlite backend seed boundary', () => {
       expect(clearedAsset.ok).toBe(true)
       expect(clearedAsset.data).toEqual(expect.objectContaining({ hasPassword: false }))
       expect(backend.getAssetSecret(savedAsset.data!.id)).toEqual({})
+    })
+  })
+
+  it('lists historical system-encrypted assets and keychains without decrypting until detail access', async () => {
+    await withAssetDatabase(async (databasePath) => {
+      const db = new Database(databasePath)
+      db.exec(`
+        CREATE TABLE assets (id TEXT PRIMARY KEY, data TEXT NOT NULL, secret TEXT NOT NULL DEFAULT '{}');
+        CREATE TABLE asset_folders (uuid TEXT PRIMARY KEY, data TEXT NOT NULL);
+        CREATE TABLE asset_keychains (id TEXT PRIMARY KEY, data TEXT NOT NULL, secret TEXT NOT NULL DEFAULT '{}');
+      `)
+      db.prepare('INSERT INTO assets (id, data, secret) VALUES (?, ?, ?)').run(
+        'lazy-system-secret-host',
+        JSON.stringify({
+          id: 'lazy-system-secret-host',
+          uuid: 'lazy-system-secret-host',
+          name: 'lazy-system-secret-host',
+          title: 'lazy-system-secret-host',
+          host: '10.77.1.9',
+          ip: '10.77.1.9',
+          group: 'test',
+          group_name: 'test',
+          status: 'online',
+          tags: [],
+          username: 'ops',
+          port: 22,
+          asset_type: 'person',
+          auth_type: 'password',
+          data_source: 'manual'
+        }),
+        JSON.stringify({ password: `as1:${Buffer.from('lazy-system-password').toString('base64')}` })
+      )
+      db.prepare('INSERT INTO asset_keychains (id, data, secret) VALUES (?, ?, ?)').run(
+        'lazy-system-keychain',
+        JSON.stringify({
+          id: 'lazy-system-keychain',
+          name: 'lazy-system-keychain',
+          type: 'ed25519',
+          publicKey: '',
+          createdAt: 1717200000000,
+          updatedAt: 1717200000000
+        }),
+        JSON.stringify({ privateKey: `as1:${Buffer.from('lazy-system-private-key').toString('base64')}` })
+      )
+      db.close()
+
+      const backend = await loadBackend()
+      backend.configureAssetBackendRuntime({
+        databasePath,
+        useSeedData: false,
+        sqliteFactory: Database,
+        credentialStorageBackend: 'system',
+        safeStorage: electronSafeStorage
+      })
+
+      expect(backend.listAssets().assets).toContainEqual(expect.objectContaining({ id: 'lazy-system-secret-host', hasPassword: true }))
+      expect(backend.listKeychains()).toContainEqual(expect.objectContaining({ id: 'lazy-system-keychain', hasPrivateKey: true }))
+      expect(backend.listSshAgentKeychainOptions()).toContainEqual(expect.objectContaining({ key: 'lazy-system-keychain' }))
+      expect(electronSafeStorage.decryptString).not.toHaveBeenCalled()
+
+      expect(backend.getAssetSecret('lazy-system-secret-host')).toEqual({ password: 'lazy-system-password' })
+      expect(electronSafeStorage.decryptString).toHaveBeenCalledTimes(1)
+      expect(backend.getKeychainSecret('lazy-system-keychain')).toEqual({ privateKey: 'lazy-system-private-key' })
+      expect(electronSafeStorage.decryptString).toHaveBeenCalledTimes(2)
     })
   })
 

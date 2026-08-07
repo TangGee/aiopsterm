@@ -9,10 +9,7 @@ import type {
   DatabaseTableInfo
 } from './contracts/database'
 import { normalizeDatabaseAiPaneState } from './databaseAi'
-import {
-  decryptDatabaseCredentialFromStorage,
-  isDatabaseCredentialCiphertext
-} from './databaseCredentialStorage'
+import { isDatabaseCredentialCiphertext } from './databaseCredentialStorage'
 import {
   DEFAULT_DATABASE_GROUP_ID,
   supportedDatabaseEngines
@@ -230,12 +227,9 @@ export const normalizePersistedState = (value: unknown): DatabasePersistedState 
   connections.forEach((connection) => {
     const secret = rawSecrets[connection.id]
     if (isRecord(secret) && typeof secret.password === 'string' && secret.password) {
-      const password = decryptDatabaseCredentialFromStorage(secret.password)
-      if (password) {
-        secrets[connection.id] = { password }
-        connection.hasPassword = true
-        if (!isDatabaseCredentialCiphertext(secret.password)) needsSecretMigration = true
-      }
+      secrets[connection.id] = { password: secret.password }
+      connection.hasPassword = true
+      if (!isDatabaseCredentialCiphertext(secret.password)) needsSecretMigration = true
     }
   })
   return {

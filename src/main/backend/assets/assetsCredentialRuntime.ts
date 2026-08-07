@@ -9,7 +9,7 @@ export type AssetSecret = {
   jumpserverToken?: string
 }
 
-type AssetSafeStorageLike = {
+export type AssetSafeStorageLike = {
   isEncryptionAvailable: () => boolean
   encryptString: (plain: string) => Buffer
   decryptString: (cipher: Buffer) => string
@@ -18,7 +18,10 @@ type AssetSafeStorageLike = {
 export type AssetCredentialRuntimeConfig = {
   credentialKeyPath?: string
   safeStorage?: AssetSafeStorageLike | null
+  storageBackend?: AssetCredentialStorageBackend
 }
+
+export type AssetCredentialStorageBackend = 'system' | 'local'
 
 const safeStorageCredentialPrefix = 'as1:'
 const localKeyCredentialPrefix = 'ak1:'
@@ -39,6 +42,14 @@ export const resetAssetCredentialRuntime = () => {
 }
 
 const hasOwn = (source: object, key: string) => Object.prototype.hasOwnProperty.call(source, key)
+
+const selectedStorageBackend = (): AssetCredentialStorageBackend => {
+  if (runtimeConfig.storageBackend) return runtimeConfig.storageBackend
+  const configured = String(process.env.AIOPSTERM_ASSETS_CREDENTIAL_STORAGE || process.env.AIOPSTERM_CREDENTIAL_STORAGE || '').trim().toLowerCase()
+  if (configured === 'system' || configured === 'local') return configured
+  if (hasOwn(runtimeConfig, 'safeStorage')) return 'system'
+  return process.platform === 'darwin' ? 'local' : 'system'
+}
 
 const resolveSafeStorage = () => {
   if (hasOwn(runtimeConfig, 'safeStorage')) return runtimeConfig.safeStorage || null
@@ -104,12 +115,15 @@ const decryptWithLocalCredentialKey = (cipherText: string) => {
 export const isAssetCredentialCiphertext = (value: unknown) =>
   typeof value === 'string' && (value.startsWith(safeStorageCredentialPrefix) || value.startsWith(localKeyCredentialPrefix))
 
+export const assetSecretUsesSafeStorage = (secret: AssetSecret = {}) =>
+  credentialFields.some((key) => typeof secret[key] === 'string' && secret[key]!.startsWith(safeStorageCredentialPrefix))
+
 const encryptCredentialValue = (value: unknown) => {
   if (typeof value !== 'string') return undefined
   if (!value) return ''
   if (isAssetCredentialCiphertext(value)) return value
   const safeStorage = resolveSafeStorage()
-  if (safeStorageAvailable(safeStorage)) {
+  if (selectedStorageBackend() === 'system' && safeStorageAvailable(safeStorage)) {
     return `${safeStorageCredentialPrefix}${safeStorage!.encryptString(value).toString('base64')}`
   }
   return encryptWithLocalCredentialKey(value)

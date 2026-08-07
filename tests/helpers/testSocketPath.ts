@@ -4,7 +4,9 @@ import { join } from 'node:path'
 
 export const testSocketPath = (namespace: string, root = tmpdir()) => {
   const uniqueName = `${namespace}-${process.pid}-${randomUUID()}`
-  return process.platform === 'win32' ? `\\\\.\\pipe\\${uniqueName}` : join(root, `${uniqueName}.sock`)
+  if (process.platform === 'win32') return `\\\\.\\pipe\\${uniqueName}`
+  if (process.platform === 'darwin') return join('/tmp', `aiopsterm-test-${process.pid}-${randomUUID().slice(0, 12)}.sock`)
+  return join(root, `${uniqueName}.sock`)
 }
 
 export const removeTestSocketPath = async (socketPath: string) => {
