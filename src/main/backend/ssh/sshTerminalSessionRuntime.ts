@@ -369,6 +369,22 @@ export const createSshTerminalSession = (
   let detachActiveTargetClientEvents: (() => void) | null = null
   let reusedShellRetryUsed = false
   const staleTargetClients = new Set<SshTerminalClient>()
+  const retiredTargetClients = new WeakSet<SshTerminalClient>()
+
+  const retireTargetClient = (authClient: SshTerminalClient) => {
+    if (retiredTargetClients.has(authClient)) return
+    retiredTargetClients.add(authClient)
+    staleTargetClients.add(authClient)
+    sshConnectionPoolRegistry.target.removeAliases(authClient)
+
+    // ssh2 can emit more than one error while a failed socket is winding down.
+    // Keep a no-op listener on retired clients so a late error cannot escape as
+    // an uncaught main-process exception after session listeners are detached.
+    authClient.on('error', () => {})
+    try {
+      authClient.end()
+    } catch {}
+  }
 
   let lifecycle = sendLifecycle(id, sink, {
     ...lifecycleBase,
@@ -451,8 +467,11 @@ export const createSshTerminalSession = (
   ) => {
     if (closed) return
     closed = true
+    const failedClient = client
     detachActiveTargetClientEvents?.()
     detachActiveTargetClientEvents = null
+    if (failedClient) retireTargetClient(failedClient)
+    client = null
     cleanupTransports()
     sink.closed?.(id)
     lifecycle = sendErrorLifecycle(id, sink, error, {
@@ -556,10 +575,7 @@ export const createSshTerminalSession = (
     staleTargetClients.add(authClient)
     detachActiveTargetClientEvents?.()
     detachActiveTargetClientEvents = null
-    sshConnectionPoolRegistry.target.removeAliases(authClient)
-    try {
-      authClient.end()
-    } catch {}
+    retireTargetClient(authClient)
     if (client === authClient) client = null
     stream = null
     targetClientIsPooled = false
@@ -1249,7 +1265,7 @@ export const createSshTerminalSession = (
     }
     const handleTransportClose = () => {
       if (closed || staleTargetClients.has(authClient) || authClient !== client) return
-      if (targetClientPoolable) sshConnectionPoolRegistry.target.removeAliases(authClient)
+      retireTargetClient(authClient)
       if (stream) {
         finish(null, 'network', {
           isNetworkDisconnect: true,
