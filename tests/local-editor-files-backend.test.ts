@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'fs/promises'
+import { mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -29,11 +29,12 @@ describe('local editor files backend', () => {
     const linkPath = join(dir, 'note-link.txt')
     await writeFile(filePath, 'hello\n', 'utf8')
     await symlink(filePath, linkPath)
+    const canonicalFilePath = await realpath(filePath)
 
     await expect(inspectLocalEditorFile(linkPath)).resolves.toEqual({
       ok: true,
       data: {
-        filePath,
+        filePath: canonicalFilePath,
         size: 6,
         mtimeMs: expect.any(Number)
       }
@@ -41,7 +42,7 @@ describe('local editor files backend', () => {
     await expect(readLocalEditorFile(filePath)).resolves.toEqual({
       ok: true,
       data: {
-        filePath,
+        filePath: canonicalFilePath,
         content: 'hello\n',
         contentHash: expect.stringMatching(/^[a-f0-9]{64}$/),
         size: 6,
@@ -68,6 +69,7 @@ describe('local editor files backend', () => {
     const dir = await createTempDir()
     const filePath = join(dir, 'note.txt')
     await writeFile(filePath, 'before\n', 'utf8')
+    const canonicalFilePath = await realpath(filePath)
     const initial = await readLocalEditorFile(filePath)
     expect(initial.ok).toBe(true)
     await writeFile(filePath, 'external\n', 'utf8')
@@ -87,7 +89,7 @@ describe('local editor files backend', () => {
       content: 'editor\n',
       overwrite: true
     })
-    expect(overwritten).toMatchObject({ ok: true, data: { filePath, size: 7 } })
+    expect(overwritten).toMatchObject({ ok: true, data: { filePath: canonicalFilePath, size: 7 } })
     await expect(readFile(filePath, 'utf8')).resolves.toBe('editor\n')
   })
 })

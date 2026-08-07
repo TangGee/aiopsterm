@@ -1,6 +1,7 @@
 <template>
   <header
     class="top-bar"
+    :class="{ 'platform-macos': isMac }"
     data-onboarding-id="top-layout-controls"
     data-ui-focus-chrome
   >

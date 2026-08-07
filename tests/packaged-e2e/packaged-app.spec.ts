@@ -6,7 +6,9 @@ import { join, resolve } from 'node:path'
 
 const defaultExecutablePath = () => {
   if (process.platform === 'win32') return 'dist/win-unpacked/aiopsterm.exe'
-  if (process.platform === 'darwin') return 'dist/mac/aiopsterm.app/Contents/MacOS/aiopsterm'
+  if (process.platform === 'darwin') {
+    return `dist/${process.arch === 'arm64' ? 'mac-arm64' : 'mac'}/aiopsterm.app/Contents/MacOS/aiopsterm`
+  }
   return 'dist/linux-unpacked/aiopsterm'
 }
 
@@ -48,8 +50,9 @@ const socketJsonRequest = <T extends Record<string, any> = Record<string, any>>(
 
 test('packaged app starts, opens local terminal, browses local files, and accepts notification control requests', async () => {
   const executablePath = resolve(process.env.AIOPSTERM_PACKAGED_APP || defaultExecutablePath())
-  const userDataDir = join(tmpdir(), `aiopsterm-packaged-e2e-${Date.now()}`)
-  const localFilesDir = join(tmpdir(), `aiopsterm-packaged-files-${Date.now()}`)
+  const testTempDir = process.platform === 'darwin' ? '/tmp' : tmpdir()
+  const userDataDir = join(testTempDir, `aiops-e2e-${Date.now()}`)
+  const localFilesDir = join(testTempDir, `aiops-files-${Date.now()}`)
   await mkdir(userDataDir, { recursive: true })
   await mkdir(localFilesDir, { recursive: true })
   await writeFile(join(localFilesDir, 'packaged-e2e.txt'), 'packaged e2e local file\n', 'utf-8')
@@ -73,15 +76,41 @@ test('packaged app starts, opens local terminal, browses local files, and accept
     const page = await app.firstWindow({ timeout: 30_000 })
     await page.waitForLoadState('domcontentloaded')
     await expect(page.getByText('aiopsterm', { exact: true })).toBeVisible()
+    if (process.platform === 'darwin') {
+      await expect(page.locator('.top-bar')).toHaveClass(/platform-macos/)
+      const topLeftBox = await page.locator('.top-left').boundingBox()
+      expect(topLeftBox?.x).toBeGreaterThanOrEqual(78)
+    }
     await page.getByText('127.0.0.1', { exact: true }).dblclick()
     await expect(page.locator('.terminal-tab').first()).toBeVisible({ timeout: 30_000 })
-    await expect(page.locator('.terminal-output-mirror').first()).toBeVisible()
+    const terminalMirror = page.locator('.terminal-output-mirror').first()
+    await expect(terminalMirror).toBeVisible()
+    const socketPath = process.env.AIOPSTERM_PACKAGED_CONTROL_SOCKET || (await controlSocketPath(userDataDir, app.process().pid || 0))
+    if (process.platform === 'darwin') {
+      const panelId = await page.locator('.terminal-tab.active').getAttribute('data-panel-id')
+      expect(panelId).toBeTruthy()
+      const terminalInput = page.locator('.terminal-pane.active .threaded-terminal-input, .terminal-pane.active .xterm-helper-textarea').first()
+      await terminalInput.focus()
+      await page.keyboard.type(
+        `printf '__AIOPSTERM_COLOR_ENV__=%s|%s|%s|%s\\n' "$TERM" "$COLORTERM" "$CLICOLOR" "$TERM_PROGRAM"`
+      )
+      await page.keyboard.press('Enter')
+      await expect
+        .poll(async () => {
+          const replay = await socketJsonRequest(socketPath, {
+            id: 'packaged-e2e-terminal-color-env',
+            method: 'terminal.replay',
+            params: { surface_id: panelId, tail_lines: 30 }
+          })
+          return String(replay.data?.snapshot_text || '')
+        })
+        .toContain('__AIOPSTERM_COLOR_ENV__=xterm-256color|truecolor|1|aiopsterm')
+    }
 
     await page.locator('button[data-module-key="files"]').click()
     await expect(page.locator('.files-workspace')).toBeVisible()
     await expect(page.locator('.file-browser').first()).toBeVisible()
 
-    const socketPath = process.env.AIOPSTERM_PACKAGED_CONTROL_SOCKET || (await controlSocketPath(userDataDir, app.process().pid || 0))
     const created = await socketJsonRequest(socketPath, {
       id: 'packaged-e2e-notification',
       method: 'notification.create',

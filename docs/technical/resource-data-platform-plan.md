@@ -132,12 +132,12 @@ Remaining direction:
 
 - run `package:build -- linux-appimage`, `package:build -- linux-deb`, and matching `package:verify` gates on Linux for release candidates;
 - run `build:win` / `build:win:dir` on Windows and record the result;
-- run `build:mac` / `build:mac:dir` on macOS and record the result;
+- repeat `package:build -- macos` and `package:verify -- macos` for release candidates; the native Apple Silicon dmg/zip build, packaged-app audit, launch smoke test, and packaged E2E flow passed locally on 2026-08-06;
 - extend platform-specific audits if installer metadata needs checks beyond the cross-platform unpacked-app audit.
 
 ### Native Modules
 
-`node-pty`, `better-sqlite3`, and `ssh2` are native-sensitive dependencies. The current rebuild script pins Electron `31.7.7`, which is good for consistency, but each platform must prove:
+`node-pty`, `better-sqlite3`, and `ssh2` are native-sensitive dependencies. The current dependency lock resolves Electron `40.10.6`; each platform must prove:
 
 - `node-pty` loads and creates a local terminal;
 - `better-sqlite3` opens `aiopsterm-state.db`;

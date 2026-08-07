@@ -31,12 +31,12 @@ const defaultAiPreferences = {
 
 const defaultTerminalSettings = {
   terminalType: 'xterm-256color',
-  fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
+  fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
   fontSize: 12,
   scrollBack: 1000,
   cursorStyle: 'block' as const,
   cursorBlink: true,
-  lineHeight: 1,
+  lineHeight: 1.2,
   pinchZoomStatus: true,
   showCloseButton: true,
   sshAgentsStatus: false,
@@ -150,7 +150,9 @@ const defaultShortcuts = [
   { id: 'closeCurrentPanel', action: '关闭当前面板', shortcut: 'Ctrl+Shift+W' },
   { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+Tab' },
   { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
-  { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' }
+  { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' },
+  { id: 'navigatePanelByOrderBack', action: '按标签栏顺序切换到左侧面板', shortcut: 'Ctrl+Shift+Left' },
+  { id: 'navigatePanelByOrderForward', action: '按标签栏顺序切换到右侧面板', shortcut: 'Ctrl+Shift+Right' }
 ]
 
 const defaultRules = [
@@ -3847,7 +3849,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
+        fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -3959,7 +3961,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
+        fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -4092,7 +4094,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
+        fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -4360,7 +4362,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
+        fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -4459,7 +4461,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
+        fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -4579,7 +4581,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
+        fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -4719,7 +4721,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
+        fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -4795,7 +4797,9 @@ describe('workspace store', () => {
       { id: 'closeCurrentPanel', action: '关闭当前面板', shortcut: 'Ctrl+Shift+W' },
       { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+Tab' },
       { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
-      { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' }
+      { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' },
+      { id: 'navigatePanelByOrderBack', action: '按标签栏顺序切换到左侧面板', shortcut: 'Ctrl+Shift+Left' },
+      { id: 'navigatePanelByOrderForward', action: '按标签栏顺序切换到右侧面板', shortcut: 'Ctrl+Shift+Right' }
     ])
     expect(window.aiops.getSettingsPreferences).toHaveBeenCalledWith()
   })
@@ -4821,7 +4825,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
+        fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -4984,7 +4988,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
+        fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -5439,7 +5443,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
+        fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -5611,7 +5615,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
+        fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -5749,7 +5753,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
+        fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -5855,7 +5859,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
+        fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -6030,7 +6034,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
+        fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -12769,24 +12773,29 @@ describe('workspace store', () => {
     }
   })
 
-  it('migrates legacy terminal font stacks that collapse to the same Linux fallback', async () => {
+  it('migrates legacy terminal font stacks and their old compact line height', async () => {
     const store = useWorkspaceStore()
     const backendConfig = await window.aiops.getConfig()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
       ...backendConfig,
       terminal: {
         ...defaultTerminalSettings,
-        fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace'
+        fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+        lineHeight: 1
       }
     })
 
     await store.hydrateConfig()
 
-    expect(store.terminalSettings.fontFamily).toBe('"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace')
+    expect(store.terminalSettings.fontFamily).toBe(
+      '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace'
+    )
+    expect(store.terminalSettings.lineHeight).toBe(1.2)
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         terminal: expect.objectContaining({
-          fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace'
+          fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
+          lineHeight: 1.2
         })
       })
     )

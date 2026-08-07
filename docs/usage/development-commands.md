@@ -166,6 +166,14 @@ Build macOS packages on a macOS runner:
 npm run build:mac
 ```
 
+For a complete local macOS build and verification pass, use the one-click wrapper. Mainland China maintainers can opt into process-local npm, Electron, Rust, Cargo, and Homebrew mirrors:
+
+```bash
+npm run build:mac:one-click -- --china-mirror
+```
+
+The wrapper runs `npm ci`, builds the dmg and zip packages, and runs `package:verify -- macos`. Use `--skip-setup` with an existing toolchain, `--skip-dependencies` to reuse `node_modules`, `--run-tests` for Vitest, `--run-e2e` for Electron E2E, or `--setup-only` to stop after checking prerequisites. `--npm-registry <URL>` overrides only npm while retaining the other mirror choices. `--codex-package-dir <DIR>` passes an existing complete current-architecture Codex package through the supported cache override when a release runner already has that artifact.
+
 For a macOS unpacked directory build during package debugging:
 
 ```bash

@@ -303,7 +303,7 @@ export class ClineAgentSidecarSupervisor {
       const spawnProcess = this.options.spawnProcess || spawn
       const dataDir = join(this.options.userDataPath, 'cline-agent')
       const child = spawnProcess(launch.command, launch.args, {
-        cwd: this.options.appPath,
+        cwd: this.options.userDataPath,
         shell: false,
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],

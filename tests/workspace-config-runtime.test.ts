@@ -100,18 +100,26 @@ describe('workspaceConfigRuntime', () => {
     expect(terminal.changed).toBe(true)
     expect(terminal.normalized).toMatchObject({
       terminalType: 'xterm-256color',
-      fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
+      fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
       fontSize: 12,
       scrollBack: 1000,
       cursorStyle: 'block',
       cursorBlink: false,
-      lineHeight: 1,
+      lineHeight: 1.2,
       pinchZoomStatus: false,
       showCloseButton: false,
       sshAgentsStatus: true,
       middleMouseEvent: 'closeTab',
       rightMouseEvent: 'contextMenu'
     })
+
+    expect(
+      normalizeTerminalConfig({
+        ...terminal.normalized,
+        fontFamily: 'Custom Mono, monospace',
+        lineHeight: 1
+      }).normalized.lineHeight
+    ).toBe(1)
 
     const editor = normalizeEditorSettingsConfig({
       fontSize: 100,

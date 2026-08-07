@@ -1248,7 +1248,7 @@ export const ensureCodexTerminalBridgeServer = async (userDataPath: string) => {
   }
   socketPath = bridgeSocketPathFor(userDataPath)
   if (process.platform !== 'win32') {
-    await mkdir(dirname(socketPath), { recursive: true })
+    await mkdir(dirname(socketPath), { recursive: true, mode: 0o700 })
     if (existsSync(socketPath)) rmSync(socketPath, { force: true })
   }
   server = createServer((socket) => {

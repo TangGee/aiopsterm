@@ -85,7 +85,9 @@ describe('settings preferences backend boundary', () => {
       { id: 'closeCurrentPanel', action: '关闭当前面板', shortcut: 'Ctrl+Shift+W' },
       { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+Tab' },
       { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
-      { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' }
+      { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' },
+      { id: 'navigatePanelByOrderBack', action: '按标签栏顺序切换到左侧面板', shortcut: 'Ctrl+Shift+Left' },
+      { id: 'navigatePanelByOrderForward', action: '按标签栏顺序切换到右侧面板', shortcut: 'Ctrl+Shift+Right' }
     ])
     expect(result.data.rules).toEqual([])
   })
@@ -130,7 +132,9 @@ describe('settings preferences backend boundary', () => {
       { id: 'closeCurrentPanel', action: '关闭当前面板', shortcut: 'Ctrl+Shift+W' },
       { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+Tab' },
       { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
-      { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' }
+      { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' },
+      { id: 'navigatePanelByOrderBack', action: '按标签栏顺序切换到左侧面板', shortcut: 'Ctrl+Shift+Left' },
+      { id: 'navigatePanelByOrderForward', action: '按标签栏顺序切换到右侧面板', shortcut: 'Ctrl+Shift+Right' }
     ])
     expect(result.data?.rules).toEqual([])
   })
@@ -232,7 +236,9 @@ describe('settings preferences backend boundary', () => {
       { id: 'closeCurrentPanel', action: '关闭当前面板', shortcut: 'Ctrl+Shift+W' },
       { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+Tab' },
       { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
-      { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' }
+      { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' },
+      { id: 'navigatePanelByOrderBack', action: '按标签栏顺序切换到左侧面板', shortcut: 'Ctrl+Shift+Left' },
+      { id: 'navigatePanelByOrderForward', action: '按标签栏顺序切换到右侧面板', shortcut: 'Ctrl+Shift+Right' }
     ])
     expect(result.data.rules).toEqual([
       { id: 'rule-custom-instructions', content: 'legacy global instruction', enabled: true },
