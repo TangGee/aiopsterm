@@ -71,7 +71,8 @@ export const relayShellSshArgs = (jumpTarget: SshTerminalTarget) => [
   '-o',
   'HostKeyAlgorithms=+ssh-rsa',
   '-o',
-  'PubkeyAcceptedAlgorithms=+ssh-rsa',
+  // OpenSSH 8.2 (Ubuntu 20.04) only knows the legacy name; newer releases keep it as an alias.
+  'PubkeyAcceptedKeyTypes=+ssh-rsa',
   '-tt',
   '-p',
   String(jumpTarget.port),
