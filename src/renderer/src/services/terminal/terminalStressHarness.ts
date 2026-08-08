@@ -622,6 +622,10 @@ const stressSplitGroupPanels = (workspace: WorkspaceStore) => {
 
 const largestStressSplitTarget = (workspace: WorkspaceStore) => {
   const groupPanels = stressSplitGroupPanels(workspace)
+  return largestStressSplitTargetFor(groupPanels)
+}
+
+const largestStressSplitTargetFor = (groupPanels: TerminalPanel[]) => {
   const rects = stressSplitRectsFor(groupPanels)
   return groupPanels
     .map((panel) => ({ panel, rect: rects.get(panel.id) || { x: 0, y: 0, width: 100, height: 100 } }))
@@ -1405,16 +1409,16 @@ const runTerminalStressHarness = async (
       foregroundCursor += 1
       backgroundCursor += 1
       if (!outgoing || !incoming || outgoing.id === incoming.id) return
-      const largestTarget = largestStressSplitTarget(workspace)?.panel
-      const target =
-        (largestTarget && largestTarget.id !== outgoing.id && foregroundPanels.some((panel) => panel.id === largestTarget.id)
-          ? largestTarget
-          : undefined) ||
-        foregroundPanels.find((panel) => panel.id !== outgoing.id && isStressRenderableElement(input.getTerminalElement(panel.id))) ||
-        foregroundPanels.find((panel) => isStressRenderableElement(input.getTerminalElement(panel.id))) ||
-        outgoing
-      workspace.unsplitPanel(outgoing.id)
-      workspace.attachPanelToSplit(incoming.id, target.id, backgroundCursor % 2 === 0 ? 'right' : 'below')
+      const splitGroupId = outgoing.splitGroupId
+      workspace.unsplitPanel(outgoing.id, { activation: 'preserve' })
+      const remainingGroup = splitGroupId
+        ? workspace.panels.filter((panel) => isTerminalWorkspacePanel(panel) && panel.splitGroupId === splitGroupId)
+        : foregroundPanels.filter((panel) => panel.id !== outgoing.id)
+      const targetLayout = largestStressSplitTargetFor(remainingGroup)
+      const target = targetLayout?.panel || foregroundPanels.find((panel) => panel.id !== outgoing.id)
+      if (!target) return
+      const direction = !targetLayout || targetLayout.rect.width >= targetLayout.rect.height ? 'right' : 'below'
+      workspace.attachPanelToSplit(incoming.id, target.id, direction)
       workspace.selectPanelForLifecycle(incoming.id)
       await syncStressPanelViews(input)
       input.syncTerminalView(incoming, { refit: true })
