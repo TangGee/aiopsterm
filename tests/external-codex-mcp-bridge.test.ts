@@ -1590,7 +1590,11 @@ describe('external Codex MCP bridge runtime', () => {
     const { bridge } = await loadBackends()
     activeBridge = bridge
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-external-mcp-stable-'))
-    const expectedSocket = process.platform === 'win32' ? '\\\\.\\pipe\\aiopsterm-external-codex' : join(root, 'external-codex-mcp', 'aiopsterm-external-codex.sock')
+    const expectedSocket = process.platform === 'win32'
+      ? '\\\\.\\pipe\\aiopsterm-external-codex'
+      : process.platform === 'darwin'
+        ? /^\/tmp\/aiopsterm-\d+\/aiopsterm-external-codex-[a-f0-9]{12}\.sock$/
+        : join(root, 'external-codex-mcp', 'aiopsterm-external-codex.sock')
 
     try {
       const firstSocket = await bridge.ensureExternalCodexMcpBridgeServer({
@@ -1598,7 +1602,8 @@ describe('external Codex MCP bridge runtime', () => {
         token: 'test-token',
         userDataPath: root
       })
-      expect(firstSocket).toBe(expectedSocket)
+      if (expectedSocket instanceof RegExp) expect(firstSocket).toMatch(expectedSocket)
+      else expect(firstSocket).toBe(expectedSocket)
 
       bridge.closeExternalCodexMcpBridgeServer()
 

@@ -15,7 +15,7 @@ import type { UserConfig } from '@shared/contracts/userConfig'
 import { isDatabaseMcpToolName } from '@shared/databaseMcpRuntime'
 import { createSshTerminalSession, resolveSshTerminalTarget, type SshTerminalSession } from '../ssh/sshTerminal'
 import { listAssets } from '../assets/assets'
-import { isWindowsPlatform } from '../app/platformRuntime'
+import { platformSocketPath } from '../app/platformRuntime'
 import { logRuntimeEvent } from '../app/runtimeLog'
 import { callDatabaseMcpTool } from '../database/databaseMcp'
 import { handleExternalCodexMcpManagedAiRequest } from './externalCodexMcpManagedAiRuntime'
@@ -145,8 +145,7 @@ const isEnabled = () => runtimeConfig.enabled === true || process.env.AIOPSTERM_
 
 const defaultSocketPath = () => {
   const base = cleanText(runtimeConfig.userDataPath) || process.cwd()
-  if (isWindowsPlatform()) return '\\\\.\\pipe\\aiopsterm-external-codex'
-  return join(base, 'external-codex-mcp', 'aiopsterm-external-codex.sock')
+  return platformSocketPath(base, 'aiopsterm-external-codex', { directory: 'external-codex-mcp', stable: true })
 }
 
 const bridgeSocketPath = () => cleanText(runtimeConfig.socketPath) || cleanText(process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET) || defaultSocketPath()
@@ -861,7 +860,7 @@ export const ensureExternalCodexMcpBridgeServer = async (config: ExternalCodexMc
       }
     })
   })
-  await new Promise<void>((resolve, reject) => {
+  const listen = () => new Promise<void>((resolve, reject) => {
     const failListen = (error: Error) => {
       server?.off('listening', done)
       reject(error)
@@ -874,6 +873,7 @@ export const ensureExternalCodexMcpBridgeServer = async (config: ExternalCodexMc
     server?.once('listening', done)
     server?.listen(socketPath)
   })
+  await listen()
   return socketPath
 }
 
@@ -888,9 +888,18 @@ export const closeExternalCodexMcpBridgeServer = () => {
   }
   connections.clear()
   const existingServer = server
+  const closingSocketPath = socketPath
   server = null
-  if (existingServer) serverClosePromise = new Promise((resolve) => existingServer.close(() => resolve()))
-  if (socketPath && process.platform !== 'win32' && existsSync(socketPath)) rmSync(socketPath, { force: true })
+  if (existingServer) {
+    serverClosePromise = new Promise((resolve) => existingServer.close(() => {
+      if (closingSocketPath && process.platform !== 'win32' && existsSync(closingSocketPath)) {
+        rmSync(closingSocketPath, { force: true })
+      }
+      resolve()
+    }))
+  } else if (closingSocketPath && process.platform !== 'win32' && existsSync(closingSocketPath)) {
+    rmSync(closingSocketPath, { force: true })
+  }
   socketPath = ''
 }
 

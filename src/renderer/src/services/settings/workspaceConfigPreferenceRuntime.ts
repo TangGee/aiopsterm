@@ -9,13 +9,13 @@ import type {
 } from '@shared/contracts/appRuntime'
 import type { ExtensionUserConfig } from '@shared/contracts/extensions'
 import {
+  crossPlatformTerminalFontFamily,
   defaultEditorSettings,
   defaultExtensionSettings,
   defaultTerminalSettings,
   defaultWorkspacePreferences,
   editorWordWrapValues,
   legacyTerminalFontFamilies,
-  linuxReadableTerminalFontFamily,
   middleMouseEventActions,
   rightMouseEventActions,
   sshProxyTypes,
@@ -30,14 +30,18 @@ import { isRecord, numberInRange, stringFromOptions } from './workspaceConfigPri
 export const normalizeTerminalConfig = (source?: Partial<TerminalUserConfig>) => {
   const incoming = isRecord(source) ? source : {}
   const incomingFontFamily = typeof incoming.fontFamily === 'string' ? incoming.fontFamily.trim() : ''
+  const migratingLegacyDefaults = legacyTerminalFontFamilies.has(incomingFontFamily)
   const normalized: TerminalSettings = {
     terminalType: stringFromOptions(incoming.terminalType, terminalTypes, defaultTerminalSettings.terminalType),
-    fontFamily: incomingFontFamily ? (legacyTerminalFontFamilies.has(incomingFontFamily) ? linuxReadableTerminalFontFamily : incomingFontFamily) : defaultTerminalSettings.fontFamily,
+    fontFamily: incomingFontFamily ? (migratingLegacyDefaults ? crossPlatformTerminalFontFamily : incomingFontFamily) : defaultTerminalSettings.fontFamily,
     fontSize: numberInRange(incoming.fontSize, defaultTerminalSettings.fontSize, 8, 64),
     scrollBack: numberInRange(incoming.scrollBack, defaultTerminalSettings.scrollBack, 1, 100000),
     cursorStyle: stringFromOptions(incoming.cursorStyle, terminalCursorStyles, defaultTerminalSettings.cursorStyle),
     cursorBlink: typeof incoming.cursorBlink === 'boolean' ? incoming.cursorBlink : defaultTerminalSettings.cursorBlink,
-    lineHeight: numberInRange(incoming.lineHeight, defaultTerminalSettings.lineHeight, 1, 3),
+    lineHeight:
+      migratingLegacyDefaults && incoming.lineHeight === 1
+        ? defaultTerminalSettings.lineHeight
+        : numberInRange(incoming.lineHeight, defaultTerminalSettings.lineHeight, 1, 3),
     pinchZoomStatus: typeof incoming.pinchZoomStatus === 'boolean' ? incoming.pinchZoomStatus : defaultTerminalSettings.pinchZoomStatus,
     showCloseButton: typeof incoming.showCloseButton === 'boolean' ? incoming.showCloseButton : defaultTerminalSettings.showCloseButton,
     sshAgentsStatus: typeof incoming.sshAgentsStatus === 'boolean' ? incoming.sshAgentsStatus : defaultTerminalSettings.sshAgentsStatus,

@@ -3,7 +3,7 @@ import { dirname, isAbsolute, join, resolve } from 'path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { trim } from './databaseTableRuntime'
 
-type SafeStorageLike = {
+export type SafeStorageLike = {
   isEncryptionAvailable: () => boolean
   encryptString: (plain: string) => Buffer
   decryptString: (cipher: Buffer) => string
@@ -12,7 +12,11 @@ type SafeStorageLike = {
 export type DatabaseCredentialStorageConfig = {
   stateFilePath?: string
   credentialKeyPath?: string
+  safeStorage?: SafeStorageLike | null
+  storageBackend?: DatabaseCredentialStorageBackend
 }
+
+export type DatabaseCredentialStorageBackend = 'system' | 'local'
 
 const databaseSafeStorageCredentialPrefix = 'ds1:'
 const databaseLocalKeyCredentialPrefix = 'dk1:'
@@ -32,6 +36,7 @@ export const resetDatabaseCredentialKeyCache = () => {
 }
 
 const resolveDatabaseSafeStorage = (): SafeStorageLike | null => {
+  if (Object.prototype.hasOwnProperty.call(credentialConfig, 'safeStorage')) return credentialConfig.safeStorage || null
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const electron = require('electron') as { safeStorage?: SafeStorageLike }
@@ -39,6 +44,18 @@ const resolveDatabaseSafeStorage = (): SafeStorageLike | null => {
   } catch {
     return null
   }
+}
+
+const selectedDatabaseCredentialStorageBackend = (): DatabaseCredentialStorageBackend => {
+  if (credentialConfig.storageBackend) return credentialConfig.storageBackend
+  const configured = trim(
+    typeof process !== 'undefined'
+      ? process.env?.AIOPSTERM_DATABASE_CREDENTIAL_STORAGE || process.env?.AIOPSTERM_CREDENTIAL_STORAGE
+      : ''
+  ).toLowerCase()
+  if (configured === 'system' || configured === 'local') return configured
+  if (Object.prototype.hasOwnProperty.call(credentialConfig, 'safeStorage')) return 'system'
+  return typeof process !== 'undefined' && process.platform === 'darwin' ? 'local' : 'system'
 }
 
 const defaultDatabaseCredentialKeyPath = () => {
@@ -106,7 +123,7 @@ export const encryptDatabaseCredentialForStorage = (value: unknown) => {
   if (!value) return ''
   if (isDatabaseCredentialCiphertext(value)) return value
   const safeStorage = resolveDatabaseSafeStorage()
-  if (databaseSafeStorageAvailable(safeStorage)) {
+  if (selectedDatabaseCredentialStorageBackend() === 'system' && databaseSafeStorageAvailable(safeStorage)) {
     return `${databaseSafeStorageCredentialPrefix}${safeStorage!.encryptString(value).toString('base64')}`
   }
   return encryptDatabaseCredentialWithLocalKey(value)

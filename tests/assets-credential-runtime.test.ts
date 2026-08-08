@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -19,6 +19,7 @@ type AssetCredentialRuntimeModule = {
       encryptString: (plain: string) => Buffer
       decryptString: (cipher: Buffer) => string
     } | null
+    storageBackend?: 'system' | 'local'
   }): void
   decryptAssetSecret(secret?: AssetSecret): AssetSecret
   encryptAssetSecretForStorage(secret?: AssetSecret): AssetSecret
@@ -143,6 +144,26 @@ describe('asset credential runtime', () => {
       expect(encrypted.password).toMatch(/^as1:/)
       expect(decryptAssetSecret(encrypted)).toEqual({ [passwordField]: 'safe-storage-material' })
       await expect(readFile(credentialKeyPath)).rejects.toThrow()
+    })
+  })
+
+  it('uses the local backend when explicitly selected even if safeStorage is available', async () => {
+    await withCredentialKeyPath(async (credentialKeyPath) => {
+      const { configureAssetCredentialRuntime, decryptAssetSecret, encryptAssetSecretForStorage } = await loadRuntime()
+      const safeStorage = {
+        isEncryptionAvailable: () => true,
+        encryptString: vi.fn((plain: string) => Buffer.from(`sealed:${plain}`, 'utf-8')),
+        decryptString: vi.fn((cipher: Buffer) => cipher.toString('utf-8').replace(/^sealed:/, ''))
+      }
+      configureAssetCredentialRuntime({ credentialKeyPath, safeStorage, storageBackend: 'local' })
+
+      const encrypted = encryptAssetSecretForStorage({ [passwordField]: 'local-policy-material' })
+
+      expect(encrypted.password).toMatch(/^ak1:/)
+      expect(decryptAssetSecret(encrypted)).toEqual({ [passwordField]: 'local-policy-material' })
+      expect(safeStorage.encryptString).not.toHaveBeenCalled()
+      expect(safeStorage.decryptString).not.toHaveBeenCalled()
+      expect(await readFile(credentialKeyPath)).toHaveLength(32)
     })
   })
 

@@ -1,6 +1,7 @@
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { chmodSync, cpSync, existsSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import {
   codexBinaryName,
   codexPackageDir,
@@ -102,6 +103,41 @@ const prunePackagedNativeBuildNoise = (context) => {
   }
 }
 
+const hasConfiguredMacSigningIdentity = () => {
+  if (process.env.CSC_LINK || process.env.CSC_NAME) return true
+  try {
+    const identities = execFileSync('/usr/bin/security', ['find-identity', '-v', '-p', 'codesigning'], { encoding: 'utf8' })
+    return /[1-9]\d* valid identities found/.test(identities)
+  } catch {
+    return false
+  }
+}
+
+const signMacAppForLocalUse = (context) => {
+  if (context?.electronPlatformName !== 'darwin' || process.env.AIOPSTERM_MAC_ADHOC_SIGN === '0') return
+  if (hasConfiguredMacSigningIdentity()) return
+
+  const appOutDir = context?.appOutDir
+  const productFilename = context?.packager?.appInfo?.productFilename || context?.packager?.appInfo?.productName || 'aiopsterm'
+  const appPath = join(appOutDir, `${productFilename}.app`)
+  const projectDir = context?.packager?.projectDir || process.cwd()
+  const entitlementsPath = resolve(projectDir, 'resources/entitlements.mac.plist')
+
+  console.warn(`[aiopsterm] no Apple signing identity found; applying local ad-hoc signature to ${appPath}`)
+  execFileSync('/usr/bin/codesign', [
+    '--force',
+    '--deep',
+    '--sign',
+    '-',
+    '--options',
+    'runtime',
+    '--entitlements',
+    entitlementsPath,
+    appPath
+  ], { stdio: 'inherit' })
+  execFileSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', appPath], { stdio: 'inherit' })
+}
+
 const prunePackagedSqlite = (context) => {
   const platform = context?.electronPlatformName || process.platform
   const arch = normalizeNodeArch(context?.arch ?? process.arch)
@@ -179,6 +215,8 @@ export default async function prunePackagedNativeModules(context) {
 
   prunePackagedSqlite(context)
   prunePackagedNativeBuildNoise(context)
+
+  signMacAppForLocalUse(context)
 
   if (platform !== 'linux') return
 

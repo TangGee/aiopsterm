@@ -62,6 +62,27 @@ const electron = () => {
   return electronRuntime
 }
 
+const resolvePackageBin = (packageName, binName) => {
+  let current = dirname(require.resolve(packageName))
+  while (true) {
+    const packageJsonPath = resolve(current, 'package.json')
+    if (existsSync(packageJsonPath)) {
+      const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'))
+      if (packageJson.name === packageName) {
+        const relativeBinPath = typeof packageJson.bin === 'string' ? packageJson.bin : packageJson.bin?.[binName]
+        if (!relativeBinPath) throw new Error(`${packageName} does not declare the ${binName} executable.`)
+        const binPath = resolve(current, relativeBinPath)
+        if (!existsSync(binPath)) throw new Error(`${packageName} executable does not exist: ${binPath}`)
+        return binPath
+      }
+    }
+    const parent = dirname(current)
+    if (parent === current) break
+    current = parent
+  }
+  throw new Error(`Cannot locate package metadata for ${packageName}.`)
+}
+
 const runRuntime = (runtime, source) => {
   const env = { ...process.env }
   if (runtime === 'electron') env.ELECTRON_RUN_AS_NODE = '1'
@@ -248,7 +269,7 @@ const runRebuild = (runtime, modules) => {
     })
   } else {
     const invocation = electronRebuildInvocation({
-      cliPath: require.resolve('@electron/rebuild/lib/cli.js'),
+      cliPath: resolvePackageBin('@electron/rebuild', 'electron-rebuild'),
       modules,
       electronVersion: electron().version,
       headersUrl: electronHeadersUrl(process.env)

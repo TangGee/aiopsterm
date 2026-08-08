@@ -37,7 +37,7 @@ npm run package:verify -- windows
 
 `package:verify` refuses to verify a target on the wrong host platform. On the target host it runs `audit:package-config`, `audit:packaged-app`, and `smoke:packaged`, then runs the split Linux installer audit for `linux-appimage` or `linux-deb`, and finally checks that the expected artifact exists.
 
-`audit:codex-runtime` checks the generated Codex package before app packaging. It requires `codex-package.json`, the platform entrypoint (`bin/codex` or `bin/codex.exe`), bundled `rg` or `rg.exe`, Linux `bwrap`, and Windows `codex-resources/codex-command-runner.exe` plus `codex-resources/codex-windows-sandbox-setup.exe`; on Linux it also rejects unresolved dynamic dependencies and OpenSSL 1.1 dynamic links such as `libssl.so.1.1` / `libcrypto.so.1.1`.
+`audit:codex-runtime` checks the generated Codex package before app packaging. It requires `codex-package.json`, the platform entrypoint (`bin/codex` or `bin/codex.exe`), bundled `rg` or `rg.exe`, Linux `bwrap`, and Windows `codex-resources/codex-command-runner.exe` plus `codex-resources/codex-windows-sandbox-setup.exe`. It also rejects an unpatched upstream Codex binary that lacks aiopsterm's flat MCP function-tool compatibility marker; on Linux it rejects unresolved dynamic dependencies and OpenSSL 1.1 dynamic links such as `libssl.so.1.1` / `libcrypto.so.1.1`.
 
 On Linux, the Codex musl package build requires the native release toolchain used by Codex: `ca-certificates curl musl-tools pkg-config libcap-dev g++ clang libc++-dev libc++abi-dev lld xz-utils`. CI jobs may provide prebuilt helper binaries through `AIOPSTERM_CODEX_BWRAP_BIN` and `AIOPSTERM_CODEX_RG_BIN`, but the package entrypoint must still come from this repository's local modified `codex/` source unless `AIOPSTERM_CODEX_PACKAGE_DIR` is intentionally supplied. The Codex package builder downloads Codex-built V8 artifacts from OpenAI Codex releases by default; offline or restricted runners should preconfigure `RUSTY_V8_ARCHIVE` and `RUSTY_V8_SRC_BINDING_PATH`.
 
@@ -61,7 +61,8 @@ npm run audit:linux-package
 `smoke:packaged` now chooses the unpacked app path for the current platform by default:
 
 - Linux: `dist/linux-unpacked/aiopsterm`
-- macOS: `dist/mac/aiopsterm.app/Contents/MacOS/aiopsterm`
+- macOS Intel: `dist/mac/aiopsterm.app/Contents/MacOS/aiopsterm`
+- macOS Apple Silicon: `dist/mac-arm64/aiopsterm.app/Contents/MacOS/aiopsterm`
 - Windows: `dist/win-unpacked/aiopsterm.exe`
 
 On Linux without `DISPLAY`, the script attempts to re-run itself under `xvfb-run` when that command is available. You can pass an explicit executable path as the first argument.
@@ -116,6 +117,8 @@ npm run build:mac:dir
 ```
 
 Run those commands on macOS. Linux development machines can audit the macOS target configuration with `npm run audit:package-config`, but they should not be treated as successful macOS packaging runners.
+
+On a local macOS machine, `scripts/build-macos.sh` is the complete orchestration entrypoint. It accepts `--china-mirror` for process-local mainland China download mirrors and finishes with the same `package:build -- macos` and `package:verify -- macos` gates documented above. Without a Developer ID certificate, the afterPack hook applies an ad-hoc local signature; external distribution still requires Apple signing and notarization.
 
 Windows packaging is configured with:
 

@@ -1,3 +1,4 @@
+import { createHash } from 'crypto'
 import { basename, posix } from 'path'
 
 export type PlatformRuntime = NodeJS.Platform
@@ -33,12 +34,24 @@ export const executableCandidateNames = (binaryName: string, env: NodeJS.Process
 export const platformSocketPath = (
   userDataPath: string,
   namespace: string,
-  options: { platform?: PlatformRuntime; pid?: number; directory?: string } = {}
+  options: { platform?: PlatformRuntime; pid?: number; directory?: string; uid?: number; stable?: boolean } = {}
 ) => {
   const platform = options.platform || process.platform
   const pid = Number.isFinite(options.pid) ? Math.floor(Number(options.pid)) : process.pid
   const cleanNamespace = String(namespace || 'aiopsterm').replace(/[^a-zA-Z0-9_-]/g, '-')
-  if (isWindowsPlatform(platform)) return `\\\\.\\pipe\\${cleanNamespace}-${pid}`
+  if (isWindowsPlatform(platform)) return `\\\\.\\pipe\\${cleanNamespace}${options.stable ? '' : `-${pid}`}`
   const directory = options.directory || cleanNamespace
-  return posix.join(userDataPath, directory, `${cleanNamespace}-${pid}.sock`)
+  const socketName = `${cleanNamespace}${options.stable ? '' : `-${pid}`}.sock`
+  const preferredPath = posix.join(userDataPath, directory, socketName)
+  if (platform !== 'darwin' || Buffer.byteLength(preferredPath) <= 103) return preferredPath
+
+  const uid = Number.isFinite(options.uid)
+    ? Math.floor(Number(options.uid))
+    : typeof process.getuid === 'function'
+      ? process.getuid()
+      : 0
+  const profileSuffix = options.stable
+    ? `-${createHash('sha256').update(userDataPath).digest('hex').slice(0, 12)}`
+    : `-${pid}`
+  return posix.join('/tmp', `aiopsterm-${uid}`, `${cleanNamespace}${profileSuffix}.sock`)
 }

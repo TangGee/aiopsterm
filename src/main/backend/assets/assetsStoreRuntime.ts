@@ -15,9 +15,12 @@ import type {
 import { shouldUseAssetsSeedData } from '@shared/runtimeSwitches'
 import {
   assetSecretNeedsEncryption,
+  assetSecretUsesSafeStorage,
   configureAssetCredentialRuntime,
   decryptAssetSecret,
   encryptAssetSecretForStorage,
+  type AssetCredentialStorageBackend,
+  type AssetSafeStorageLike,
   type AssetSecret
 } from './assetsCredentialRuntime'
 import {
@@ -80,6 +83,8 @@ export type AssetStoreRuntimeConfig = {
   useSeedData?: boolean
   forceFallbackStore?: boolean
   sqliteFactory?: new (path: string) => SqliteDatabase
+  credentialStorageBackend?: AssetCredentialStorageBackend
+  safeStorage?: AssetSafeStorageLike | null
 }
 
 export type AssetStore = {
@@ -115,6 +120,7 @@ const defaultAssetCredentialKeyPath = () => {
 
 type AssetRuntimeState = Required<Pick<AssetStoreRuntimeConfig, 'databasePath' | 'credentialKeyPath' | 'useSeedData' | 'forceFallbackStore'>> & {
   sqliteFactory?: new (path: string) => SqliteDatabase
+  credentialStorageBackend?: AssetCredentialStorageBackend
 }
 
 let runtimeConfig: AssetRuntimeState = {
@@ -131,13 +137,21 @@ export const configureAssetStoreRuntime = (config: AssetStoreRuntimeConfig = {})
     credentialKeyPath: config.credentialKeyPath ? (isAbsolute(config.credentialKeyPath) ? config.credentialKeyPath : resolve(config.credentialKeyPath)) : defaultAssetCredentialKeyPath(),
     useSeedData: config.useSeedData ?? defaultAssetSeedMode(),
     forceFallbackStore: Boolean(config.forceFallbackStore),
+    ...(config.credentialStorageBackend ? { credentialStorageBackend: config.credentialStorageBackend } : {}),
     ...(config.sqliteFactory ? { sqliteFactory: config.sqliteFactory } : {})
   }
   assetStore = null
-  configureAssetCredentialRuntime({ credentialKeyPath: runtimeConfig.credentialKeyPath })
+  configureAssetCredentialRuntime({
+    credentialKeyPath: runtimeConfig.credentialKeyPath,
+    storageBackend: runtimeConfig.credentialStorageBackend,
+    ...(Object.prototype.hasOwnProperty.call(config, 'safeStorage') ? { safeStorage: config.safeStorage } : {})
+  })
 }
 
-configureAssetCredentialRuntime({ credentialKeyPath: runtimeConfig.credentialKeyPath })
+configureAssetCredentialRuntime({
+  credentialKeyPath: runtimeConfig.credentialKeyPath,
+  storageBackend: runtimeConfig.credentialStorageBackend
+})
 
 const cloneAssetSnapshot = (snapshot: AiopsAssetSnapshot): AiopsAssetSnapshot => ({
   assets: snapshot.assets.map(cloneAsset),
@@ -194,9 +208,12 @@ class FallbackAssetStore {
     const folders = (this.store.get('folders') || []).filter((folder) => !isUnmodifiedSeedFolder(folder) || referencedFolders.has(folder.uuid))
     const referencedKeychains = new Set(assets.map((asset) => asset.keychainId).filter((id): id is string => Boolean(id)))
     const keychainSecrets = this.store.get('keychainSecrets') || {}
-    const keychains = (this.store.get('keychains') || []).filter(
-      (keychain) => !isUnmodifiedSeedKeychain(keychain, decryptAssetSecret(keychainSecrets[keychain.id])) || referencedKeychains.has(keychain.id)
-    )
+    const keychains = (this.store.get('keychains') || []).filter((keychain) => {
+      if (referencedKeychains.has(keychain.id)) return true
+      const secret = keychainSecrets[keychain.id]
+      if (assetSecretUsesSafeStorage(secret)) return true
+      return !isUnmodifiedSeedKeychain(keychain, decryptAssetSecret(secret))
+    })
     const keychainIds = new Set(keychains.map((keychain) => keychain.id))
     const nextKeychainSecrets = Object.fromEntries(Object.entries(keychainSecrets).filter(([keychainId]) => keychainIds.has(keychainId)))
     this.store.set('assets', assets)
@@ -211,7 +228,7 @@ class FallbackAssetStore {
     const secrets = this.store.get('secrets') || {}
     const assets = withLocalShellAsset(this.store.get('assets') || [])
     this.snapshotCache = {
-      assets: assets.map((asset) => sanitizeAsset(asset, decryptAssetSecret(secrets[asset.id]))),
+      assets: assets.map((asset) => sanitizeAsset(asset, secrets[asset.id])),
       folders: (this.store.get('folders') || []).map(cloneFolder)
     }
     return cloneAssetSnapshot(this.snapshotCache)
@@ -235,7 +252,7 @@ class FallbackAssetStore {
 
   listKeychains(): AiopsKeychainRecord[] {
     const secrets = this.store.get('keychainSecrets') || {}
-    return (this.store.get('keychains') || []).map((keychain) => sanitizeKeychain(keychain, decryptAssetSecret(secrets[keychain.id])))
+    return (this.store.get('keychains') || []).map((keychain) => sanitizeKeychain(keychain, secrets[keychain.id]))
   }
 
   getKeychain(id: string): AiopsKeychainRecord | null {
@@ -455,7 +472,7 @@ class SqliteAssetStore {
 
       const referencedKeychains = new Set(assetsToKeep.map(({ asset }) => asset.keychainId).filter((id): id is string => Boolean(id)))
       for (const { keychain, secret } of this.rawKeychains()) {
-        if (isUnmodifiedSeedKeychain(keychain, decryptAssetSecret(secret)) && !referencedKeychains.has(keychain.id)) {
+        if (!assetSecretUsesSafeStorage(secret) && isUnmodifiedSeedKeychain(keychain, decryptAssetSecret(secret)) && !referencedKeychains.has(keychain.id)) {
           this.db.prepare('DELETE FROM asset_keychains WHERE id = ?').run(keychain.id)
         }
       }
@@ -482,7 +499,7 @@ class SqliteAssetStore {
     const rawAssets = withLocalShellAsset(rows.map(({ asset }) => asset))
     const secrets = new Map(rows.map(({ asset, secret }) => [asset.id, secret]))
     this.snapshotCache = {
-      assets: rawAssets.map((asset) => sanitizeAsset(asset, decryptAssetSecret(secrets.get(asset.id)))),
+      assets: rawAssets.map((asset) => sanitizeAsset(asset, secrets.get(asset.id))),
       folders: this.db
         .prepare("SELECT data FROM asset_folders ORDER BY json_extract(data, '$.name') ASC")
         .all()
@@ -522,7 +539,7 @@ class SqliteAssetStore {
   }
 
   listKeychains(): AiopsKeychainRecord[] {
-    return this.rawKeychains().map(({ keychain, secret }) => sanitizeKeychain(keychain, decryptAssetSecret(secret)))
+    return this.rawKeychains().map(({ keychain, secret }) => sanitizeKeychain(keychain, secret))
   }
 
   getKeychain(id: string): AiopsKeychainRecord | null {

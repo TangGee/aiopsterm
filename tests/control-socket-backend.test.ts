@@ -1,6 +1,6 @@
 import { createConnection } from 'net'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -1116,6 +1116,7 @@ describe('control socket backend', () => {
     const validPath = join(dir, 'valid.txt')
     const missingPath = join(dir, 'missing.txt')
     await writeFile(validPath, 'valid\n', 'utf8')
+    const canonicalValidPath = await realpath(validPath)
     try {
       await expect(backend.__testing.handleControlRequest({
         method: 'file.editor.open',
@@ -1125,7 +1126,7 @@ describe('control socket backend', () => {
         errorCode: 'LOCAL_EDITOR_FILE_OPEN_PARTIAL',
         data: expect.objectContaining({
           opened: true,
-          openedPaths: [validPath],
+          openedPaths: [canonicalValidPath],
           failures: [
             expect.objectContaining({
               path: missingPath,
@@ -1137,7 +1138,7 @@ describe('control socket backend', () => {
       expect(mockWindow.requests).toEqual([
         expect.objectContaining({
           method: 'file.editor.open',
-          params: expect.objectContaining({ paths: [validPath] })
+          params: expect.objectContaining({ paths: [canonicalValidPath] })
         })
       ])
     } finally {

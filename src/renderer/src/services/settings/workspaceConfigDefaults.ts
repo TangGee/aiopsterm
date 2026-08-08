@@ -126,12 +126,12 @@ export const defaultConfig: UserConfig = {
   },
   terminal: {
     terminalType: 'xterm-256color',
-    fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
+    fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
     fontSize: 12,
     scrollBack: 1000,
     cursorStyle: 'block',
     cursorBlink: true,
-    lineHeight: 1,
+    lineHeight: 1.2,
     pinchZoomStatus: true,
     showCloseButton: true,
     sshAgentsStatus: false,
@@ -375,8 +375,9 @@ export const rightMouseEventActions: TerminalSettings['rightMouseEvent'][] = ['n
 export const sshProxyTypes: SshProxyType[] = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5', 'TCP']
 export const standardProxyTypes: Array<Exclude<SshProxyType, 'TCP'>> = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5']
 
-export const linuxReadableTerminalFontFamily = '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace'
+export const crossPlatformTerminalFontFamily = '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace'
 export const legacyTerminalFontFamilies = new Set([
+  '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
   'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
   'Monaco, "Courier New", Consolas, Courier, monospace',
   '"MesloLGS NF", "Courier New", Courier, monospace',

@@ -1477,6 +1477,15 @@ describe('ssh terminal backend runtime', () => {
     ])
     expect(connectEvents.exit).toEqual([{ event: connectEvents.lifecycle[2], code: 1 }])
     expect(connectEvents.data).toEqual([])
+    expect(connectFailureSsh.clients[0].endCalls).toBe(1)
+    expect(() =>
+      connectFailureSsh.clients[0].emit(
+        'error',
+        Object.assign(new Error('connect ETIMEDOUT 10.71.0.8:22'), { code: 'ETIMEDOUT' })
+      )
+    ).not.toThrow()
+    expect(connectEvents.lifecycle).toHaveLength(3)
+    expect(connectFailureSsh.clients[0].endCalls).toBe(1)
   })
 
   it('reports ssh authentication failures with actionable diagnostics', async () => {

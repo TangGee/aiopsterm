@@ -62,6 +62,13 @@ if (!/^codex-cli\s+\S+/.test(version)) {
   throw new Error(`Codex runtime --version returned an unexpected value: ${version}`)
 }
 
+const flatMcpCompatibilityMarker = Buffer.from('AIOPSTERM_CODEX_FLAT_MCP_TOOLS')
+if (!readFileSync(binary).includes(flatMcpCompatibilityMarker)) {
+  throw new Error(
+    'Codex runtime is missing aiopsterm flat MCP tool compatibility. Build it from the bundled codex/ source instead of using an unpatched upstream binary.'
+  )
+}
+
 if (process.platform === 'linux') {
   const lddResult = spawnSync('ldd', [binary], { encoding: 'utf8' })
   const ldd = `${lddResult.stdout || ''}${lddResult.stderr || ''}`
