@@ -43,7 +43,7 @@ export const platformSocketPath = (
   const directory = options.directory || cleanNamespace
   const socketName = `${cleanNamespace}${options.stable ? '' : `-${pid}`}.sock`
   const preferredPath = posix.join(userDataPath, directory, socketName)
-  if (platform !== 'darwin' || Buffer.byteLength(preferredPath) <= 103) return preferredPath
+  if (Buffer.byteLength(preferredPath) <= 103) return preferredPath
 
   const uid = Number.isFinite(options.uid)
     ? Math.floor(Number(options.uid))

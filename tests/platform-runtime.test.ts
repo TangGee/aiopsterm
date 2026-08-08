@@ -52,6 +52,11 @@ describe('platform runtime helpers', () => {
       { platform: 'darwin', pid: 80015, uid: 501, directory: 'agent-sessions' }
     )).toBe('/tmp/aiopsterm-501/aiopsterm-agent-sessions-80015.sock')
     expect(platformSocketPath(
+      '/tmp/aiopsterm-e2e-quick-architecture-baseline-with-a-profile-name-that-exceeds-the-unix-socket-limit',
+      'aiopsterm-agent-sessions',
+      { platform: 'linux', pid: 80016, uid: 1000, directory: 'agent-sessions' }
+    )).toBe('/tmp/aiopsterm-1000/aiopsterm-agent-sessions-80016.sock')
+    expect(platformSocketPath(
       '/Users/tangyumin/Library/Application Support/aiopsterm/profiles/primary-profile-with-long-name',
       'aiopsterm-external-codex',
       { platform: 'darwin', uid: 501, directory: 'external-codex-mcp', stable: true }

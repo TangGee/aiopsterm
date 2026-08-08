@@ -1051,6 +1051,23 @@ const runTerminalRegressionProbes = async (
     const styledRun = line?.cells?.find((run) => run.text.includes(marker) || marker.includes(run.text.trim()))
     return styledRun?.fg || ''
   }
+  const waitForStyledForeground = async (
+    terminal: ThreadedTerminalHost,
+    marker: string,
+    previousForeground = '',
+    timeoutMs = 3000
+  ) => {
+    const deadline = nowMs() + timeoutMs
+    let foreground = ''
+    while (nowMs() < deadline) {
+      foreground = styledForegroundForMarker(terminal, marker)
+      if (foreground && foreground !== previousForeground) return foreground
+      await new Promise((resolve) => window.setTimeout(resolve, 50))
+    }
+    throw new Error(
+      `Timed out waiting for ANSI marker foreground change. marker=${marker} previous=${previousForeground || '(empty)'} current=${foreground || '(empty)'}`
+    )
+  }
 
   const contentFreshness = await runRegressionProbe(async () => {
     const candidate = await dedicatedProbeCandidate()
@@ -1091,12 +1108,10 @@ const runTerminalRegressionProbes = async (
     const marker = `W${Date.now().toString(36).slice(-5)}`
     await candidate.terminal.writeAndMeasurePaint(`\r\n\x1b[31m${marker}\x1b[0m`, 3000, { settlePendingFrame: true })
     await waitForScreenText(candidate.terminal, marker)
-    const firstFg = styledForegroundForMarker(candidate.terminal, marker)
+    const firstFg = await waitForStyledForeground(candidate.terminal, marker)
     const frame = await candidate.terminal.writeAndMeasurePaint(`\r\x1b[32m${marker}\x1b[0m`, 3000, { settlePendingFrame: true })
     await waitForScreenText(candidate.terminal, marker)
-    const secondFg = styledForegroundForMarker(candidate.terminal, marker)
-    if (!firstFg || !secondFg) throw new Error(`Styled run was not captured for ANSI marker. first=${firstFg || '(empty)'} second=${secondFg || '(empty)'}`)
-    if (firstFg === secondFg) throw new Error(`ANSI style did not change for same-text repaint: ${firstFg}`)
+    const secondFg = await waitForStyledForeground(candidate.terminal, marker, firstFg)
     if (frame.paintedRows <= 0) throw new Error('Same-text ANSI repaint did not paint any row.')
     return {
       panelId: candidate.panel.id,
