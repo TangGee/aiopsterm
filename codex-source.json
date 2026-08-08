@@ -1,5 +1,5 @@
 {
-  "repository": "https://gitee.com/tanggee2/aiopsterm-codex.git",
+  "repository": "git@gitee.com:tanggee2/aiopsterm-codex.git",
   "ref": "main",
   "commit": "4da00251b7dce84e7f0c399d7ba2fa5543729373"
 }
