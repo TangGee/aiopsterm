@@ -1200,7 +1200,7 @@ describe('ssh terminal backend runtime', () => {
         'ControlMaster=auto',
         'ControlPersist=yes',
         'HostKeyAlgorithms=+ssh-rsa',
-        'PubkeyAcceptedAlgorithms=+ssh-rsa',
+        'PubkeyAcceptedKeyTypes=+ssh-rsa',
         '-tt',
         '-p',
         '2222',

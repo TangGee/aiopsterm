@@ -53,6 +53,25 @@ const listFiles = (target) => {
 
 const portableRelative = (root, target) => relative(root, target).replaceAll('\\', '/')
 
+const compareVersions = (left, right) => {
+  const leftParts = left.split('.').map(Number)
+  const rightParts = right.split('.').map(Number)
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    const difference = (leftParts[index] || 0) - (rightParts[index] || 0)
+    if (difference !== 0) return difference
+  }
+  return 0
+}
+
+const requiredGlibcVersions = (target) => {
+  const output = execFileSync('readelf', ['--version-info', target], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: 32 * 1024 * 1024
+  })
+  return [...new Set([...output.matchAll(/\bGLIBC_(\d+(?:\.\d+)+)\b/g)].map((match) => match[1]))]
+}
+
 const readJson = (target, label) => {
   try {
     return JSON.parse(readFileSync(target, 'utf8'))
@@ -105,6 +124,34 @@ if (platform === 'win32') {
 const missing = requiredFiles.filter((file) => !existsSync(file))
 if (missing.length) {
   throw new Error(`Missing required packaged files for ${platform}:\n${missing.join('\n')}`)
+}
+
+if (platform === 'linux') {
+  const glibcBaseline = '2.31'
+  const nativeBindings = listFiles(join(resourcesDir, 'app.asar.unpacked')).filter((file) => file.endsWith('.node'))
+  const electronElfFiles = listFiles(unpackedDir).filter((file) => /\.so(?:\.\d+)*$/.test(basename(file)))
+  const compatibilityFiles = [
+    appExecutable,
+    join(unpackedDir, 'chrome-sandbox'),
+    join(unpackedDir, 'chrome_crashpad_handler'),
+    clineNode,
+    codexBinary,
+    join(codexPackage, 'codex-resources', 'bwrap'),
+    ...electronElfFiles,
+    ...nativeBindings
+  ].filter((file, index, files) => existsSync(file) && files.indexOf(file) === index)
+  const incompatibleFiles = compatibilityFiles.flatMap((file) => {
+    const versions = requiredGlibcVersions(file)
+    const newest = versions.sort(compareVersions).at(-1)
+    return newest && compareVersions(newest, glibcBaseline) > 0
+      ? [`${portableRelative(unpackedDir, file)} requires GLIBC_${newest}`]
+      : []
+  })
+  if (incompatibleFiles.length) {
+    throw new Error(
+      `Packaged Linux ELF files exceed the Ubuntu 20.04 GLIBC_${glibcBaseline} baseline:\n${incompatibleFiles.join('\n')}`
+    )
+  }
 }
 
 const sqlitePackage = readJson(sqlitePackagePath, 'packaged better-sqlite3 package metadata')

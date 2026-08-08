@@ -30,22 +30,32 @@ configure_musl_toolchain() {
   cc_env_name="CC_${cc_env_name}"
   local musl_cc="${target_triple/-unknown/}-gcc"
   if [[ -n "${!cc_env_name:-}" ]]; then
-    return
-  fi
-  if command -v "${musl_cc}" >/dev/null 2>&1; then
+    :
+  elif command -v "${musl_cc}" >/dev/null 2>&1; then
     export "${cc_env_name}=$(command -v "${musl_cc}")"
-    return
-  fi
-  if command -v musl-gcc >/dev/null 2>&1; then
+  elif command -v musl-gcc >/dev/null 2>&1; then
     export "${cc_env_name}=$(command -v musl-gcc)"
-    return
-  fi
-  cat >&2 <<EOF
+  else
+    cat >&2 <<EOF
 [aiopsterm] missing musl C compiler for ${target_triple}.
 [aiopsterm] Install musl-tools, or set ${cc_env_name} to a compatible musl gcc wrapper.
 [aiopsterm] Ubuntu/Debian: sudo apt-get install ca-certificates curl musl-tools pkg-config libcap-dev g++ clang libc++-dev libc++abi-dev lld xz-utils
 EOF
-  exit 1
+    exit 1
+  fi
+
+  export PKG_CONFIG_ALLOW_CROSS="${PKG_CONFIG_ALLOW_CROSS:-1}"
+  local libcap_prefix
+  libcap_prefix="$("${APP_ROOT}/scripts/build-musl-libcap.sh" "${target_triple}")"
+  export PKG_CONFIG_PATH="${libcap_prefix}/lib/pkgconfig${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
+
+  if command -v dpkg-architecture >/dev/null 2>&1; then
+    local multiarch cflags_env_name cflags_value
+    multiarch="$(dpkg-architecture -qDEB_HOST_MULTIARCH)"
+    cflags_env_name="CFLAGS_${target_triple//-/_}"
+    cflags_value="${!cflags_env_name:-}"
+    export "${cflags_env_name}=${cflags_value} -idirafter/usr/include -idirafter/usr/include/${multiarch}"
+  fi
 }
 
 codex_builder_args=(

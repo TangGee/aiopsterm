@@ -20,7 +20,7 @@ Usage: scripts/build-linux.sh [options]
 Build and verify the Linux AppImage and deb packages on a native Linux host.
 
 Options:
-  --china-mirror       Use process-local npm, Electron, and Rust mirrors.
+  --china-mirror       Use process-local Node, npm, Electron, Rust, Cargo, and GitHub mirrors.
   --npm-registry URL   Override the process-local npm registry.
   --skip-setup         Do not install missing system prerequisites.
   --skip-dependencies  Reuse the existing node_modules directory.
@@ -93,20 +93,51 @@ configure_sources() {
   if ((china_mirror)); then
     export npm_config_registry='https://registry.npmmirror.com/'
     export npm_config_disturl='https://npmmirror.com/mirrors/node'
+    export NVM_NODEJS_ORG_MIRROR='https://npmmirror.com/mirrors/node'
+    export NVM_SOURCE='https://gitee.com/mirrors/nvm.git'
+    export AIOPSTERM_NVM_INSTALL_URL='https://gitee.com/mirrors/nvm/raw/v0.40.3/install.sh'
     export ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'
     export ELECTRON_BUILDER_BINARIES_MIRROR='https://npmmirror.com/mirrors/electron-builder-binaries/'
     export npm_config_electron_mirror="${ELECTRON_MIRROR}"
     export npm_config_electron_builder_binaries_mirror="${ELECTRON_BUILDER_BINARIES_MIRROR}"
-    export AIOPSTERM_ELECTRON_HEADERS_URL='https://npmmirror.com/mirrors/electron/'
+    # npmmirror mirrors Electron binaries but not the node-v*-headers archives
+    # consumed by node-gyp. Keep the dedicated headers endpoint on Electron's CDN.
+    export AIOPSTERM_ELECTRON_HEADERS_URL='https://artifacts.electronjs.org/headers/dist'
     export RUSTUP_DIST_SERVER='https://rsproxy.cn'
     export RUSTUP_UPDATE_ROOT='https://rsproxy.cn/rustup'
+    export AIOPSTERM_RUSTUP_INSTALL_URL='https://rsproxy.cn/rustup-init.sh'
+    export AIOPSTERM_GITHUB_MIRROR="${AIOPSTERM_GITHUB_MIRROR:-https://ghproxy.net/https://github.com/}"
+    export CARGO_REGISTRIES_CRATES_IO_INDEX='sparse+https://rsproxy.cn/index/'
+    export CARGO_REGISTRIES_CRATES_IO_PROTOCOL='sparse'
+    export CARGO_NET_GIT_FETCH_WITH_CLI='true'
   else
     export npm_config_registry='https://registry.npmjs.org/'
     export npm_config_disturl='https://nodejs.org/dist'
+    export AIOPSTERM_NVM_INSTALL_URL='https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh'
     export AIOPSTERM_ELECTRON_HEADERS_URL='https://artifacts.electronjs.org/headers/dist'
+    export AIOPSTERM_RUSTUP_INSTALL_URL='https://sh.rustup.rs'
   fi
   if [[ -n "${npm_registry}" ]]; then
     export npm_config_registry="${npm_registry}"
+  fi
+}
+
+configure_git_mirror() {
+  ((china_mirror)) || return 0
+  export AIOPSTERM_REAL_GIT
+  AIOPSTERM_REAL_GIT="$(command -v git)"
+  export PATH="${APP_ROOT}/scripts/china-mirror-bin:${PATH}"
+}
+
+configure_build_resources() {
+  [[ -z "${CARGO_BUILD_JOBS:-}" ]] || return 0
+  [[ -r /proc/meminfo ]] || return 0
+
+  local mem_total_kib
+  mem_total_kib="$(awk '/^MemTotal:/ { print $2; exit }' /proc/meminfo)"
+  if [[ "${mem_total_kib}" =~ ^[0-9]+$ ]] && ((mem_total_kib < 12 * 1024 * 1024)); then
+    export CARGO_BUILD_JOBS=2
+    echo '[aiopsterm] low-memory host detected; limiting Cargo to 2 parallel jobs'
   fi
 }
 
@@ -157,7 +188,7 @@ ensure_node() {
   fi
   if ! command_exists nvm; then
     echo '[aiopsterm] installing nvm because Node.js 20+ is not available'
-    curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+    curl --proto '=https' --tlsv1.2 -sSfL "${AIOPSTERM_NVM_INSTALL_URL}" | bash
     load_nvm
   fi
   command_exists nvm || { echo '[aiopsterm] nvm installation failed; install Node.js 22+ manually.' >&2; return 1; }
@@ -169,8 +200,8 @@ ensure_node() {
 
 ensure_rustup() {
   if ! command_exists rustup; then
-    echo '[aiopsterm] rustup is missing; installing it from the official rustup endpoint'
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+    echo '[aiopsterm] rustup is missing; installing it from the configured rustup endpoint'
+    curl --proto '=https' --tlsv1.2 -sSfL "${AIOPSTERM_RUSTUP_INSTALL_URL}" | sh -s -- -y --profile minimal
     export PATH="${HOME}/.cargo/bin:${PATH}"
   fi
   command_exists rustup || { echo '[aiopsterm] rustup is still unavailable after installation.' >&2; return 1; }
@@ -205,6 +236,8 @@ run_npm() {
 configure_sources
 cd "${APP_ROOT}"
 ensure_prerequisites
+configure_git_mirror
+configure_build_resources
 if ((setup_only)); then
   echo '[aiopsterm] Linux prerequisites are ready.'
   exit 0
