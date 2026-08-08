@@ -7,6 +7,10 @@ import {
   threadedTerminalDefaultWorkerCount,
   threadedTerminalPriorityFor
 } from '@/services/terminal/threadedTerminalRuntime'
+import { DEFAULT_TERMINAL_PADDING_HORIZONTAL, DEFAULT_TERMINAL_PADDING_VERTICAL } from '@shared/terminalTypography'
+
+const terminalPaddingX = DEFAULT_TERMINAL_PADDING_HORIZONTAL
+const terminalPaddingY = DEFAULT_TERMINAL_PADDING_VERTICAL
 
 const logs: Array<{ level: string; event: string; fields?: Record<string, unknown> }> = []
 
@@ -374,21 +378,21 @@ describe('threadedTerminalRuntime', () => {
     const attachMessage = messages.render.filter((message: any) => message.type === 'attach').at(-1) as any
 
     expect(createMessage.options).toEqual(expect.objectContaining({
-      cols: 21,
-      rows: 10
+      cols: 19,
+      rows: 9
     }))
     expect(attachMessage.options.geometry).toEqual(expect.objectContaining({
       canvasWidth: 170,
       canvasHeight: 160,
-      cols: 21,
-      rows: 10,
+      cols: 19,
+      rows: 9,
       cellWidth: 8,
       cellHeight: 15,
       baseline: 11,
-      paddingLeft: 0,
-      paddingRight: 2,
-      paddingTop: 0,
-      paddingBottom: 10
+      paddingLeft: 8,
+      paddingRight: 10,
+      paddingTop: 6,
+      paddingBottom: 19
     }))
     expect(attachMessage.options.geometry.cols).toBe(createMessage.options.cols)
     expect(attachMessage.options.geometry.rows).toBe(createMessage.options.rows)
@@ -572,10 +576,10 @@ describe('threadedTerminalRuntime', () => {
     host.fit()
     const afterStable = await workerMessages()
     expect(afterStable.core.slice(afterTiny.core.length)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'resize', terminalId: 'panel-1', cols: 31, rows: 10 })
+      expect.objectContaining({ type: 'resize', terminalId: 'panel-1', cols: 29, rows: 9 })
     ]))
     expect(afterStable.render.slice(afterTiny.render.length)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'resize', terminalId: 'panel-1', geometry: expect.objectContaining({ canvasWidth: 250, cols: 31, rows: 10 }) })
+      expect.objectContaining({ type: 'resize', terminalId: 'panel-1', geometry: expect.objectContaining({ canvasWidth: 250, cols: 29, rows: 9 }) })
     ]))
     host.dispose()
   })
@@ -653,9 +657,9 @@ describe('threadedTerminalRuntime', () => {
       visible: true,
       priority: 'active'
     })
-    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 0, clientY: 0 }))
-    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, clientX: 64, clientY: 0 }))
-    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 64, clientY: 0 }))
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: terminalPaddingX, clientY: terminalPaddingY }))
+    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, clientX: terminalPaddingX + 64, clientY: terminalPaddingY }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: terminalPaddingX + 64, clientY: terminalPaddingY }))
 
     const beforeCopy = await workerMessages()
     element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'C', ctrlKey: true, shiftKey: true }))
@@ -754,9 +758,9 @@ describe('threadedTerminalRuntime', () => {
       visible: true,
       priority: 'active'
     })
-    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 0, clientY: 0 }))
-    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, clientX: 64, clientY: 0 }))
-    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 64, clientY: 0 }))
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: terminalPaddingX, clientY: terminalPaddingY }))
+    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, clientX: terminalPaddingX + 64, clientY: terminalPaddingY }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: terminalPaddingX + 64, clientY: terminalPaddingY }))
 
     const setData = vi.fn()
     const event = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent
@@ -1100,9 +1104,9 @@ describe('threadedTerminalRuntime', () => {
       priority: 'active'
     })
 
-    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 0, clientY: 0 }))
-    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, clientX: 40, clientY: 0 }))
-    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 40, clientY: 0 }))
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: terminalPaddingX, clientY: terminalPaddingY }))
+    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, clientX: terminalPaddingX + 40, clientY: terminalPaddingY }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: terminalPaddingX + 40, clientY: terminalPaddingY }))
 
     expect(host.hasSelection()).toBe(true)
     expect(host.getSelection()).toBe('alpha')
@@ -1141,7 +1145,7 @@ describe('threadedTerminalRuntime', () => {
       })
 
       const before = await workerMessages()
-      element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, buttons: 1, clientX: 80, clientY: 75 }))
+      element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, buttons: 1, clientX: terminalPaddingX + 80, clientY: terminalPaddingY + 75 }))
       window.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, buttons: 1, clientX: 0, clientY: -10 }))
       vi.advanceTimersByTime(85)
 
@@ -1193,7 +1197,7 @@ describe('threadedTerminalRuntime', () => {
       priority: 'active'
     })
 
-    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 12 * 8, clientY: 2 }))
+    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: terminalPaddingX + 12 * 8, clientY: terminalPaddingY + 2 }))
     expect(element.style.cursor).toBe('pointer')
     expect(element.querySelectorAll('.threaded-terminal-link-underline').length).toBe(1)
 
@@ -1237,8 +1241,8 @@ describe('threadedTerminalRuntime', () => {
     })
 
     const beforeMouse = await workerMessages()
-    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 16, clientY: 30 }))
-    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 16, clientY: 30 }))
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: terminalPaddingX + 16, clientY: terminalPaddingY + 30 }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: terminalPaddingX + 16, clientY: terminalPaddingY + 30 }))
     const afterMouse = await workerMessages()
     expect(afterMouse.core.slice(beforeMouse.core.length)).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -1254,9 +1258,9 @@ describe('threadedTerminalRuntime', () => {
     ]))
     expect(host.hasSelection()).toBe(false)
 
-    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, shiftKey: true, clientX: 0, clientY: 0 }))
-    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, shiftKey: true, clientX: 24, clientY: 0 }))
-    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, shiftKey: true, clientX: 24, clientY: 0 }))
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, shiftKey: true, clientX: terminalPaddingX, clientY: terminalPaddingY }))
+    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, shiftKey: true, clientX: terminalPaddingX + 24, clientY: terminalPaddingY }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, shiftKey: true, clientX: terminalPaddingX + 24, clientY: terminalPaddingY }))
     expect(host.getSelection()).toBe('vim')
     host.dispose()
   })
@@ -1335,15 +1339,15 @@ describe('threadedTerminalRuntime', () => {
       priority: 'active'
     })
 
-    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 100, clientY: 50 + 3 * 15 }))
-    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, clientX: 100 + 55, clientY: 50 + 3 * 15 }))
-    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 100 + 55, clientY: 50 + 3 * 15 }))
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 100 + terminalPaddingX, clientY: 50 + terminalPaddingY + 3 * 15 }))
+    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, clientX: 100 + terminalPaddingX + 55, clientY: 50 + terminalPaddingY + 3 * 15 }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 100 + terminalPaddingX + 55, clientY: 50 + terminalPaddingY + 3 * 15 }))
 
     const rect = element.querySelector<HTMLElement>('.threaded-terminal-selection-rect')
     expect(host.getSelection()).toBe('row-3-')
     expect(host.getSelectionPosition()).toEqual({ start: { x: 0, y: 103 }, end: { x: 6, y: 103 } })
     expect(rect?.style.position).toBe('absolute')
-    expect(rect?.style.top).toBe(`${3 * 15}px`)
+    expect(rect?.style.top).toBe(`${terminalPaddingY + 3 * 15}px`)
     host.dispose()
   })
 
@@ -1376,9 +1380,9 @@ describe('threadedTerminalRuntime', () => {
       priority: 'active'
     })
 
-    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 0, clientY: 0 }))
-    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, clientX: 9 * 24, clientY: 15 }))
-    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 9 * 24, clientY: 15 }))
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: terminalPaddingX, clientY: terminalPaddingY }))
+    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, clientX: terminalPaddingX + 9 * 24, clientY: terminalPaddingY + 15 }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: terminalPaddingX + 9 * 24, clientY: terminalPaddingY + 15 }))
 
     expect(host.getSelection()).toBe('./.claude/plugins/marketplaces/claude-plugins-official/plugins/security-guidance/hooks/diffstate.py')
     host.dispose()
@@ -1417,9 +1421,9 @@ describe('threadedTerminalRuntime', () => {
       priority: 'active'
     })
 
-    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 9, clientY: 0 }))
-    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, clientX: 36, clientY: 0 }))
-    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 36, clientY: 0 }))
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: terminalPaddingX + 9, clientY: terminalPaddingY }))
+    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, clientX: terminalPaddingX + 36, clientY: terminalPaddingY }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: terminalPaddingX + 36, clientY: terminalPaddingY }))
 
     expect(host.getSelection()).toBe('你b')
     expect(host.getSelectionPosition()).toEqual({ start: { x: 1, y: 0 }, end: { x: 4, y: 0 } })
@@ -1456,16 +1460,16 @@ describe('threadedTerminalRuntime', () => {
       priority: 'active'
     })
 
-    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, detail: 2, clientX: 9 * 8, clientY: 0 }))
-    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, detail: 2, clientX: 9 * 8, clientY: 0 }))
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, detail: 2, clientX: terminalPaddingX + 9 * 8, clientY: terminalPaddingY }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, detail: 2, clientX: terminalPaddingX + 9 * 8, clientY: terminalPaddingY }))
     expect(host.getSelection()).toBe('command-value')
 
-    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, detail: 2, clientX: 2 * 8, clientY: 15 }))
-    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, detail: 2, clientX: 2 * 8, clientY: 15 }))
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, detail: 2, clientX: terminalPaddingX + 2 * 8, clientY: terminalPaddingY + 15 }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, detail: 2, clientX: terminalPaddingX + 2 * 8, clientY: terminalPaddingY + 15 }))
     expect(host.getSelection()).toBe('tailwrapped-tail')
 
-    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, detail: 3, clientX: 9 * 4, clientY: 15 }))
-    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, detail: 3, clientX: 9 * 4, clientY: 15 }))
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, detail: 3, clientX: terminalPaddingX + 9 * 4, clientY: terminalPaddingY + 15 }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, detail: 3, clientX: terminalPaddingX + 9 * 4, clientY: terminalPaddingY + 15 }))
     expect(host.getSelection()).toBe('first command-value tailwrapped-tail next')
     expect(host.getSelectionPosition()).toEqual({ start: { x: 0, y: 0 }, end: { x: 80, y: 1 } })
     host.dispose()
@@ -1503,7 +1507,7 @@ describe('threadedTerminalRuntime', () => {
     })
 
     const doubleClickAt = (column: number, row = 0) => {
-      const event = { bubbles: true, button: 0, detail: 2, clientX: column * 8 + 1, clientY: row * 15 }
+      const event = { bubbles: true, button: 0, detail: 2, clientX: terminalPaddingX + column * 8 + 1, clientY: terminalPaddingY + row * 15 }
       element.dispatchEvent(new MouseEvent('mousedown', event))
       window.dispatchEvent(new MouseEvent('mouseup', event))
     }
@@ -1561,8 +1565,8 @@ describe('threadedTerminalRuntime', () => {
       priority: 'active'
     })
 
-    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, detail: 3, clientX: 24, clientY: 75 }))
-    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, detail: 3, clientX: 24, clientY: 75 }))
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, detail: 3, clientX: terminalPaddingX + 24, clientY: terminalPaddingY + 75 }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, detail: 3, clientX: terminalPaddingX + 24, clientY: terminalPaddingY + 75 }))
 
     expect(host.getSelectionPosition()).toEqual({ start: { x: 0, y: 96 }, end: { x: 80, y: 108 } })
     host.dispose()
@@ -1603,8 +1607,8 @@ describe('threadedTerminalRuntime', () => {
       priority: 'active'
     })
 
-    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, detail: 2, clientX: 27, clientY: 0 }))
-    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, detail: 2, clientX: 27, clientY: 0 }))
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, detail: 2, clientX: terminalPaddingX + 27, clientY: terminalPaddingY }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, detail: 2, clientX: terminalPaddingX + 27, clientY: terminalPaddingY }))
 
     expect(host.getSelection()).toBe('go你好')
     expect(host.getSelectionPosition()).toEqual({ start: { x: 0, y: 0 }, end: { x: 6, y: 0 } })

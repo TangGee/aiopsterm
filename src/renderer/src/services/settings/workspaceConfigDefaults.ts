@@ -24,6 +24,11 @@ import type { QuickCommandsUserConfig } from '@shared/contracts/quickCommands'
 import type { ShortcutUserConfig, UserRuleConfig } from '@shared/contracts/settingsPreferences'
 import type { SkillUserConfig } from '@shared/contracts/skills'
 import type { UserConfig, WorkspaceIdleCleanupUserConfig } from '@shared/contracts/userConfig'
+import {
+  DEFAULT_TERMINAL_FONT_SIZE,
+  DEFAULT_TERMINAL_LINE_HEIGHT,
+  TERMINAL_FONT_FAMILY
+} from '@shared/terminalTypography'
 import { defaultModelSettingsData } from '@shared/modelSettingsDefaults'
 import { defaultWorkspacePreferencesData } from '@shared/workspacePreferencesDefaults'
 
@@ -126,12 +131,12 @@ export const defaultConfig: UserConfig = {
   },
   terminal: {
     terminalType: 'xterm-256color',
-    fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
-    fontSize: 12,
+    fontFamily: TERMINAL_FONT_FAMILY,
+    fontSize: DEFAULT_TERMINAL_FONT_SIZE,
     scrollBack: 1000,
     cursorStyle: 'block',
     cursorBlink: true,
-    lineHeight: 1.2,
+    lineHeight: DEFAULT_TERMINAL_LINE_HEIGHT,
     pinchZoomStatus: true,
     showCloseButton: true,
     sshAgentsStatus: false,
@@ -375,7 +380,7 @@ export const rightMouseEventActions: TerminalSettings['rightMouseEvent'][] = ['n
 export const sshProxyTypes: SshProxyType[] = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5', 'TCP']
 export const standardProxyTypes: Array<Exclude<SshProxyType, 'TCP'>> = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5']
 
-export const crossPlatformTerminalFontFamily = '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace'
+export const crossPlatformTerminalFontFamily = TERMINAL_FONT_FAMILY
 export const legacyTerminalFontFamilies = new Set([
   '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
   'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',

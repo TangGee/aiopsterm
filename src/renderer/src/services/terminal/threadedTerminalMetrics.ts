@@ -1,4 +1,5 @@
 import type { ThreadedTerminalCellMetrics } from '@/services/terminal/threadedTerminalProtocol'
+import { DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT, TERMINAL_FONT_FAMILY } from '@shared/terminalTypography'
 
 type TextMeasureContext = Pick<CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, 'font' | 'measureText'>
 type TerminalFontSettings = {
@@ -7,24 +8,26 @@ type TerminalFontSettings = {
   lineHeight?: number
 }
 
-const fallbackFontFamily = '"JetBrains Mono", "SFMono-Regular", Consolas, monospace'
-const asciiMeasureChars = Array.from({ length: 0x7f - 0x21 }, (_item, index) => String.fromCharCode(0x21 + index))
+const widthMeasureText = '0'.repeat(32)
+const boundsMeasureText = 'Mg'
+const subpixelPrecision = 64
+const roundSubpixel = (value: number) => Math.round(value * subpixelPrecision) / subpixelPrecision
 
 export const terminalFontSpec = (
   settings: Pick<TerminalFontSettings, 'fontFamily' | 'fontSize'>,
-  _bold = false,
-  _italic = false
+  bold = false,
+  italic = false
 ) => {
-  const weight = '400'
-  const style = ''
-  return `${style}${weight} ${Math.max(8, Number(settings.fontSize || 12))}px ${settings.fontFamily || fallbackFontFamily}`
+  const weight = bold ? '700' : '400'
+  const style = italic ? 'italic ' : ''
+  return `${style}${weight} ${Math.max(8, Number(settings.fontSize || DEFAULT_TERMINAL_FONT_SIZE))}px ${settings.fontFamily || TERMINAL_FONT_FAMILY}`
 }
 
 export const fallbackTerminalCellMetrics = (
   settings: Pick<TerminalFontSettings, 'fontSize' | 'lineHeight'>
 ): ThreadedTerminalCellMetrics => {
-  const fontSize = Number(settings.fontSize || 12)
-  const lineHeight = Number(settings.lineHeight || 1)
+  const fontSize = Number(settings.fontSize || DEFAULT_TERMINAL_FONT_SIZE)
+  const lineHeight = Number(settings.lineHeight || DEFAULT_TERMINAL_LINE_HEIGHT)
   const height = Math.max(10, Math.ceil(fontSize * lineHeight))
   return {
     width: Math.max(4, Math.ceil(fontSize * 0.62)),
@@ -40,10 +43,19 @@ export const measureTerminalCellMetrics = (
   const fallback = fallbackTerminalCellMetrics(settings)
   if (!context) return fallback
   context.font = terminalFontSpec(settings)
-  let width = 0
-  for (const char of asciiMeasureChars) width = Math.max(width, context.measureText(char).width || 0)
+  const singleWidth = context.measureText('0').width
+  const averagedWidth = context.measureText(widthMeasureText).width / widthMeasureText.length
+  const measuredWidth = averagedWidth >= singleWidth * 0.5 ? averagedWidth : singleWidth
+  const bounds = context.measureText(boundsMeasureText)
+  const ascent = Number(bounds.actualBoundingBoxAscent || 0)
+  const descent = Number(bounds.actualBoundingBoxDescent || 0)
+  const glyphHeight = ascent + descent
+  const measuredBaseline = glyphHeight > 0
+    ? Math.max(1, Math.min(fallback.height - 1, (fallback.height - glyphHeight) / 2 + ascent))
+    : fallback.baseline
   return {
     ...fallback,
-    width: Math.max(4, Math.ceil(width || fallback.width))
+    width: Number.isFinite(measuredWidth) && measuredWidth > 0 ? Math.max(4, roundSubpixel(measuredWidth)) : fallback.width,
+    baseline: roundSubpixel(measuredBaseline)
   }
 }

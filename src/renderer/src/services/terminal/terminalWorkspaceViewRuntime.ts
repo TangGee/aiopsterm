@@ -33,6 +33,7 @@ import type { TerminalPanel, TerminalSettings, useWorkspaceStore } from '@/store
 import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import type { TerminalCommandSuggestion } from '@shared/contracts/terminalTools'
 import { shouldUseTerminalDebugLogs, shouldUseThreadedTerminal } from '@shared/runtimeSwitches'
+import { DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT, TERMINAL_FONT_FAMILY } from '@shared/terminalTypography'
 import { findTerminalHttpLinks, isTerminalLinkActivation, terminalColumnAtTextIndex } from '@/services/terminal/terminalLinkRuntime'
 
 type WorkspaceStore = ReturnType<typeof useWorkspaceStore>
@@ -388,7 +389,7 @@ export const createTerminalWorkspaceViewRuntime = ({
     ;(terminal.options as XtermRuntimeOptions).termName = terminalType || 'xterm-256color'
   }
 
-  const defaultTerminalFontSize = () => workspace.terminalSettings.fontSize || 12
+  const defaultTerminalFontSize = () => workspace.terminalSettings.fontSize || DEFAULT_TERMINAL_FONT_SIZE
   const terminalFontSizeForPanel = (panelId: string) => paneFontSizes[panelId] || defaultTerminalFontSize()
   const terminalSurfaceMode = (): TerminalSurfaceMode => (workspace.config?.background?.mode === 'none' ? 'base' : 'withBackground')
   const terminalSettingsSignature = () => {
@@ -1010,9 +1011,9 @@ export const createTerminalWorkspaceViewRuntime = ({
   ) => {
     const preservePaneFontSize = options.preservePaneFontSize ?? true
     setXtermTermName(view.terminal, settings.terminalType)
-    view.terminal.options.fontFamily = settings.fontFamily || '"JetBrains Mono", "SFMono-Regular", Consolas, monospace'
+    view.terminal.options.fontFamily = settings.fontFamily || TERMINAL_FONT_FAMILY
     view.terminal.options.fontSize = preservePaneFontSize && paneFontSizes[panelId] ? paneFontSizes[panelId] : settings.fontSize || defaultTerminalFontSize()
-    view.terminal.options.lineHeight = settings.lineHeight || 1
+    view.terminal.options.lineHeight = settings.lineHeight || DEFAULT_TERMINAL_LINE_HEIGHT
     view.terminal.options.cursorBlink = settings.cursorBlink
     view.terminal.options.cursorStyle = settings.cursorStyle
     view.terminal.options.scrollback = settings.scrollBack
@@ -1179,9 +1180,9 @@ export const createTerminalWorkspaceViewRuntime = ({
         cursorBlink: workspace.terminalSettings.cursorBlink,
         convertEol: true,
         cursorStyle: workspace.terminalSettings.cursorStyle,
-        fontFamily: workspace.terminalSettings.fontFamily || '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
+        fontFamily: workspace.terminalSettings.fontFamily || TERMINAL_FONT_FAMILY,
         fontSize: terminalFontSizeForPanel(panel.id),
-        lineHeight: workspace.terminalSettings.lineHeight || 1,
+        lineHeight: workspace.terminalSettings.lineHeight || DEFAULT_TERMINAL_LINE_HEIGHT,
         minimumContrastRatio: theme.minimumContrastRatio,
         scrollback: workspace.terminalSettings.scrollBack,
         theme

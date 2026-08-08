@@ -5,6 +5,13 @@ import { copyTextToClipboard, readTextFromClipboard } from '@/services/app/clipb
 import { localFilesClient } from '@/services/app/localFilesClient'
 import { shouldUseTerminalDebugLogs, terminalRenderBackend } from '@shared/runtimeSwitches'
 import {
+  DEFAULT_TERMINAL_FONT_SIZE,
+  DEFAULT_TERMINAL_LINE_HEIGHT,
+  DEFAULT_TERMINAL_PADDING_HORIZONTAL,
+  DEFAULT_TERMINAL_PADDING_VERTICAL,
+  TERMINAL_FONT_FAMILY
+} from '@shared/terminalTypography'
+import {
   fallbackTerminalCellMetrics,
   measureTerminalCellMetrics,
   terminalFontSpec
@@ -308,9 +315,9 @@ const nextRequestId = (prefix: string) => `${prefix}-${++requestSeq}-${Math.roun
 
 const normalizeSettings = (settings: ThreadedTerminalSettings): ThreadedTerminalSettings => ({
   terminalType: settings.terminalType || 'xterm-256color',
-  fontFamily: settings.fontFamily || '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
-  fontSize: settings.fontSize || 12,
-  lineHeight: settings.lineHeight || 1,
+  fontFamily: settings.fontFamily || TERMINAL_FONT_FAMILY,
+  fontSize: settings.fontSize || DEFAULT_TERMINAL_FONT_SIZE,
+  lineHeight: settings.lineHeight || DEFAULT_TERMINAL_LINE_HEIGHT,
   cursorBlink: settings.cursorBlink,
   cursorStyle: settings.cursorStyle || 'block',
   scrollBack: settings.scrollBack || 1000
@@ -334,9 +341,9 @@ const renderSettingsFor = (
   settings: ThreadedTerminalSettings,
   theme: ThreadedTerminalTheme,
 ): ThreadedTerminalRenderSettings => ({
-  fontFamily: settings.fontFamily || '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
-  fontSize: settings.fontSize || 12,
-  lineHeight: settings.lineHeight || 1,
+  fontFamily: settings.fontFamily || TERMINAL_FONT_FAMILY,
+  fontSize: settings.fontSize || DEFAULT_TERMINAL_FONT_SIZE,
+  lineHeight: settings.lineHeight || DEFAULT_TERMINAL_LINE_HEIGHT,
   cursorBlink: settings.cursorBlink,
   cursorStyle: settings.cursorStyle || 'block',
   theme: cloneTheme(theme)
@@ -345,9 +352,9 @@ const renderSettingsFor = (
 const settingsSignatureFor = (settings: ThreadedTerminalSettings, theme: ThreadedTerminalTheme) =>
   [
     settings.terminalType || 'xterm-256color',
-    settings.fontFamily || '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
-    settings.fontSize || 12,
-    settings.lineHeight || 1,
+    settings.fontFamily || TERMINAL_FONT_FAMILY,
+    settings.fontSize || DEFAULT_TERMINAL_FONT_SIZE,
+    settings.lineHeight || DEFAULT_TERMINAL_LINE_HEIGHT,
     settings.cursorBlink ? '1' : '0',
     settings.cursorStyle || 'block',
     settings.scrollBack || 1000,
@@ -1041,8 +1048,8 @@ export class ThreadedTerminalHost {
   private hoveredLinkRange: ThreadedTerminalSelectionRange | null = null
   private modeState: ThreadedTerminalModeState = defaultModeState()
   private cellMetrics: ThreadedTerminalCellMetrics = fallbackTerminalCellMetrics({
-    fontSize: 12,
-    lineHeight: 1
+    fontSize: DEFAULT_TERMINAL_FONT_SIZE,
+    lineHeight: DEFAULT_TERMINAL_LINE_HEIGHT
   })
   private frameWaiters = new Set<{
     afterSeq: number
@@ -1194,7 +1201,7 @@ export class ThreadedTerminalHost {
       left: '0',
       top: '0',
       width: '1px',
-      height: `${Math.max(1, Number(this.options.fontSize || 12))}px`,
+      height: `${Math.max(1, Number(this.options.fontSize || DEFAULT_TERMINAL_FONT_SIZE))}px`,
       opacity: '0',
       border: '0',
       padding: '0',
@@ -1801,8 +1808,10 @@ export class ThreadedTerminalHost {
     const metrics = this.cellMetrics
     const canvasWidth = Math.max(1, width - terminalScrollbarWidthPx)
     const canvasHeight = Math.max(1, height)
-    const cols = Math.max(2, Math.floor(canvasWidth / metrics.width))
-    const rows = Math.max(1, Math.floor(canvasHeight / metrics.height))
+    const gridAvailableWidth = Math.max(1, canvasWidth - DEFAULT_TERMINAL_PADDING_HORIZONTAL * 2)
+    const gridAvailableHeight = Math.max(1, canvasHeight - DEFAULT_TERMINAL_PADDING_VERTICAL * 2)
+    const cols = Math.max(2, Math.floor(gridAvailableWidth / metrics.width))
+    const rows = Math.max(1, Math.floor(gridAvailableHeight / metrics.height))
     const gridWidth = cols * metrics.width
     const gridHeight = rows * metrics.height
     // 几何值未变时复用上一个对象(含 seq):上层的多帧 fit 重试与设置 watch 会反复调用此函数,
@@ -1829,10 +1838,10 @@ export class ThreadedTerminalHost {
       cellWidth: metrics.width,
       cellHeight: metrics.height,
       baseline: metrics.baseline,
-      paddingLeft: 0,
-      paddingRight: Math.max(0, canvasWidth - gridWidth),
-      paddingTop: 0,
-      paddingBottom: Math.max(0, canvasHeight - gridHeight)
+      paddingLeft: DEFAULT_TERMINAL_PADDING_HORIZONTAL,
+      paddingRight: Math.max(DEFAULT_TERMINAL_PADDING_HORIZONTAL, canvasWidth - DEFAULT_TERMINAL_PADDING_HORIZONTAL - gridWidth),
+      paddingTop: DEFAULT_TERMINAL_PADDING_VERTICAL,
+      paddingBottom: Math.max(DEFAULT_TERMINAL_PADDING_VERTICAL, canvasHeight - DEFAULT_TERMINAL_PADDING_VERTICAL - gridHeight)
     }
     this.lastComputedGeometry = geometry
     return geometry
@@ -2902,7 +2911,10 @@ export class ThreadedTerminalHost {
       }
     }, { signal })
     host.addEventListener('wheel', (event) => {
-      const lineHeight = Math.max(1, Number(this.options.fontSize || 12) * Number(this.options.lineHeight || 1))
+      const lineHeight = Math.max(
+        1,
+        Number(this.options.fontSize || DEFAULT_TERMINAL_FONT_SIZE) * Number(this.options.lineHeight || DEFAULT_TERMINAL_LINE_HEIGHT)
+      )
       const deltaRows = event.deltaMode === WheelEvent.DOM_DELTA_LINE
         ? event.deltaY
         : event.deltaMode === WheelEvent.DOM_DELTA_PAGE

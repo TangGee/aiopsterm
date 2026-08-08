@@ -5,13 +5,13 @@ This page controls defaults for new terminal sessions and opened terminal panes.
 ## Terminal Basics
 
 - Terminal Type: Sets xterm `termName` and the `TERM` value for new local shells, SSH shells, and relay shells. It affects capability detection, color support, and full-screen program compatibility more than appearance.
-- Font: Terminal font family. It is visible only when the system has or can match the font.
+- Font: Uses the platform monospace font by default, with SF Mono/Menlo on macOS, Cascadia Mono/Consolas on Windows, and DejaVu/Noto/Liberation Mono on Linux as fallbacks.
 - Ubuntu Terminal theme: Select `Ubuntu Terminal` under General -> Theme to use the Ubuntu/GNOME Terminal-style solid background and ANSI color palette. For the closest text shape, also select `Ubuntu Mono` here when the font is installed on the system.
-- Font Size: Default terminal font size. Pane-local zoom can override it until the pane closes.
+- Font Size: Defaults to `13` on new installations. Pane-local zoom can override it until the pane closes.
 - ScrollBack: Number of history lines kept by the terminal. Higher values keep more output and use more memory.
 - Cursor Style: Block, bar, or underline cursor.
 - Cursor Blink: Enables or disables cursor blinking.
-- Line Height: Terminal line spacing ratio.
+- Line Height: Terminal line spacing ratio, defaulting to `1.3` on new installations.
 
 ## Interaction And SSH
 

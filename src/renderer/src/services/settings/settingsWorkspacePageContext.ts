@@ -7,6 +7,7 @@ import type { I18nKey } from '@/i18n'
 import type { AgentHookInstallerStatus } from '@shared/contracts/agentHooks'
 import type { ExportMcpBridgeStatus, ExportMcpClientStatus } from '@shared/contracts/exportMcp'
 import type { SettingsDocumentationPage } from '@shared/contracts/appRuntime'
+import { LEGACY_DEFAULT_TERMINAL_FONT_FAMILY, TERMINAL_FONT_FAMILY } from '@shared/terminalTypography'
 
 export type SettingsWorkspaceStore = ReturnType<typeof useWorkspaceStore>
 export type SettingsWorkspaceTranslate = (key: I18nKey, params?: Record<string, string | number>) => string
@@ -16,7 +17,8 @@ export type PersistResult = void | boolean | Promise<void | boolean>
 export const createSettingsWorkspacePageContext = (workspace: SettingsWorkspaceStore, t: SettingsWorkspaceTranslate) => {
   const terminalTypes = ['xterm', 'xterm-256color', 'vt100', 'vt102', 'vt220', 'vt320', 'linux', 'scoansi', 'ansi']
   const terminalFonts = [
-    { value: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace', label: 'System Monospace' },
+    { value: TERMINAL_FONT_FAMILY, label: 'System Monospace' },
+    { value: LEGACY_DEFAULT_TERMINAL_FONT_FAMILY, label: 'System Monospace (legacy)' },
     { value: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace', label: 'DejaVu Sans Mono' },
     { value: '"Liberation Mono", "DejaVu Sans Mono", "Noto Sans Mono", monospace', label: 'Liberation Mono' },
     { value: '"Ubuntu Mono", "Ubuntu Sans Mono", "DejaVu Sans Mono", monospace', label: 'Ubuntu Mono' },

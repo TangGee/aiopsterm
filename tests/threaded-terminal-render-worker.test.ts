@@ -400,8 +400,7 @@ describe('threadedTerminalRenderWorker', () => {
     const workingOps = canvas.context.operations.filter((operation) => operation.type === 'fillText' && 'Working'.includes(operation.text || ''))
     expect(workingOps).toHaveLength(7)
     expect(workingOps.every((operation) => operation.fillStyle === '#c86432')).toBe(true)
-    expect(canvas.context.font).toContain('400')
-    expect(canvas.context.font).not.toContain('700')
+    expect(canvas.context.font).toContain('700')
     expect(messages).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'frame', terminalId: 'render-worker-terminal', seq: 2, paintedRows: 1 })]))
   })
 

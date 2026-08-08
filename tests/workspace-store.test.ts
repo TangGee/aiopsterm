@@ -12781,6 +12781,7 @@ describe('workspace store', () => {
       terminal: {
         ...defaultTerminalSettings,
         fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+        fontSize: 12,
         lineHeight: 1
       }
     })
@@ -12788,14 +12789,14 @@ describe('workspace store', () => {
     await store.hydrateConfig()
 
     expect(store.terminalSettings.fontFamily).toBe(
-      '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace'
+      'ui-monospace, "SFMono-Regular", Menlo, Monaco, "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace'
     )
-    expect(store.terminalSettings.lineHeight).toBe(1.2)
+    expect(store.terminalSettings.lineHeight).toBe(1.3)
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         terminal: expect.objectContaining({
-          fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
-          lineHeight: 1.2
+          fontFamily: 'ui-monospace, "SFMono-Regular", Menlo, Monaco, "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
+          lineHeight: 1.3
         })
       })
     )

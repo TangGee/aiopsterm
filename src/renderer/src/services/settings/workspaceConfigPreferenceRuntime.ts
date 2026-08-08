@@ -26,22 +26,40 @@ import {
   type TerminalSettings
 } from './workspaceConfigDefaults'
 import { isRecord, numberInRange, stringFromOptions } from './workspaceConfigPrimitives'
+import {
+  DEFAULT_TERMINAL_FONT_SIZE,
+  DEFAULT_TERMINAL_LINE_HEIGHT,
+  LEGACY_DEFAULT_TERMINAL_FONT_FAMILY,
+  LEGACY_DEFAULT_TERMINAL_FONT_SIZE,
+  LEGACY_DEFAULT_TERMINAL_LINE_HEIGHT
+} from '@shared/terminalTypography'
 
 export const normalizeTerminalConfig = (source?: Partial<TerminalUserConfig>) => {
   const incoming = isRecord(source) ? source : {}
   const incomingFontFamily = typeof incoming.fontFamily === 'string' ? incoming.fontFamily.trim() : ''
-  const migratingLegacyDefaults = legacyTerminalFontFamilies.has(incomingFontFamily)
+  const migratingLegacyTypography =
+    incomingFontFamily === LEGACY_DEFAULT_TERMINAL_FONT_FAMILY &&
+    incoming.fontSize === LEGACY_DEFAULT_TERMINAL_FONT_SIZE &&
+    incoming.lineHeight === LEGACY_DEFAULT_TERMINAL_LINE_HEIGHT
+  const migratingOlderLegacyTypography =
+    legacyTerminalFontFamilies.has(incomingFontFamily) &&
+    incoming.fontSize === LEGACY_DEFAULT_TERMINAL_FONT_SIZE &&
+    incoming.lineHeight === 1
+  const migratingTypography = migratingLegacyTypography || migratingOlderLegacyTypography
   const normalized: TerminalSettings = {
     terminalType: stringFromOptions(incoming.terminalType, terminalTypes, defaultTerminalSettings.terminalType),
-    fontFamily: incomingFontFamily ? (migratingLegacyDefaults ? crossPlatformTerminalFontFamily : incomingFontFamily) : defaultTerminalSettings.fontFamily,
-    fontSize: numberInRange(incoming.fontSize, defaultTerminalSettings.fontSize, 8, 64),
+    fontFamily: incomingFontFamily
+      ? (migratingTypography ? crossPlatformTerminalFontFamily : incomingFontFamily)
+      : defaultTerminalSettings.fontFamily,
+    fontSize: migratingTypography
+      ? DEFAULT_TERMINAL_FONT_SIZE
+      : numberInRange(incoming.fontSize, defaultTerminalSettings.fontSize, 8, 64),
     scrollBack: numberInRange(incoming.scrollBack, defaultTerminalSettings.scrollBack, 1, 100000),
     cursorStyle: stringFromOptions(incoming.cursorStyle, terminalCursorStyles, defaultTerminalSettings.cursorStyle),
     cursorBlink: typeof incoming.cursorBlink === 'boolean' ? incoming.cursorBlink : defaultTerminalSettings.cursorBlink,
-    lineHeight:
-      migratingLegacyDefaults && incoming.lineHeight === 1
-        ? defaultTerminalSettings.lineHeight
-        : numberInRange(incoming.lineHeight, defaultTerminalSettings.lineHeight, 1, 3),
+    lineHeight: migratingTypography
+      ? DEFAULT_TERMINAL_LINE_HEIGHT
+      : numberInRange(incoming.lineHeight, defaultTerminalSettings.lineHeight, 1, 3),
     pinchZoomStatus: typeof incoming.pinchZoomStatus === 'boolean' ? incoming.pinchZoomStatus : defaultTerminalSettings.pinchZoomStatus,
     showCloseButton: typeof incoming.showCloseButton === 'boolean' ? incoming.showCloseButton : defaultTerminalSettings.showCloseButton,
     sshAgentsStatus: typeof incoming.sshAgentsStatus === 'boolean' ? incoming.sshAgentsStatus : defaultTerminalSettings.sshAgentsStatus,

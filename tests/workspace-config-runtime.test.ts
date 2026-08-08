@@ -100,12 +100,12 @@ describe('workspaceConfigRuntime', () => {
     expect(terminal.changed).toBe(true)
     expect(terminal.normalized).toMatchObject({
       terminalType: 'xterm-256color',
-      fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
-      fontSize: 12,
+      fontFamily: 'Monaco, "Courier New", Consolas, Courier, monospace',
+      fontSize: 13,
       scrollBack: 1000,
       cursorStyle: 'block',
       cursorBlink: false,
-      lineHeight: 1.2,
+      lineHeight: 1.3,
       pinchZoomStatus: false,
       showCloseButton: false,
       sshAgentsStatus: true,
@@ -151,6 +151,43 @@ describe('workspaceConfigRuntime', () => {
       expandedGroups: ['recent_connections', 'local_connections'],
       showIpMode: true,
       recentAssetIds: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
+    })
+  })
+
+  it('migrates only the complete previous terminal typography default', () => {
+    const oldFont = '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace'
+    const newFont = 'ui-monospace, "SFMono-Regular", Menlo, Monaco, "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace'
+
+    expect(normalizeTerminalConfig({ fontFamily: oldFont, fontSize: 12, lineHeight: 1.2 }).normalized).toMatchObject({
+      fontFamily: newFont,
+      fontSize: 13,
+      lineHeight: 1.3
+    })
+    expect(normalizeTerminalConfig({ fontFamily: oldFont, fontSize: 14, lineHeight: 1.2 }).normalized).toMatchObject({
+      fontFamily: oldFont,
+      fontSize: 14,
+      lineHeight: 1.2
+    })
+    expect(normalizeTerminalConfig({ fontFamily: oldFont, fontSize: 12, lineHeight: 1.4 }).normalized).toMatchObject({
+      fontFamily: oldFont,
+      fontSize: 12,
+      lineHeight: 1.4
+    })
+    expect(normalizeTerminalConfig({ fontFamily: 'Ubuntu Mono, monospace', fontSize: 12, lineHeight: 1.2 }).normalized).toMatchObject({
+      fontFamily: 'Ubuntu Mono, monospace',
+      fontSize: 12,
+      lineHeight: 1.2
+    })
+    const linuxFont = '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace'
+    expect(normalizeTerminalConfig({ fontFamily: linuxFont, fontSize: 12, lineHeight: 1.2 }).normalized).toMatchObject({
+      fontFamily: linuxFont,
+      fontSize: 12,
+      lineHeight: 1.2
+    })
+    expect(normalizeTerminalConfig({ fontFamily: linuxFont, fontSize: 12, lineHeight: 1 }).normalized).toMatchObject({
+      fontFamily: newFont,
+      fontSize: 13,
+      lineHeight: 1.3
     })
   })
 

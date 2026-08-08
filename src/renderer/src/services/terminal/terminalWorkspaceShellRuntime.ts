@@ -7,6 +7,7 @@ import type { TerminalFocusReason, TerminalView } from '@/services/terminal/term
 import type { UiFocusCause } from '@/services/app/uiFocusCoordinator'
 import { isThreadedTerminalHost } from '@/services/terminal/threadedTerminalRuntime'
 import { managedAssetDisplayName, managedAssetEndpoint } from '@shared/assetDisplayRuntime'
+import { DEFAULT_TERMINAL_FONT_SIZE } from '@shared/terminalTypography'
 import {
   terminalShortcutActionForEvent,
   type TerminalShortcutAction
@@ -540,7 +541,7 @@ export const createTerminalWorkspaceShellRuntime = (
 
   const increaseFont = (panelId = workspace.activePanelId) => updateFontSize(panelId, terminalFontSizeForPanel(panelId) + 1)
   const decreaseFont = (panelId = workspace.activePanelId) => updateFontSize(panelId, terminalFontSizeForPanel(panelId) - 1)
-  const resetFont = (panelId = workspace.activePanelId) => updateFontSize(panelId, workspace.terminalSettings.fontSize || 12)
+  const resetFont = (panelId = workspace.activePanelId) => updateFontSize(panelId, workspace.terminalSettings.fontSize || DEFAULT_TERMINAL_FONT_SIZE)
 
   const increaseFontFromMenu = () => {
     increaseFont(termMenu.panelId || workspace.activePanelId)

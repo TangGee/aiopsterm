@@ -23,6 +23,11 @@ import type { McpConfigFile, McpServerUserConfig, McpToolStatesUserConfig } from
 import type { ShortcutUserConfig, UserRuleConfig } from '@shared/contracts/settingsPreferences'
 import type { SkillUserConfig } from '@shared/contracts/skills'
 import type { UserConfig, WorkspaceIdleCleanupUserConfig } from '@shared/contracts/userConfig'
+import {
+  DEFAULT_TERMINAL_FONT_SIZE,
+  DEFAULT_TERMINAL_LINE_HEIGHT,
+  TERMINAL_FONT_FAMILY
+} from '@shared/terminalTypography'
 
 const defaultWorkspaceIdleCleanup: WorkspaceIdleCleanupUserConfig = {
   enabled: false,
@@ -86,12 +91,12 @@ export const defaultConfig: UserConfig = {
   },
   terminal: {
     terminalType: 'xterm-256color',
-    fontFamily: '"SFMono-Regular", Menlo, Monaco, "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
-    fontSize: 12,
+    fontFamily: TERMINAL_FONT_FAMILY,
+    fontSize: DEFAULT_TERMINAL_FONT_SIZE,
     scrollBack: 1000,
     cursorStyle: 'block',
     cursorBlink: true,
-    lineHeight: 1.2,
+    lineHeight: DEFAULT_TERMINAL_LINE_HEIGHT,
     pinchZoomStatus: true,
     showCloseButton: true,
     sshAgentsStatus: false,

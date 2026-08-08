@@ -32,6 +32,11 @@ import type { TerminalSettings } from '@/services/settings/workspaceConfigRuntim
 import type { RuntimeLogLevel } from '@shared/contracts/appRuntime'
 import type { CodexSessionKillResult, CodexSessionTargetContext } from '@shared/contracts/codexSessions'
 import { shouldUseTerminalDebugLogs } from '@shared/runtimeSwitches'
+import {
+  DEFAULT_TERMINAL_FONT_SIZE,
+  DEFAULT_TERMINAL_LINE_HEIGHT,
+  TERMINAL_FONT_FAMILY
+} from '@shared/terminalTypography'
 
 type XtermRuntimeOptions = XtermTerminal['options'] & { termName?: string; minimumContrastRatio?: number }
 
@@ -801,9 +806,9 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     const terminal = conversation.terminal
     if (!terminal) return
     setXtermTermName(terminal, settings.terminalType)
-    terminal.options.fontFamily = settings.fontFamily || '"JetBrains Mono", "SFMono-Regular", Consolas, monospace'
-    terminal.options.fontSize = settings.fontSize || 12
-    terminal.options.lineHeight = settings.lineHeight || 1
+    terminal.options.fontFamily = settings.fontFamily || TERMINAL_FONT_FAMILY
+    terminal.options.fontSize = settings.fontSize || DEFAULT_TERMINAL_FONT_SIZE
+    terminal.options.lineHeight = settings.lineHeight || DEFAULT_TERMINAL_LINE_HEIGHT
     terminal.options.cursorBlink = settings.cursorBlink
     terminal.options.cursorStyle = settings.cursorStyle
     terminal.options.scrollback = settings.scrollBack
@@ -836,9 +841,9 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
           cursorBlink: settings.cursorBlink,
           convertEol: true,
           cursorStyle: settings.cursorStyle,
-          fontFamily: settings.fontFamily || '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
-          fontSize: settings.fontSize || 12,
-          lineHeight: settings.lineHeight || 1,
+          fontFamily: settings.fontFamily || TERMINAL_FONT_FAMILY,
+          fontSize: settings.fontSize || DEFAULT_TERMINAL_FONT_SIZE,
+          lineHeight: settings.lineHeight || DEFAULT_TERMINAL_LINE_HEIGHT,
           minimumContrastRatio: theme.minimumContrastRatio,
           scrollback: settings.scrollBack,
           theme
