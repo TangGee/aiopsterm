@@ -146,7 +146,7 @@ bash scripts/build-linux.sh --deb-only
 bash scripts/build-linux.sh --setup-only
 ```
 
-The script is Linux-only. It uses the local package manager (`apt`, `dnf`, `yum`, or `pacman`) only when required commands are missing, and keeps mirror settings process-local. `--npm-registry <URL>` overrides only the npm registry. Combine it with `--china-mirror` to keep the mainland China Electron and Rust mirrors while using a custom npm registry such as Huawei Cloud.
+The script is Linux-only. Release artifacts use Ubuntu 20.04 (glibc 2.31) as the Linux build baseline so the AppImage and deb run on Ubuntu 20.04 and newer. Build release artifacts on Ubuntu 20.04; package verification rejects host-built ELF files that require a newer glibc. The script uses the local package manager (`apt`, `dnf`, `yum`, or `pacman`) only when required commands are missing, limits Cargo parallelism on hosts with less than 12 GiB of RAM, and keeps mirror settings process-local. `--npm-registry <URL>` overrides only the npm registry. Combine it with `--china-mirror` to use Gitee/npmmirror for NVM and Node, npmmirror for npm/Electron, rsproxy for rustup/Rust/Cargo, and the configured GitHub proxy. Electron's dedicated headers CDN remains in use because npmmirror does not publish the `node-v*-headers` archives required by `node-gyp`.
 
 Build only the Linux AppImage package:
 

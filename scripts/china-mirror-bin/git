@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+: "${AIOPSTERM_REAL_GIT:?AIOPSTERM_REAL_GIT is required}"
+github_mirror="${AIOPSTERM_GITHUB_MIRROR:-https://ghproxy.net/https://github.com/}"
+
+exec "${AIOPSTERM_REAL_GIT}" \
+  -c "url.${github_mirror}.insteadOf=https://github.com/" \
+  -c "url.${github_mirror}lemenkov/libyuv.insteadOf=https://chromium.googlesource.com/libyuv/libyuv" \
+  "$@"
