@@ -1,4 +1,4 @@
-import { app, BrowserWindow, crashReporter, Notification, shell } from 'electron'
+import { app, BrowserWindow, crashReporter, Notification, shell, systemPreferences } from 'electron'
 import { join } from 'path'
 import Store from 'electron-store'
 import { refreshOrganizationAssets, saveAsset } from './backend/assets/assets'
@@ -44,6 +44,7 @@ import {
 import { createAppBootstrapRuntime } from './appBootstrapRuntime'
 import { registerMainIpcRuntime } from './mainIpcRuntime'
 import { createMainTerminalRuntime } from './terminalRuntime'
+import { configurePlatformInputRuntime } from '@shared/platformInputRuntime'
 import { shouldUseE2eDialogFixtures } from '@shared/runtimeSwitches'
 import { broadcastWindowEvent } from '@shared/windowEvents'
 import type { ControlNotificationRecord } from '@shared/contracts/control'
@@ -60,6 +61,10 @@ if (process.env.AIOPSTERM_USER_DATA_DIR) {
 
 app.setName('aiopsterm')
 app.setAppUserModelId('app.aiopsterm.desktop')
+configurePlatformInputRuntime({
+  platform: process.platform,
+  setUserDefault: (key, type, value) => systemPreferences.setUserDefault(key, type, value)
+})
 
 const store = new Store<{ config: UserConfig }>({
   name: 'aiopsterm-config',
