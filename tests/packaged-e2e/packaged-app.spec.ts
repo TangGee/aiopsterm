@@ -48,7 +48,7 @@ const socketJsonRequest = <T extends Record<string, any> = Record<string, any>>(
     socket.on('error', reject)
   })
 
-test('packaged app starts, opens local terminal, browses local files, and accepts notification control requests', async () => {
+test('packaged app starts, opens interactive local and Codex terminals, browses local files, and accepts notification control requests', async () => {
   const executablePath = resolve(process.env.AIOPSTERM_PACKAGED_APP || defaultExecutablePath())
   const testTempDir = process.platform === 'darwin' ? '/tmp' : tmpdir()
   const userDataDir = join(testTempDir, `aiops-e2e-${Date.now()}`)
@@ -86,26 +86,56 @@ test('packaged app starts, opens local terminal, browses local files, and accept
     const terminalMirror = page.locator('.terminal-output-mirror').first()
     await expect(terminalMirror).toBeVisible()
     const socketPath = process.env.AIOPSTERM_PACKAGED_CONTROL_SOCKET || (await controlSocketPath(userDataDir, app.process().pid || 0))
-    if (process.platform === 'darwin') {
-      const panelId = await page.locator('.terminal-tab.active').getAttribute('data-panel-id')
-      expect(panelId).toBeTruthy()
-      const terminalInput = page.locator('.terminal-pane.active .threaded-terminal-input, .terminal-pane.active .xterm-helper-textarea').first()
-      await terminalInput.focus()
-      await page.keyboard.type(
-        `printf '__AIOPSTERM_COLOR_ENV__=%s|%s|%s|%s\\n' "$TERM" "$COLORTERM" "$CLICOLOR" "$TERM_PROGRAM"`
-      )
-      await page.keyboard.press('Enter')
-      await expect
-        .poll(async () => {
-          const replay = await socketJsonRequest(socketPath, {
-            id: 'packaged-e2e-terminal-color-env',
-            method: 'terminal.replay',
-            params: { surface_id: panelId, tail_lines: 30 }
-          })
-          return String(replay.data?.snapshot_text || '')
+    const panelId = await page.locator('.terminal-tab.active').getAttribute('data-panel-id')
+    expect(panelId).toBeTruthy()
+    await expect
+      .poll(async () => {
+        const listed = await socketJsonRequest(socketPath, {
+          id: 'packaged-e2e-terminal-list',
+          method: 'terminal.list',
+          params: {}
         })
-        .toContain('__AIOPSTERM_COLOR_ENV__=xterm-256color|truecolor|1|aiopsterm')
+        return listed.data?.terminals?.find((terminal: Record<string, unknown>) => terminal.panelId === panelId)?.connected === true
+      })
+      .toBe(true)
+    const terminalInput = page.locator('.terminal-pane.active .threaded-terminal-input, .terminal-pane.active .xterm-helper-textarea').first()
+    await terminalInput.focus()
+    await page.keyboard.type(
+      `printf '__AIOPSTERM_COLOR_ENV__=%s|%s|%s|%s\\n' "$TERM" "$COLORTERM" "$CLICOLOR" "$TERM_PROGRAM"`
+    )
+    await page.keyboard.press('Enter')
+    let terminalOutput = ''
+    await expect
+      .poll(async () => {
+        const replay = await socketJsonRequest(socketPath, {
+          id: 'packaged-e2e-terminal-color-env',
+          method: 'terminal.replay',
+          params: { surface_id: panelId, tail_lines: 30 }
+        })
+        terminalOutput = String(replay.data?.snapshot_text || '')
+        return terminalOutput
+      })
+      .toContain('__AIOPSTERM_COLOR_ENV__=xterm-256color|truecolor|')
+    if (process.platform === 'darwin') {
+      expect(terminalOutput).toContain('__AIOPSTERM_COLOR_ENV__=xterm-256color|truecolor|1|aiopsterm')
     }
+    const embeddedCodex = await page.evaluate(async () => {
+      const api = (window as unknown as {
+        aiops: {
+          createCodexSession: (options: Record<string, unknown>) => Promise<Record<string, any>>
+          killCodexSession: (id: string) => Promise<unknown>
+        }
+      }).aiops
+      const session = await api.createCodexSession({ cols: 80, rows: 24, launch: { mode: 'new' } })
+      await api.killCodexSession(String(session.id))
+      return {
+        binaryPath: session.binaryPath,
+        runtimeKind: session.runtimeKind,
+        lifecycleStage: session.lifecycle?.stage
+      }
+    })
+    expect(embeddedCodex).toEqual(expect.objectContaining({ runtimeKind: 'pty', lifecycleStage: 'ready' }))
+    expect(embeddedCodex.binaryPath).toMatch(/[\\/]resources[\\/]codex[\\/]bin[\\/]codex(?:\.exe)?$/)
 
     await page.locator('button[data-module-key="files"]').click()
     await expect(page.locator('.files-workspace')).toBeVisible()
