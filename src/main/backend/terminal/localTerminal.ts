@@ -238,6 +238,12 @@ export const managedLocalTerminalEnvironment = (id: string, options: TerminalCre
     AIOPSTERM_WORKSPACE_ID: workspaceId,
     AIOPSTERM_MANAGED_TERMINAL: '1'
   }
+  if (getPlatform() === 'darwin') {
+    if (env.COLORTERM === undefined) env.COLORTERM = 'truecolor'
+    if (env.CLICOLOR === undefined) env.CLICOLOR = '1'
+    if (env.LSCOLORS === undefined) env.LSCOLORS = 'GxFxCxDxBxegedabagaced'
+    env.TERM_PROGRAM = 'aiopsterm'
+  }
   if (panelId) {
     env.AIOPSTERM_PANEL_ID = panelId
     env.AIOPSTERM_SURFACE_ID = panelId

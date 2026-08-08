@@ -1673,7 +1673,7 @@ export const ensureAiAgentSessionServer = async ({ userDataPath, emit }: AgentSe
   }
   socketPath = agentSessionSocketPathFor(userDataPath)
   if (process.platform !== 'win32') {
-    await mkdir(join(userDataPath, 'agent-sessions'), { recursive: true })
+    await mkdir(dirname(socketPath), { recursive: true, mode: 0o700 })
     if (existsSync(socketPath)) rmSync(socketPath, { force: true })
   }
   server = createServer((socket) => {

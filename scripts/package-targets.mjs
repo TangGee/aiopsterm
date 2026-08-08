@@ -19,7 +19,7 @@ export const packageTargets = {
     platform: 'darwin',
     buildScript: 'build:mac',
     artifacts: ['dist/aiopsterm-${version}-macos-${arch}.dmg', 'dist/aiopsterm-${version}-macos-${arch}.zip'],
-    unpackedDirs: ['dist/mac']
+    unpackedDirs: ['dist/mac', 'dist/mac-arm64']
   },
   windows: {
     platform: 'win32',

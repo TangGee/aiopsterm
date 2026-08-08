@@ -26,14 +26,15 @@ vi.mock('@/services/app/clipboardRuntime', () => clipboardRuntime)
 vi.mock('@/services/terminal/threadedTerminalCoreWorker?worker', () => ({
   default: class FakeCoreWorker {
     static instances: FakeCoreWorker[] = []
+    static messageSequence = 0
     onmessage: ((event: MessageEvent) => void) | null = null
     onerror: ((event: ErrorEvent) => void) | null = null
-    messages: unknown[] = []
+    messages: Array<{ sequence: number; message: unknown }> = []
     constructor() {
       FakeCoreWorker.instances.push(this)
     }
     postMessage(message: unknown) {
-      this.messages.push(message)
+      this.messages.push({ sequence: ++FakeCoreWorker.messageSequence, message })
       if ((message as { type?: string }).type === 'read-selection') {
         const request = message as { requestId?: string; terminalId?: string }
         this.onmessage?.({
@@ -204,7 +205,10 @@ const workerMessages = async () => {
   const coreModule = await import('@/services/terminal/threadedTerminalCoreWorker?worker')
   const renderModule = await import('@/services/terminal/threadedTerminalRenderWorker?worker')
   return {
-    core: (coreModule.default as any).instances.flatMap((worker: { messages: unknown[] }) => worker.messages),
+    core: (coreModule.default as any).instances
+      .flatMap((worker: { messages: Array<{ sequence: number; message: unknown }> }) => worker.messages)
+      .sort((first: { sequence: number }, second: { sequence: number }) => first.sequence - second.sequence)
+      .map((entry: { message: unknown }) => entry.message),
     render: (renderModule.default as any).instances.flatMap((worker: { messages: unknown[] }) => worker.messages)
   }
 }

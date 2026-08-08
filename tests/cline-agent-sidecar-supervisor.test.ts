@@ -126,9 +126,13 @@ describe('Cline Agent sidecar path resolution', () => {
 })
 
 describe('Cline Agent sidecar supervisor', () => {
-  const createHarness = (onCallback = vi.fn(async () => ({ accepted: true }))) => {
+  const createHarness = (
+    onCallback = vi.fn(async () => ({ accepted: true })),
+    paths: { appPath?: string; userDataPath?: string; isPackaged?: boolean } = {}
+  ) => {
     const child = new FakeSidecarProcess()
-    const appPath = temporaryApp()
+    const appPath = paths.appPath || temporaryApp()
+    const userDataPath = paths.userDataPath || appPath
     const writes: any[] = []
     let inputBuffer = ''
     child.stdin.on('data', (chunk) => {
@@ -160,19 +164,38 @@ describe('Cline Agent sidecar supervisor', () => {
       }
     })
     const onExit = vi.fn()
+    const spawnProcess = vi.fn(() => child as any) as any
     const supervisor = new ClineAgentSidecarSupervisor({
       appPath,
       resourcesPath: appPath,
-      userDataPath: appPath,
-      isPackaged: false,
+      userDataPath,
+      isPackaged: paths.isPackaged === true,
       env: { AIOPSTERM_CLINE_SIDECAR_BIN: '/fake/cline-sidecar' },
-      spawnProcess: vi.fn(() => child as any) as any,
+      spawnProcess,
       onCallback,
       onExit
     })
     queueMicrotask(() => child.sendFrame(readyFrame))
-    return { child, onCallback, onExit, supervisor, writes }
+    return { child, onCallback, onExit, spawnProcess, supervisor, userDataPath, writes }
   }
+
+  it('uses user data as cwd when the packaged app path is an app.asar file', async () => {
+    const root = temporaryApp()
+    const appPath = join(root, 'app.asar')
+    const userDataPath = join(root, 'user-data')
+    writeFileSync(appPath, '')
+    mkdirSync(userDataPath)
+    const harness = createHarness(undefined, { appPath, userDataPath, isPackaged: true })
+
+    await harness.supervisor.ensureStarted()
+
+    expect(harness.spawnProcess).toHaveBeenCalledWith(
+      '/fake/cline-sidecar',
+      [],
+      expect.objectContaining({ cwd: userDataPath })
+    )
+    await harness.supervisor.shutdown()
+  })
 
   it('handshakes, correlates requests, handles callbacks, and shuts down cleanly', async () => {
     const harness = createHarness()

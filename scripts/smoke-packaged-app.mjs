@@ -7,7 +7,9 @@ import { join, resolve } from 'node:path'
 
 const defaultExecutablePath = () => {
   if (process.platform === 'win32') return 'dist/win-unpacked/aiopsterm.exe'
-  if (process.platform === 'darwin') return 'dist/mac/aiopsterm.app/Contents/MacOS/aiopsterm'
+  if (process.platform === 'darwin') {
+    return `dist/${process.arch === 'arm64' ? 'mac-arm64' : 'mac'}/aiopsterm.app/Contents/MacOS/aiopsterm`
+  }
   return 'dist/linux-unpacked/aiopsterm'
 }
 
@@ -23,7 +25,8 @@ if (process.platform === 'linux' && !process.env.DISPLAY && !process.env.AIOPSTE
 }
 
 const executablePath = resolve(process.argv[2] || defaultExecutablePath())
-const userDataDir = join(tmpdir(), `aiopsterm-packaged-smoke-${Date.now()}`)
+const testTempDir = process.platform === 'darwin' ? '/tmp' : tmpdir()
+const userDataDir = join(testTempDir, `aiops-smoke-${Date.now()}`)
 
 if (!existsSync(executablePath)) {
   throw new Error(`Packaged app executable is missing: ${executablePath}`)

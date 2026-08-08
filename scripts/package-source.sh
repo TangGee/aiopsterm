@@ -4,7 +4,6 @@ set -euo pipefail
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 project_root=$(git -C "$script_dir/.." rev-parse --show-toplevel)
-project_parent=$(dirname "$project_root")
 project_name=$(basename "$project_root")
 codex_root="$project_root/codex"
 
@@ -23,49 +22,83 @@ output_dir=$(cd "$output_dir" && pwd)
 archive_path="$output_dir/$archive_name"
 
 temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/${project_name}-source.XXXXXX")
-file_list="$temp_dir/files"
+staging_root="$temp_dir/$project_name"
 archive_list="$temp_dir/archive-files"
 trap 'rm -rf "$temp_dir"' EXIT
 
-append_repository_files() {
-  local repository=$1
-  local archive_prefix=$2
+snapshot_repository() {
+  local source_repository=$1
+  local staged_repository=$2
+  local snapshot_label=$3
+  shift 3
+  local diff_file="$temp_dir/${snapshot_label}-working-tree.patch"
+  local untracked_list="$temp_dir/${snapshot_label}-untracked"
   local path
 
-  while IFS= read -r -d '' path; do
-    if [[ ! -e "$repository/$path" && ! -L "$repository/$path" ]]; then
-      echo "Tracked source file is missing: $repository/$path" >&2
-      exit 1
-    fi
-    printf '%s\0' "$archive_prefix/$path" >> "$file_list"
-  done < <(git -C "$repository" ls-files -z --cached --others --exclude-standard)
-}
+  git -C "$source_repository" diff --binary --full-index HEAD -- "$@" > "$diff_file"
+  if [[ -s "$diff_file" ]]; then
+    git -C "$staged_repository" apply --index "$diff_file"
+  fi
 
-while IFS= read -r -d '' path; do
-  case "$path" in
-    external-reference|external-reference/*|codex|codex/*|control_compat|control_compat/*|release|release/*)
-      continue
-      ;;
-  esac
-  if [[ ! -e "$project_root/$path" && ! -L "$project_root/$path" ]]; then
-    echo "Tracked source file is missing: $project_root/$path" >&2
+  while IFS= read -r -d '' path; do
+    case "$snapshot_label/$path" in
+      root/external-reference|root/external-reference/*|root/codex|root/codex/*|root/control_compat|root/control_compat/*|root/release|root/release/*)
+        continue
+        ;;
+    esac
+    printf '%s\0' "$path" >> "$untracked_list"
+  done < <(git -C "$source_repository" ls-files -z --others --exclude-standard)
+
+  if [[ -s "$untracked_list" ]]; then
+    tar -C "$source_repository" --null --files-from="$untracked_list" -cf - | tar -C "$staged_repository" -xf -
+    git -C "$staged_repository" add --all
+  fi
+
+  if ! git -C "$staged_repository" diff --cached --quiet; then
+    git \
+      -C "$staged_repository" \
+      -c user.name='aiopsterm source packager' \
+      -c user.email='source-packager@aiopsterm.invalid' \
+      -c commit.gpgsign=false \
+      commit --quiet -m "Source snapshot for $snapshot_label packaging"
+  fi
+
+  if [[ -n "$(git -C "$staged_repository" status --porcelain)" ]]; then
+    echo "Staged source repository is not clean: $staged_repository" >&2
     exit 1
   fi
-  printf '%s\0' "$project_name/$path" >> "$file_list"
-done < <(git -C "$project_root" ls-files -z --cached --others --exclude-standard)
+}
 
-append_repository_files "$codex_root" "$project_name/codex"
+git clone --quiet --no-hardlinks --no-recurse-submodules "$project_root" "$staging_root"
+if git -C "$staging_root" ls-files --error-unmatch external-reference >/dev/null 2>&1; then
+  git -C "$staging_root" rm --cached --quiet external-reference
+fi
+if [[ -d "$staging_root/external-reference" ]]; then
+  rmdir "$staging_root/external-reference"
+fi
+snapshot_repository \
+  "$project_root" \
+  "$staging_root" \
+  root \
+  . \
+  ':(exclude)external-reference' \
+  ':(exclude)external-reference/**' \
+  ':(exclude)codex' \
+  ':(exclude)codex/**' \
+  ':(exclude)control_compat' \
+  ':(exclude)control_compat/**' \
+  ':(exclude)release' \
+  ':(exclude)release/**'
 
-printf '%s\0' "$project_name/.git" >> "$file_list"
-printf '%s\0' "$project_name/codex/.git" >> "$file_list"
+git clone --quiet --no-hardlinks --no-recurse-submodules "$codex_root" "$staging_root/codex"
+snapshot_repository "$codex_root" "$staging_root/codex" codex .
 
 tar \
-  -C "$project_parent" \
+  -C "$temp_dir" \
   --exclude="$project_name/.git/modules/external-reference" \
   --exclude="$project_name/.git/modules/external-reference/*" \
-  --null \
-  --files-from="$file_list" \
-  -czf "$archive_path"
+  -czf "$archive_path" \
+  "$project_name"
 tar -tzf "$archive_path" > "$archive_list"
 
 if grep -Eq "^${project_name}/(external-reference|control_compat)(/|$)" "$archive_list"; then

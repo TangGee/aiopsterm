@@ -4,7 +4,7 @@ type PlatformRuntimeBackend = {
   defaultShellForPlatform: (env: NodeJS.ProcessEnv, platform: NodeJS.Platform) => string
   executableCandidateNames: (binaryName: string, env: NodeJS.ProcessEnv, platform: NodeJS.Platform) => string[]
   localShellArgsForPlatform: (shell: string, platform: NodeJS.Platform) => string[]
-  platformSocketPath: (userDataPath: string, namespace: string, options?: { platform?: NodeJS.Platform; pid?: number; directory?: string }) => string
+  platformSocketPath: (userDataPath: string, namespace: string, options?: { platform?: NodeJS.Platform; pid?: number; directory?: string; uid?: number; stable?: boolean }) => string
 }
 
 const loadBackend = async () => {
@@ -46,6 +46,16 @@ describe('platform runtime helpers', () => {
     expect(platformSocketPath('/tmp/aiopsterm', 'aiopsterm-control', { platform: 'darwin', pid: 42, directory: 'control' })).toBe(
       '/tmp/aiopsterm/control/aiopsterm-control-42.sock'
     )
+    expect(platformSocketPath(
+      '/Users/tangyumin/Library/Application Support/aiopsterm/profiles/primary-profile-with-long-name',
+      'aiopsterm-agent-sessions',
+      { platform: 'darwin', pid: 80015, uid: 501, directory: 'agent-sessions' }
+    )).toBe('/tmp/aiopsterm-501/aiopsterm-agent-sessions-80015.sock')
+    expect(platformSocketPath(
+      '/Users/tangyumin/Library/Application Support/aiopsterm/profiles/primary-profile-with-long-name',
+      'aiopsterm-external-codex',
+      { platform: 'darwin', uid: 501, directory: 'external-codex-mcp', stable: true }
+    )).toMatch(/^\/tmp\/aiopsterm-501\/aiopsterm-external-codex-[a-f0-9]{12}\.sock$/)
     expect(platformSocketPath('C:\\Users\\unit\\AppData\\Roaming\\aiopsterm', 'aiopsterm-control', { platform: 'win32', pid: 42 })).toBe(
       '\\\\.\\pipe\\aiopsterm-control-42'
     )

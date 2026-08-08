@@ -131,6 +131,16 @@ describe('package configuration audit', () => {
     expect(license.toString('utf8')).toMatch(/^Node\.js is licensed for use as follows:/)
   })
 
+  it('keeps macOS bundler binaries installable despite npm optional dependency pruning', () => {
+    const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as { optionalDependencies?: Record<string, string> }
+
+    expect(packageJson.optionalDependencies?.['@esbuild/darwin-arm64']).toBe('0.21.5')
+    expect(packageJson.optionalDependencies?.['@esbuild/darwin-x64']).toBe('0.21.5')
+    expect(packageJson.optionalDependencies?.['@rollup/rollup-darwin-arm64']).toBe('4.61.0')
+    expect(packageJson.optionalDependencies?.['@rollup/rollup-darwin-x64']).toBe('4.61.0')
+    expect(packageJson.optionalDependencies?.['dmg-license']).toBe('1.0.11')
+  })
+
   it('runs the Bun executable directly when building the Windows sidecar', () => {
     const buildSource = readFileSync('scripts/build-cline-sidecar.mjs', 'utf8')
 
@@ -181,6 +191,35 @@ describe('package configuration audit', () => {
     expect(script).toContain('run_npm run build:linux')
     expect(script).toContain('package:verify -- linux-appimage')
     expect(script).toContain('package:verify -- linux-deb')
+  })
+
+  it('keeps the local macOS one-click build entrypoint available', async () => {
+    const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts?: Record<string, string> }
+    const script = readFileSync('scripts/build-macos.sh', 'utf8')
+    const help = await execFileAsync('bash', ['scripts/build-macos.sh', '--help'], { cwd: process.cwd() })
+    await expect(execFileAsync('bash', ['scripts/build-macos.sh', '--npm-registry'], { cwd: process.cwd() })).rejects.toMatchObject({
+      code: 2,
+      stderr: expect.stringContaining('--npm-registry requires a URL')
+    })
+    expect(packageJson.scripts?.['build:mac:one-click']).toContain('scripts/build-macos.sh')
+    expect(help.stdout).toContain('--china-mirror')
+    expect(help.stdout).toContain('--npm-registry URL')
+    expect(help.stdout).toContain('--codex-package-dir DIR')
+    expect(script).toContain('can only run on macOS')
+    expect(script).toContain('https://registry.npmmirror.com/')
+    expect(script).toContain('https://npmmirror.com/mirrors/node/v${node_version}')
+    expect(script).toContain('https://rsproxy.cn/rustup-init.sh')
+    expect(script).toContain('HOMEBREW_BOTTLE_DOMAIN')
+    expect(script).toContain('HOMEBREW_NO_AUTO_UPDATE=1')
+    expect(script).toContain('major >= 20 && major <= 24 && major % 2 === 0')
+    expect(script).toContain('shasum -a 256 -c SHASUMS256.selected')
+    expect(script).toContain("-c 'import distutils'")
+    expect(script).toContain('export npm_config_python=')
+    expect(script).toContain('prepare_china_codex_assets')
+    expect(script).toContain('scripts/prepare-codex-dev-assets.mjs')
+    expect(script).toContain('export AIOPSTERM_CODEX_PACKAGE_DIR=')
+    expect(script).toContain('run_npm run package:build -- macos')
+    expect(script).toContain('run_npm run package:verify -- macos')
   })
 
   it('loads the native runtime entrypoint before validating its target', async () => {

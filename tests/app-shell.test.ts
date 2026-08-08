@@ -465,6 +465,7 @@ import SnippetsPanel from '@/components/panels/SnippetsPanel.vue'
 import OnboardingGuide from '@/components/onboarding/OnboardingGuide.vue'
 import OnboardingSpotlight from '@/components/onboarding/OnboardingSpotlight.vue'
 import { shortcutRuntime } from '@/services/common/shortcutRuntime'
+import { loadMonaco } from '@/services/common/monacoRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { settingsBackgroundPresets } from '@/config/settings'
 import { DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_BASE64 } from '@shared/knowledgeBaseSeed'
@@ -2938,6 +2939,22 @@ describe('AppShell', () => {
 
     await wrapper.find('.window-control-button').trigger('click')
     expect(window.aiops.minimizeWindow).toHaveBeenCalled()
+  })
+
+  it('reserves the macOS traffic-light area in the TopBar', async () => {
+    vi.mocked(window.aiops.platform).mockResolvedValueOnce('darwin')
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(TopBar, {
+      global: { plugins: [pinia] }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.classes()).toContain('platform-macos')
+    expect(wrapper.find('.window-controls').exists()).toBe(false)
+
+    wrapper.unmount()
   })
 
   it('uses a single SideRail Agents entry and exits Agents through normal modules', async () => {
@@ -13342,6 +13359,7 @@ describe('AppShell', () => {
   })
 
   it('opens External reference-style knowledge files in the main workspace editor and adds them to AI context', async () => {
+    await loadMonaco()
     vi.useFakeTimers()
     ;(globalThis as any).__resetKnowledgeTreeMock?.()
     mockXtermInstances.length = 0
@@ -13385,7 +13403,7 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('diagnose.md')
     await vi.waitFor(() => {
       expect(monacoMocks.create).toHaveBeenCalled()
-    }, { timeout: 5000 })
+    })
     await vi.waitFor(() => {
       expect(monacoMocks.editorInstance.setSelection).toHaveBeenCalledWith({
         startLineNumber: 2,

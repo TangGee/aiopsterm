@@ -58,6 +58,8 @@ E2E-only file/dialog fixtures are also explicit. `AIOPSTERM_E2E_DIALOG_FIXTURES=
 
 Development seed rows are explicit opt-ins. Use `AIOPSTERM_CHAT_HISTORY_ENABLE_SEED=1`, `AIOPSTERM_AI_TODO_ENABLE_SEED=1`, `AIOPSTERM_QUICK_COMMANDS_ENABLE_SEED=1`, `AIOPSTERM_ALIASES_ENABLE_SEED=1`, `AIOPSTERM_ASSETS_ENABLE_SEED=1`, `AIOPSTERM_DATABASE_ENABLE_SEED=1`, `AIOPSTERM_FILES_ENABLE_SEED=1`, `AIOPSTERM_KNOWLEDGE_ENABLE_SEED=1`, `AIOPSTERM_KUBERNETES_ENABLE_SEED=1`, `AIOPSTERM_MCP_ENABLE_SEED=1`, `AIOPSTERM_MODEL_SETTINGS_ENABLE_SEED=1`, `AIOPSTERM_SETTINGS_PREFERENCES_ENABLE_SEED=1`, `AIOPSTERM_SKILLS_ENABLE_SEED=1`, `AIOPSTERM_USER_ACCOUNT_ENABLE_SEED=1`, or `AIOPSTERM_WORKSPACE_PREFERENCES_ENABLE_SEED=1` only when you intentionally want the backend to expose development conversations, internal AI lifecycle rows, Quick Commands, Alias rows, asset/database/file-session rows, Knowledge Base docs/images, Kubernetes catalog rows, MCP server rows, settings model rows, settings rules, Skill files, account/trusted-device rows, or development asset expanded-group preferences; these switches also require exact `1`, and `NODE_ENV=test` does not enable those seeds by itself. The Playwright launcher enables the seed switches that its acceptance flow asserts, so those fixtures remain test-owned rather than normal runtime defaults.
 
+Credential storage is lazy on every desktop platform: catalog/list hydration keeps ciphertext and does not request an OS credential unlock. Set `AIOPSTERM_CREDENTIAL_STORAGE=local` to force the device-local AES key or `AIOPSTERM_CREDENTIAL_STORAGE=system` to force Electron `safeStorage`; asset-only and database-only overrides are available as `AIOPSTERM_ASSETS_CREDENTIAL_STORAGE` and `AIOPSTERM_DATABASE_CREDENTIAL_STORAGE`. The normal default is `local` on macOS and `system` on Windows/Linux, with automatic local fallback when the system backend is unavailable.
+
 `npm run e2e` is an alias for the longer script name:
 
 ```bash
@@ -165,6 +167,14 @@ Build macOS packages on a macOS runner:
 ```bash
 npm run build:mac
 ```
+
+For a complete local macOS build and verification pass, use the one-click wrapper. Mainland China maintainers can opt into process-local npm, Electron, Rust, Cargo, and Homebrew mirrors:
+
+```bash
+npm run build:mac:one-click -- --china-mirror
+```
+
+The wrapper runs `npm ci`, builds the dmg and zip packages, and runs `package:verify -- macos`. Use `--skip-setup` with an existing toolchain, `--skip-dependencies` to reuse `node_modules`, `--run-tests` for Vitest, `--run-e2e` for Electron E2E, or `--setup-only` to stop after checking prerequisites. `--npm-registry <URL>` overrides only npm while retaining the other mirror choices. `--codex-package-dir <DIR>` passes an existing complete current-architecture Codex package through the supported cache override when a release runner already has that artifact.
 
 For a macOS unpacked directory build during package debugging:
 

@@ -15,7 +15,7 @@ const distDir = resolve('dist')
 
 const unpackedDirForPlatform = () => {
   if (platform === 'win32') return join(distDir, 'win-unpacked')
-  if (platform === 'darwin') return join(distDir, 'mac', 'aiopsterm.app')
+  if (platform === 'darwin') return join(distDir, process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'aiopsterm.app')
   return join(distDir, 'linux-unpacked')
 }
 

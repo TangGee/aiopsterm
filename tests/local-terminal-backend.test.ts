@@ -252,6 +252,36 @@ describe('local terminal backend runtime', () => {
     )
   })
 
+  it('enables macOS terminal colors without overriding explicit shell color settings', async () => {
+    const backend = await loadBackend()
+    backend.configureLocalTerminalBackendRuntime({ getPlatform: () => 'darwin' })
+
+    expect(backend.managedLocalTerminalEnvironment('local-mac-colors', {}, { HOME: '/Users/ops' })).toEqual(
+      expect.objectContaining({
+        COLORTERM: 'truecolor',
+        CLICOLOR: '1',
+        LSCOLORS: 'GxFxCxDxBxegedabagaced',
+        TERM_PROGRAM: 'aiopsterm'
+      })
+    )
+    expect(
+      backend.managedLocalTerminalEnvironment('local-mac-custom-colors', {}, {
+        HOME: '/Users/ops',
+        COLORTERM: '24bit',
+        CLICOLOR: '0',
+        LSCOLORS: 'custom',
+        TERM_PROGRAM: 'custom-terminal'
+      })
+    ).toEqual(
+      expect.objectContaining({
+        COLORTERM: '24bit',
+        CLICOLOR: '0',
+        LSCOLORS: 'custom',
+        TERM_PROGRAM: 'aiopsterm'
+      })
+    )
+  })
+
   it('adds short control command shims to managed local terminal PATH', async () => {
     const backend = await loadBackend()
     backend.configureLocalTerminalBackendRuntime({

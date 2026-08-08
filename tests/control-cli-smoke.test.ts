@@ -2,9 +2,10 @@ import { createServer, type Server } from 'net'
 import { execFile } from 'child_process'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'fs/promises'
 import { promisify } from 'util'
 import { afterEach, describe, expect, it } from 'vitest'
+import { testSocketPath } from './helpers/testSocketPath'
 
 const execFileAsync = promisify(execFile)
 
@@ -21,7 +22,7 @@ const runCliCompletion = async (args: string[]) => {
 }
 
 const startControlServer = async (handler: (request: Record<string, unknown>) => Record<string, unknown>) => {
-  const socketPath = join(tmpdir(), `aiopsterm-control-cli-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.sock`)
+  const socketPath = testSocketPath('aiopsterm-control-cli')
   const server = createServer((socket) => {
     let buffer = ''
     socket.setEncoding('utf8')
@@ -44,7 +45,7 @@ const startControlServer = async (handler: (request: Record<string, unknown>) =>
 }
 
 const startControlStreamServer = async (handler: (request: Record<string, unknown>) => Record<string, unknown>[]) => {
-  const socketPath = join(tmpdir(), `aiopsterm-control-cli-stream-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.sock`)
+  const socketPath = testSocketPath('aiopsterm-control-cli-stream')
   const server = createServer((socket) => {
     let buffer = ''
     socket.setEncoding('utf8')
@@ -202,6 +203,7 @@ describe('aio CLI', () => {
     const absolutePath = join(dir, 'absolute.txt')
     await writeFile(relativePath, 'relative\n', 'utf8')
     await writeFile(absolutePath, 'absolute\n', 'utf8')
+    const canonicalDir = await realpath(dir)
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
       seen.push(request)
@@ -243,8 +245,8 @@ describe('aio CLI', () => {
       expect.objectContaining({
         method: 'file.editor.open',
         params: {
-          paths: [relativePath, absolutePath, join(dir, 'missing.txt')],
-          cwd: dir,
+          paths: [join(canonicalDir, 'relative file.txt'), absolutePath, join(canonicalDir, 'missing.txt')],
+          cwd: canonicalDir,
           focus: true
         }
       })
