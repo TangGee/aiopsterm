@@ -27,6 +27,7 @@ export const electronRebuildInvocation: (options: {
   modules: string[]
   electronVersion: string
   headersUrl: string
+  buildFromSource?: boolean
 }) => { commandArgs: string[] }
 export const npmRebuildInvocation: (options: {
   platform: string
@@ -34,6 +35,11 @@ export const npmRebuildInvocation: (options: {
   npmExecPath?: string
   modules: string[]
 }) => { command: string; args: string[] }
+export const nativeCompilerEnvironment: (options: {
+  platform: string
+  env: Record<string, string | undefined>
+  gcc10Available: boolean
+}) => Record<string, string | undefined>
 export const shouldRebuildPty: (options: {
   force: boolean
   target: string
