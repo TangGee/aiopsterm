@@ -292,6 +292,8 @@ npm run package:source
 
 The archive includes the main repository and local `codex/` repository Git metadata so the extracted source remains usable as a Git checkout. The packager creates temporary snapshot commits inside the archive only, leaving the current repositories untouched while ensuring both extracted worktrees have a clean `git status`. It must exclude the `external-reference/` reference tree, `control_compat/`, and `.git/modules/external-reference`; the packaging script fails if forbidden External reference source or Git objects are present. The generated archive and checksum are written below `release/source/` by default.
 
+The embedded Codex source is maintained as the separate `tanggee2/aiopsterm-codex` Git repository. `codex-source.json` records the exact commit used by the application. Run `npm run codex:ensure-source` before development or packaging; it validates an existing `codex/` checkout without overwriting it, and clones the locked commit only when the directory is absent. Codex changes keep their own history and use `codex:` commit messages; after pushing a Codex commit, update the lock file in the main repository.
+
 Use the target wrappers when validating the four installable package outputs independently:
 
 ```bash

@@ -33,7 +33,7 @@ aiopsterm starts Codex through Electron main process IPC, not from renderer code
 - Before a Codex session starts, the main process runs an asynchronous `codex --version` health check for the resolved binary. Successful checks are cached by binary path and mtime so opening additional sessions does not spawn a version probe every time. Failed checks are not cached and can be retried after the binary or environment is fixed.
 - Codex CLI model access is derived from aiopsterm's OpenAI-compatible provider settings when that provider is configured for `Responses`. The generated Codex config writes `model`, `model_provider`, provider `base_url`, `env_key`, and `wire_api = "responses"`; the API key is injected only into the Codex child-process environment as `AIOPSTERM_CODEX_API_KEY` and is not written to `config.toml`.
 - aiopsterm's Base URL normalization is preserved for Codex. A trailing `#` still means "do not auto-add `/v1`"; full operation URLs ending in `/responses` or `/chat/completions` are reduced to the provider base URL before Codex appends its Responses operation path.
-- The default development entrypoint is `codex/codex-rs/target/<triple>/aiopsterm-codex-package/bin/codex`, built from the locally modified `codex/` source tree.
+- The default development entrypoint is `codex/codex-rs/target/<triple>/aiopsterm-codex-package/bin/codex`, built from the locally modified `codex/` source tree. The tracked `codex-source.json` locks the expected aiopsterm Codex repository and commit; `npm run codex:ensure-source` verifies an existing checkout and clones the locked commit only when `codex/` is missing.
 - Packaged builds copy the complete generated Codex package directory into `resources/codex/`. This includes `codex-package.json`, `bin/codex` or `bin/codex.exe`, `codex-path/rg` or `codex-path/rg.exe`, and platform resources such as Linux `codex-resources/bwrap` or Windows `codex-resources/codex-command-runner.exe` plus `codex-resources/codex-windows-sandbox-setup.exe`; it does not copy the Codex source tree.
 - `build:codex` uses Codex's own `scripts/build_codex_package.py` against the platform target triple. Linux/macOS enter through the POSIX shell wrapper; Windows enters through the Node dispatcher because `.sh` scripts are not a native Windows build surface. On Linux this matches Codex's upstream packaging strategy by building the musl target so the runtime does not depend on distribution OpenSSL 1.1 libraries.
 - `audit:codex-runtime` verifies that the generated package is complete, the entrypoint is executable, answers `codex --version`, has no unresolved Linux dynamic dependencies, and does not depend on `libssl.so.1.1` or `libcrypto.so.1.1`.
@@ -62,7 +62,7 @@ Each Codex integration slice should record:
 - Tests run and regressions checked.
 - Overall product completion after the slice.
 
-Prefer adapter code in aiopsterm over modifying `codex/`. If `codex/` must change, commit that change separately with a `codex:` commit message.
+Prefer adapter code in aiopsterm over modifying `codex/`. If `codex/` must change, commit that change separately in the `aiopsterm-codex` repository with a `codex:` commit message, then update `codex-source.json` in the main repository to the new commit.
 
 ## Current Toolset Review
 
