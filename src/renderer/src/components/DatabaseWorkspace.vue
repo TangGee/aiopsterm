@@ -114,7 +114,6 @@
       @update-sql-tab-schema="updateSqlTabSchema"
       @update-active-sql="updateActiveSql"
       @sync-sql-editor-state="syncSqlEditorState"
-      @run-sql-from-shortcut="runSqlFromShortcut"
       @open-sql-find="openSqlFind"
       @handle-sql-find-keydown="handleSqlFindKeydown"
       @go-to-sql-find-match="goToSqlFindMatch"
@@ -486,7 +485,6 @@ const {
   updateActiveSql,
   openSqlConsole,
   runSql,
-  runSqlFromShortcut,
   saveActiveSql,
   closeResultTab,
   openSqlHistoryResult,

@@ -25,8 +25,13 @@
       <DatabaseSqlEditor
         ref="sqlEditorRef"
         v-model="activeSqlText"
+        :run-disabled="!activeSqlCanRun"
+        :save-disabled="activeSqlSaving"
+        :format-disabled="!activeSqlTab.connectionId"
         @metrics="emit('syncSqlEditorState', $event)"
-        @run="emit('runSqlFromShortcut')"
+        @run="emit('runSql', $event)"
+        @save="emit('saveActiveSql', false)"
+        @format="emit('formatSql')"
         @open-find="emit('openSqlFind', $event)"
       />
     </div>
@@ -143,6 +148,7 @@ import type { TextRange } from '@/services/database/databaseSqlEditorRuntime'
 
 const props = defineProps<{
   activeSqlTab: SqlTab
+  activeSqlCanRun: boolean
   activeSqlSaving: boolean
   sqlEditorScrollTop: number
   activeSqlEditorLines: number[]
@@ -168,7 +174,9 @@ const emit = defineEmits<{
   'update:sqlFindCaseSensitive': [value: boolean]
   updateActiveSql: [value: string]
   syncSqlEditorState: [metrics?: DatabaseSqlEditorMetrics]
-  runSqlFromShortcut: []
+  runSql: [mode: 'all' | 'current']
+  saveActiveSql: [forceSaveAs: boolean]
+  formatSql: []
   openSqlFind: [replace: boolean]
   handleSqlFindKeydown: [event: KeyboardEvent, field: 'query' | 'replace']
   goToSqlFindMatch: [direction: 1 | -1]

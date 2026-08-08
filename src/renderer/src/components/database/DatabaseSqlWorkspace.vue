@@ -30,6 +30,7 @@
         v-model:sql-find-replace="sqlFindReplaceProxy"
         v-model:sql-find-case-sensitive="sqlFindCaseSensitiveProxy"
         :active-sql-tab="activeSqlTab"
+        :active-sql-can-run="activeSqlCanRun"
         :active-sql-saving="activeSqlSaving"
         :sql-editor-scroll-top="sqlEditorScrollTop"
         :active-sql-editor-lines="activeSqlEditorLines"
@@ -46,7 +47,9 @@
         :sql-editor-selection-size="sqlEditorSelectionSize"
         @update-active-sql="emit('updateActiveSql', $event)"
         @sync-sql-editor-state="emit('syncSqlEditorState', $event)"
-        @run-sql-from-shortcut="emit('runSqlFromShortcut')"
+        @run-sql="emit('runSql', $event)"
+        @save-active-sql="emit('saveActiveSql', $event)"
+        @format-sql="emit('formatSql')"
         @open-sql-find="emit('openSqlFind', $event)"
         @handle-sql-find-keydown="(event, field) => emit('handleSqlFindKeydown', event, field)"
         @go-to-sql-find-match="emit('goToSqlFindMatch', $event)"
@@ -176,7 +179,6 @@ const emit = defineEmits<{
   updateSqlTabSchema: [event: Event]
   updateActiveSql: [value: string]
   syncSqlEditorState: [metrics?: DatabaseSqlEditorMetrics]
-  runSqlFromShortcut: []
   openSqlFind: [replace: boolean]
   handleSqlFindKeydown: [event: KeyboardEvent, field: 'query' | 'replace']
   goToSqlFindMatch: [direction: 1 | -1]

@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -60,6 +60,48 @@ describe('project file change adapters', () => {
     const context = await modules.backend.getProjectFileContext({ source: 'claude-code', sessionId: 'session-1' })
     expect(context.data?.recent).toEqual([
       expect.objectContaining({ path: 'created.ts', kind: 'created', origin: 'adapter' })
+    ])
+  })
+
+  it('records Codex apply_patch paths supplied through tool_input.command', async () => {
+    const modules = await loadModules()
+    const userDataPath = await mkdtemp(join(tmpdir(), 'aiopsterm-codex-patch-user-'))
+    const projectRoot = await mkdtemp(join(tmpdir(), 'aiopsterm-codex-patch-root-'))
+    cleanup.push(userDataPath, projectRoot)
+    const session = {
+      id: 'session-1',
+      source: 'codex',
+      terminalSessionId: 'terminal-1',
+      canonicalCwd: projectRoot
+    } as ManagedAiSessionRecord
+    modules.backend.configureProjectFilesRuntime({
+      userDataPath,
+      getManagedSession: async () => session,
+      findProductSession: () => null
+    })
+
+    const patch = [
+      '*** Begin Patch',
+      `*** Add File: ${join(await realpath(projectRoot), 'install.sh')}`,
+      '+#!/bin/sh',
+      '+echo installed',
+      '*** End Patch'
+    ].join('\n')
+    const base = {
+      source: 'codex',
+      sessionId: 'session-1',
+      terminalSessionId: 'terminal-1',
+      cwd: projectRoot,
+      tool_name: 'apply_patch',
+      tool_input: { command: patch }
+    }
+    expect(await modules.adapters.handleProjectFileAgentHook({ ...base, event: 'PreToolUse' })).toBe(true)
+    await writeFile(join(projectRoot, 'install.sh'), '#!/bin/sh\necho installed\n')
+    expect(await modules.adapters.handleProjectFileAgentHook({ ...base, event: 'Stop' })).toBe(true)
+
+    const context = await modules.backend.getProjectFileContext({ source: 'codex', sessionId: 'session-1' })
+    expect(context.data?.recent).toEqual([
+      expect.objectContaining({ path: 'install.sh', kind: 'created', origin: 'adapter' })
     ])
   })
 

@@ -1,5 +1,4 @@
 import { createHash } from 'crypto'
-import { watch, type FSWatcher } from 'fs'
 import { open, readFile, realpath, stat, writeFile } from 'fs/promises'
 import { basename, dirname, isAbsolute } from 'path'
 import type {
@@ -11,6 +10,7 @@ import type {
   LocalEditorFileWriteInput,
   LocalEditorFileWriteResult
 } from '@shared/contracts/localFiles'
+import { createResilientParentFileWatcher } from './resilientParentFileWatcher'
 
 type LocalEditorFilesRuntime = {
   emitWatchEvent?: (event: LocalEditorFileWatchEvent) => void
@@ -25,7 +25,7 @@ type WatchedTarget = {
 }
 
 type ParentWatch = {
-  watcher: FSWatcher
+  watcher: { close: () => void }
   targets: Map<string, WatchedTarget>
 }
 
@@ -244,15 +244,16 @@ export const startLocalEditorFileWatch = async (input: LocalEditorFileWatchInput
       return { ok: true, data: { filePath, watchId, watched: false, fallback: true } }
     }
     const targets = new Map<string, WatchedTarget>()
-    const watcher = watch(parentPath, { recursive: false }, (_event, filename) => {
-      const changedName = filename || ''
-      for (const target of targets.values()) {
-        if (!changedName || basename(target.filePath) === changedName) scheduleWatchInspection(target)
+    const watcher = createResilientParentFileWatcher({
+      parentPath,
+      onChange: (filename) => {
+        for (const target of targets.values()) {
+          if (!filename || basename(target.filePath) === filename) scheduleWatchInspection(target)
+        }
+      },
+      inspect: async () => {
+        await Promise.all([...targets.values()].map((target) => inspectWatchedTarget(target)))
       }
-    })
-    watcher.on('error', () => {
-      watcher.close()
-      parentWatches.delete(parentPath)
     })
     parent = { watcher, targets }
     parentWatches.set(parentPath, parent)

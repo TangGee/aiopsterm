@@ -21,14 +21,29 @@
       @select="emitFallbackMetrics"
       @keydown="handleFallbackKeydown"
     />
+    <TextEditorContextMenu
+      :visible="editorMenu.menu.visible"
+      :x="editorMenu.menu.x"
+      :y="editorMenu.menu.y"
+      :items="editorMenu.items.value"
+      @select="editorMenu.execute"
+      @close="editorMenu.close(true)"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type * as monaco from 'monaco-editor/esm/vs/editor/editor.api'
+import TextEditorContextMenu from '@/components/common/TextEditorContextMenu.vue'
+import { useI18n } from '@/i18n'
 import { editorIndent, editorLineHeightPx, resolveEditorFontFamily } from '@/services/common/editorRuntime'
 import { loadMonaco, type MonacoModule } from '@/services/common/monacoRuntime'
+import {
+  textEditorShortcutModifier,
+  useTextEditorContextMenu,
+  type TextEditorContextMenuItem
+} from '@/services/common/textEditorContextMenuRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 export interface DatabaseSqlEditorMetrics {
@@ -46,23 +61,72 @@ export interface TextRange {
 const props = defineProps<{
   modelValue: string
   readonly?: boolean
+  runDisabled?: boolean
+  saveDisabled?: boolean
+  formatDisabled?: boolean
 }>()
 
 const emit = defineEmits<{
   (event: 'update:modelValue', value: string): void
   (event: 'run', mode: 'all' | 'current'): void
+  (event: 'save'): void
+  (event: 'format'): void
   (event: 'open-find', replace: boolean): void
   (event: 'metrics', metrics: DatabaseSqlEditorMetrics): void
 }>()
 
 const workspace = useWorkspaceStore()
+const { t } = useI18n()
 const containerRef = ref<HTMLElement | null>(null)
 const fallbackRef = ref<HTMLTextAreaElement | null>(null)
 const monacoReady = ref(false)
 let monacoApi: MonacoModule | null = null
 let editor: monaco.editor.IStandaloneCodeEditor | null = null
+let editorContextMenuDisposable: { dispose(): void } | null = null
 let suppressEditorEmit = false
 let suppressFallbackEmit = false
+
+const sqlMenuItems = (): TextEditorContextMenuItem[] => {
+  const disabled = Boolean(props.runDisabled) || !getText().trim()
+  return [
+    {
+      id: 'sql-run-current',
+      label: t('database.sql.toolbar.runCurrent'),
+      icon: 'play',
+      group: 'sql-run',
+      shortcut: `${textEditorShortcutModifier()}Enter`,
+      disabled
+    },
+    {
+      id: 'sql-run-all',
+      label: t('database.sql.toolbar.runAll'),
+      icon: 'runAll',
+      group: 'sql-run',
+      disabled
+    },
+    {
+      id: 'sql-format',
+      label: t('database.sql.toolbar.format'),
+      icon: 'align',
+      group: 'sql-format',
+      disabled: Boolean(props.readonly) || Boolean(props.formatDisabled)
+    }
+  ]
+}
+
+const editorMenu = useTextEditorContextMenu({
+  getEditor: () => editor,
+  isReadonly: () => Boolean(props.readonly),
+  canSave: () => !props.saveDisabled,
+  onSave: () => emit('save'),
+  onFind: (replace) => emit('open-find', replace),
+  extraItems: sqlMenuItems,
+  onExtraAction: (action) => {
+    if (action === 'sql-run-current' && !props.runDisabled) emit('run', 'current')
+    else if (action === 'sql-run-all' && !props.runDisabled) emit('run', 'all')
+    else if (action === 'sql-format' && !props.readonly && !props.formatDisabled) emit('format')
+  }
+})
 
 const monacoTheme = computed(() => (workspace.config.theme === 'light' || document.documentElement.dataset.theme === 'light' ? 'vs' : 'vs-dark'))
 const editorOptions = computed<monaco.editor.IStandaloneEditorConstructionOptions>(() => {
@@ -200,6 +264,8 @@ const createEditor = () => {
   })
   applyModelOptions()
   editor.addCommand(monacoApi.KeyMod.CtrlCmd | monacoApi.KeyCode.Enter, () => emit('run', getSelectedText().trim() ? 'current' : 'all'))
+  editor.addCommand(monacoApi.KeyMod.CtrlCmd | monacoApi.KeyCode.KeyS, () => emit('save'))
+  editorContextMenuDisposable = editor.onContextMenu?.((event) => editorMenu.open(event.event.browserEvent)) || null
   editor.onDidChangeModelContent(() => {
     if (suppressEditorEmit) return
     const value = editor?.getValue() || ''
@@ -239,6 +305,11 @@ const handleFallbackKeydown = (event: KeyboardEvent) => {
   if ((event.metaKey || event.ctrlKey) && key === 'enter') {
     event.preventDefault()
     emit('run', getSelectedText().trim() ? 'current' : 'all')
+    return
+  }
+  if ((event.metaKey || event.ctrlKey) && key === 's') {
+    event.preventDefault()
+    emit('save')
     return
   }
   if ((event.metaKey || event.ctrlKey) && key === 'f') {
@@ -508,6 +579,8 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  editorContextMenuDisposable?.dispose()
+  editorContextMenuDisposable = null
   editor?.dispose()
   editor = null
 })

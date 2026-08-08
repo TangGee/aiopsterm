@@ -79,7 +79,9 @@ const collectPaths = (value: unknown, out: string[], depth = 0) => {
   const record = recordValue(value)
   for (const [key, item] of Object.entries(record)) {
     if (pathKeys.has(key) && typeof item === 'string' && item.trim()) out.push(item.trim())
-    if ((key === 'patch' || key === 'diff') && typeof item === 'string') out.push(...pathsFromPatch(item))
+    if ((key === 'patch' || key === 'diff' || key === 'command') && typeof item === 'string') {
+      out.push(...pathsFromPatch(item))
+    }
     if (item && typeof item === 'object') collectPaths(item, out, depth + 1)
   }
 }

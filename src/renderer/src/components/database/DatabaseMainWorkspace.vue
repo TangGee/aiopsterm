@@ -71,7 +71,6 @@
       @update-sql-tab-schema="emit('updateSqlTabSchema', $event)"
       @update-active-sql="emit('updateActiveSql', $event)"
       @sync-sql-editor-state="emit('syncSqlEditorState', $event)"
-      @run-sql-from-shortcut="emit('runSqlFromShortcut')"
       @open-sql-find="emit('openSqlFind', $event)"
       @handle-sql-find-keydown="(event, field) => emit('handleSqlFindKeydown', event, field)"
       @go-to-sql-find-match="emit('goToSqlFindMatch', $event)"
@@ -231,7 +230,6 @@ const emit = defineEmits<{
   updateSqlTabSchema: [event: Event]
   updateActiveSql: [value: string]
   syncSqlEditorState: [metrics?: DatabaseSqlEditorMetrics]
-  runSqlFromShortcut: []
   openSqlFind: [replace: boolean]
   handleSqlFindKeydown: [event: KeyboardEvent, field: 'query' | 'replace']
   goToSqlFindMatch: [direction: 1 | -1]

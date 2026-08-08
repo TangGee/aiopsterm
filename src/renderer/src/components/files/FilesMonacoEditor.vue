@@ -18,14 +18,24 @@
       @keydown="handleFallbackKeydown"
       @blur="emit('blur')"
     />
+    <TextEditorContextMenu
+      :visible="editorMenu.menu.visible"
+      :x="editorMenu.menu.x"
+      :y="editorMenu.menu.y"
+      :items="editorMenu.items.value"
+      @select="editorMenu.execute"
+      @close="editorMenu.close(true)"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type * as monaco from 'monaco-editor/esm/vs/editor/editor.api'
+import TextEditorContextMenu from '@/components/common/TextEditorContextMenu.vue'
 import { editorLineHeightPx, resolveEditorFontFamily } from '@/services/common/editorRuntime'
 import { loadMonaco, resolveMonacoLanguageId, type MonacoModule } from '@/services/common/monacoRuntime'
+import { useTextEditorContextMenu } from '@/services/common/textEditorContextMenuRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const props = defineProps<{
@@ -48,9 +58,16 @@ const fallbackRef = ref<HTMLTextAreaElement | null>(null)
 const monacoReady = ref(false)
 let monacoApi: MonacoModule | null = null
 let editor: monaco.editor.IStandaloneCodeEditor | null = null
+let editorContextMenuDisposable: { dispose(): void } | null = null
 let suppressEditorEmit = false
 let suppressFallbackEmit = false
 const resolvedLanguage = ref('plaintext')
+
+const editorMenu = useTextEditorContextMenu({
+  getEditor: () => editor,
+  isReadonly: () => Boolean(props.readonly),
+  onSave: () => emit('save')
+})
 
 const monacoTheme = computed(() => (workspace.config.theme === 'light' || document.documentElement.dataset.theme === 'light' ? 'vs' : 'vs-dark'))
 const editorOptions = computed<monaco.editor.IStandaloneEditorConstructionOptions>(() => {
@@ -126,13 +143,16 @@ const createEditor = () => {
   })
   applyModelOptions()
   editor.addCommand(monacoApi.KeyMod.CtrlCmd | monacoApi.KeyCode.KeyS, () => emit('save'))
+  editorContextMenuDisposable = editor.onContextMenu?.((event) => editorMenu.open(event.event.browserEvent)) || null
   editor.onDidChangeModelContent(() => {
     if (suppressEditorEmit) return
     const value = editor?.getValue() || ''
     syncFallbackValue(value)
     if (value !== props.modelValue) emit('update:modelValue', value)
   })
-  editor.onDidBlurEditorWidget?.(() => emit('blur'))
+  editor.onDidBlurEditorWidget?.(() => {
+    if (!editorMenu.menu.visible) emit('blur')
+  })
   monacoReady.value = true
 }
 
@@ -204,6 +224,8 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  editorContextMenuDisposable?.dispose()
+  editorContextMenuDisposable = null
   editor?.dispose()
   editor = null
 })

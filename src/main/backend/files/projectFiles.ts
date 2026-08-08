@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from 'crypto'
-import { watch, type FSWatcher } from 'fs'
 import { lstat, mkdir, open, readFile, readdir, realpath, rename, stat, unlink, writeFile } from 'fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path'
 import type {
@@ -28,6 +27,7 @@ import { projectFileChangeProtocolVersion } from '@shared/contracts/projectFiles
 import type { AiAgentSessionSource, ManagedAiSessionRecord } from '@shared/contracts/managedAiSessions'
 import type { ProductSessionRecord } from '@shared/contracts/productSessions'
 import { projectFileTrackingForAgent } from '../agent/agentIntegrationAdapters'
+import { createResilientParentFileWatcher } from './resilientParentFileWatcher'
 
 type ProjectFilesRuntimeConfig = {
   userDataPath: string
@@ -63,7 +63,7 @@ type WatchedTarget = {
 }
 
 type ParentWatch = {
-  watcher: FSWatcher
+  watcher: { close: () => void }
   targets: Map<string, WatchedTarget>
 }
 
@@ -683,15 +683,17 @@ export const startProjectFileWatch = async (input: ProjectFileWatchInput): Promi
       return { ok: true, data: { watchId: input.watchId, watched: false, fallback: true } }
     }
     const targets = new Map<string, WatchedTarget>()
-    const watcher = watch(parentPath, { recursive: false }, (_event, filename) => {
-      const changedName = cleanText(filename?.toString())
-      for (const target of targets.values()) {
-        if (!changedName || basename(target.absolutePath) === changedName) scheduleWatchInspection(target)
+    const watcher = createResilientParentFileWatcher({
+      parentPath,
+      onChange: (filename) => {
+        const changedName = cleanText(filename)
+        for (const target of targets.values()) {
+          if (!changedName || basename(target.absolutePath) === changedName) scheduleWatchInspection(target)
+        }
+      },
+      inspect: async () => {
+        await Promise.all([...targets.values()].map((target) => inspectWatchedTarget(target)))
       }
-    })
-    watcher.on('error', () => {
-      watcher.close()
-      parentWatches.delete(parentPath)
     })
     parent = { watcher, targets }
     parentWatches.set(parentPath, parent)
