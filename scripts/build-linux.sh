@@ -84,6 +84,21 @@ command_exists() {
   command -v "${command_name}" >/dev/null 2>&1
 }
 
+cxx20_compiler() {
+  local candidate
+  local -a candidates=()
+  [[ -z "${CXX:-}" ]] || candidates+=("${CXX}")
+  candidates+=(g++-10 g++)
+  for candidate in "${candidates[@]}"; do
+    command_exists "${candidate}" || continue
+    if printf '#include <compare>\nint main() {}\n' | "${candidate}" -std=gnu++20 -x c++ -fsyntax-only - >/dev/null 2>&1; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+  return 1
+}
+
 node_is_supported() {
   command_exists node || return 1
   node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)' >/dev/null 2>&1
@@ -147,6 +162,7 @@ install_system_packages() {
   if command -v apt-get >/dev/null 2>&1; then
     manager=apt
     packages=(ca-certificates curl git python3 pkg-config musl-tools libcap-dev g++ clang libc++-dev libc++abi-dev lld xz-utils dpkg-dev fakeroot xvfb)
+    cxx20_compiler >/dev/null || packages+=(g++-10)
   elif command -v dnf >/dev/null 2>&1; then
     manager=dnf
     packages=(ca-certificates curl git python3 pkgconf-pkg-config musl-gcc libcap-devel gcc-c++ clang libcxx-devel libcxxabi-devel lld xz dpkg fakeroot xorg-x11-server-Xvfb)
@@ -216,6 +232,10 @@ ensure_prerequisites() {
       missing=1
     fi
   done
+  if ! cxx20_compiler >/dev/null; then
+    echo '[aiopsterm] missing a C++20 compiler with the <compare> standard header' >&2
+    missing=1
+  fi
   if ((missing)); then
     ((skip_setup)) && { echo '[aiopsterm] prerequisites are missing and --skip-setup was supplied.' >&2; return 1; }
     install_system_packages
@@ -226,6 +246,7 @@ ensure_prerequisites() {
     command_exists "${command_name}" || { echo "[aiopsterm] required command is still missing: ${command_name}" >&2; return 1; }
   done
   node_is_supported || { echo '[aiopsterm] Node.js 20 or newer is required for the Linux build.' >&2; return 1; }
+  cxx20_compiler >/dev/null || { echo '[aiopsterm] a C++20 compiler is required for native Electron modules.' >&2; return 1; }
 }
 
 run_npm() {

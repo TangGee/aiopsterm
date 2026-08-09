@@ -5,6 +5,7 @@ import {
   electronHeadersUrl,
   lockOwnedBy,
   mergeNativeManifest,
+  nativeCompilerEnvironment,
   npmRebuildInvocation,
   parseLockOwner,
   parseNativeManifest,
@@ -35,11 +36,13 @@ describe('native runtime helpers', () => {
       cliPath: 'C:\\project\\node_modules\\@electron\\rebuild\\lib\\cli.js',
       modules: ['better-sqlite3'],
       electronVersion: '31.7.7',
-      headersUrl: 'http://127.0.0.1:48177'
+      headersUrl: 'http://127.0.0.1:48177',
+      buildFromSource: true
     })).toEqual({
       commandArgs: [
         'C:\\project\\node_modules\\@electron\\rebuild\\lib\\cli.js',
         '-f',
+        '--build-from-source',
         '-o',
         'better-sqlite3',
         '-v',
@@ -76,6 +79,29 @@ describe('native runtime helpers', () => {
         'node-pty'
       ]
     })
+  })
+
+  it('selects GCC 10 for Linux C++20 native builds without overriding configured compilers', () => {
+    expect(nativeCompilerEnvironment({
+      platform: 'linux',
+      env: { PATH: '/usr/bin' },
+      gcc10Available: true
+    })).toEqual({ PATH: '/usr/bin', CC: 'gcc-10', CXX: 'g++-10' })
+    expect(nativeCompilerEnvironment({
+      platform: 'linux',
+      env: { CC: 'clang', CXX: 'clang++' },
+      gcc10Available: true
+    })).toEqual({ CC: 'clang', CXX: 'clang++' })
+    expect(nativeCompilerEnvironment({
+      platform: 'linux',
+      env: { CC: 'clang' },
+      gcc10Available: true
+    })).toEqual({ CC: 'clang', CXX: 'g++-10' })
+    expect(nativeCompilerEnvironment({
+      platform: 'darwin',
+      env: { PATH: '/usr/bin' },
+      gcc10Available: true
+    })).toEqual({ PATH: '/usr/bin' })
   })
 
   it('treats damaged or non-object native manifests as absent', () => {

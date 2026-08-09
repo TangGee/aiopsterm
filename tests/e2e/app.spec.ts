@@ -2177,6 +2177,15 @@ test('aiopsterm primary desktop flows', async () => {
       authorization: 'Bearer e2e-voice-key'
     })
     expect(voiceServer.requests[0].body.toString('utf8')).toContain('name="model"')
+    await page.evaluate(async () => {
+      const api = (window as unknown as { aiops: { saveConfig: (patch: Record<string, unknown>) => Promise<any> } }).aiops
+      await api.saveConfig({ modelName: 'qwen2.5-coder', modelProvider: 'ollama' })
+    })
+    await expect.poll(() => page.evaluate(async () => {
+      const api = (window as unknown as { aiops: { getConfig: () => Promise<any> } }).aiops
+      const config = await api.getConfig()
+      return `${config.modelProvider}:${config.modelName}`
+    })).toBe('ollama:qwen2.5-coder')
     await expect(page.locator('.todo-inline-display')).toHaveCount(0)
     await expect(page.locator('.todo-compact-list')).toHaveCount(0)
     await expect(page.getByText('任务进度')).toHaveCount(0)
@@ -2216,7 +2225,8 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.locator('.message.user').filter({ hasText: '检查生产磁盘' })).toBeVisible()
     await expect(page.getByTestId('ai-context-usage-ring')).toBeVisible()
     await expect(page.getByTestId('ai-context-usage-ring')).toHaveAttribute('title', /\d+% - .+ \/ 128\.0K context used/)
-    await expect(page.getByText('当前响应由 E2E Ollama 后端生成。')).toBeVisible()
+    await expect.poll(() => aiChatServer.requests.map((request) => request.url), { timeout: 10_000 }).toContain('/chat/completions')
+    await expect(page.getByText('当前响应由 E2E Ollama 后端生成。')).toBeVisible({ timeout: 30_000 })
     expect(aiChatServer.requests.at(-1)?.url).toMatch(/\/chat\/completions$/)
     const finalAiChatRequestBody = aiChatServer.requests.at(-1)?.body.toString('utf8') || ''
     expect(finalAiChatRequestBody).toContain('qwen2.5-coder')

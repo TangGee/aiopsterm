@@ -20,6 +20,7 @@ import {
   electronHeadersUrl,
   lockOwnedBy,
   mergeNativeManifest,
+  nativeCompilerEnvironment,
   npmRebuildInvocation,
   parseNativeManifest,
   sanitizeNativeRebuildEnvironment,
@@ -253,7 +254,14 @@ const releaseLock = (owner) => {
 }
 
 const runRebuild = (runtime, modules) => {
-  const env = sanitizeNativeRebuildEnvironment(process.env)
+  const gcc10Available =
+    spawnSync('gcc-10', ['--version'], { stdio: 'ignore' }).status === 0 &&
+    spawnSync('g++-10', ['--version'], { stdio: 'ignore' }).status === 0
+  const env = nativeCompilerEnvironment({
+    platform: process.platform,
+    env: sanitizeNativeRebuildEnvironment(process.env),
+    gcc10Available
+  })
   let result
   if (runtime === 'node') {
     const invocation = npmRebuildInvocation({
@@ -272,7 +280,8 @@ const runRebuild = (runtime, modules) => {
       cliPath: resolvePackageBin('@electron/rebuild', 'electron-rebuild'),
       modules,
       electronVersion: electron().version,
-      headersUrl: electronHeadersUrl(process.env)
+      headersUrl: electronHeadersUrl(process.env),
+      buildFromSource: process.platform === 'linux'
     })
     result = spawnSync(
       process.execPath,

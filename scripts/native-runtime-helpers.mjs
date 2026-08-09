@@ -18,10 +18,11 @@ const isObject = (value) => value !== null && typeof value === 'object' && !Arra
 export const electronHeadersUrl = (env) =>
   env.AIOPSTERM_ELECTRON_HEADERS_URL || 'https://artifacts.electronjs.org/headers/dist'
 
-export const electronRebuildInvocation = ({ cliPath, modules, electronVersion, headersUrl }) => ({
+export const electronRebuildInvocation = ({ cliPath, modules, electronVersion, headersUrl, buildFromSource = false }) => ({
   commandArgs: [
     cliPath,
     '-f',
+    ...(buildFromSource ? ['--build-from-source'] : []),
     '-o',
     modules.join(','),
     '-v',
@@ -35,6 +36,15 @@ export const npmRebuildInvocation = ({ platform, nodeExecutable, npmExecPath, mo
   if (platform !== 'win32') return { command: 'npm', args: ['rebuild', ...modules] }
   const npmCli = npmExecPath || resolve(dirname(nodeExecutable), 'node_modules', 'npm', 'bin', 'npm-cli.js')
   return { command: nodeExecutable, args: [npmCli, 'rebuild', ...modules] }
+}
+
+export const nativeCompilerEnvironment = ({ platform, env, gcc10Available }) => {
+  const result = { ...env }
+  if (platform === 'linux' && gcc10Available) {
+    if (!result.CC) result.CC = 'gcc-10'
+    if (!result.CXX) result.CXX = 'g++-10'
+  }
+  return result
 }
 
 export const shouldRebuildPty = ({ force, target, runtime, probeStatus }) =>
