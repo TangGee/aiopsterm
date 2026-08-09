@@ -248,6 +248,10 @@ export type ThreadedTerminalHostDebugSnapshot = {
   text: string
   cols: number
   rows: number
+  cellWidth: number
+  cellHeight: number
+  paddingLeft: number
+  paddingTop: number
   viewportY: number
   baseY: number
   lines: ThreadedTerminalScreenLine[]
@@ -1745,6 +1749,10 @@ export class ThreadedTerminalHost {
       text: this.snapshotLines.join('\n').replace(/\s+$/g, ''),
       cols: this.cols,
       rows: this.rows,
+      cellWidth: this.cellMetrics.width,
+      cellHeight: this.cellMetrics.height,
+      paddingLeft: this.geometry?.paddingLeft || 0,
+      paddingTop: this.geometry?.paddingTop || 0,
       viewportY: this.buffer.active.viewportY,
       baseY: this.buffer.active.baseY,
       lines: this.snapshotScreenLines.map((line, row) => ({
@@ -2308,11 +2316,11 @@ export class ThreadedTerminalHost {
   }
 
   private terminalContentRect() {
-    const surfaceRect = this.renderSurfaceElement?.getBoundingClientRect()
-    if (surfaceRect && surfaceRect.width > 0 && surfaceRect.height > 0) return surfaceRect
     const hostRect = this.host?.getBoundingClientRect()
     if (hostRect && hostRect.width > 0 && hostRect.height > 0) return hostRect
-    return surfaceRect || hostRect || null
+    const surfaceRect = this.renderSurfaceElement?.getBoundingClientRect()
+    if (surfaceRect && surfaceRect.width > 0 && surfaceRect.height > 0) return surfaceRect
+    return hostRect || surfaceRect || null
   }
 
   private pointFromMouseEvent(event: MouseEvent): ThreadedTerminalSelectionPoint {

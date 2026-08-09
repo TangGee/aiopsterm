@@ -1047,6 +1047,21 @@ const runTerminalRegressionProbes = async (
     const styledRun = line?.cells?.find((run) => run.text.includes(marker) || marker.includes(run.text.trim()))
     return styledRun?.fg || ''
   }
+  const waitForStyledForeground = async (
+    terminal: ThreadedTerminalHost,
+    marker: string,
+    predicate: (foreground: string) => boolean,
+    timeoutMs = 3000
+  ) => {
+    const deadline = nowMs() + timeoutMs
+    let foreground = ''
+    while (nowMs() < deadline) {
+      foreground = styledForegroundForMarker(terminal, marker)
+      if (foreground && predicate(foreground)) return foreground
+      await new Promise((resolve) => window.setTimeout(resolve, 25))
+    }
+    throw new Error(`Timed out waiting for ANSI style update. marker=${marker} foreground=${foreground || '(empty)'}`)
+  }
 
   const contentFreshness = await runRegressionProbe(async () => {
     const candidate = await dedicatedProbeCandidate()
@@ -1087,10 +1102,9 @@ const runTerminalRegressionProbes = async (
     const marker = `W${Date.now().toString(36).slice(-5)}`
     await candidate.terminal.writeAndMeasurePaint(`\r\n\x1b[31m${marker}\x1b[0m`, 3000, { settlePendingFrame: true })
     await waitForScreenText(candidate.terminal, marker)
-    const firstFg = styledForegroundForMarker(candidate.terminal, marker)
+    const firstFg = await waitForStyledForeground(candidate.terminal, marker, () => true)
     const frame = await candidate.terminal.writeAndMeasurePaint(`\r\x1b[32m${marker}\x1b[0m`, 3000, { settlePendingFrame: true })
-    await waitForScreenText(candidate.terminal, marker)
-    const secondFg = styledForegroundForMarker(candidate.terminal, marker)
+    const secondFg = await waitForStyledForeground(candidate.terminal, marker, (foreground) => foreground !== firstFg)
     if (!firstFg || !secondFg) throw new Error(`Styled run was not captured for ANSI marker. first=${firstFg || '(empty)'} second=${secondFg || '(empty)'}`)
     if (firstFg === secondFg) throw new Error(`ANSI style did not change for same-text repaint: ${firstFg}`)
     if (frame.paintedRows <= 0) throw new Error('Same-text ANSI repaint did not paint any row.')
@@ -1157,28 +1171,29 @@ const runTerminalRegressionProbes = async (
     let endRow = startRow
     while (snapshot.lines[endRow + 1]?.wrapped) endRow += 1
     if (endRow === startRow) throw new Error(`Selection probe did not soft-wrap. cols=${candidate.terminal.cols} pathLength=${path.length}`)
-    const surface = candidate.element.querySelector<HTMLElement>('.threaded-terminal-surface')
-    const rect = surface?.getBoundingClientRect() || candidate.element.getBoundingClientRect()
-    const cellWidth = Math.max(1, rect.width / Math.max(1, candidate.terminal.cols))
-    const cellHeight = Math.max(1, rect.height / Math.max(1, candidate.terminal.rows))
-    const endClientX = Math.min(rect.right - 1, rect.left + candidate.terminal.cols * cellWidth - 1)
+    const rect = candidate.element.getBoundingClientRect()
+    const cellWidth = Math.max(1, snapshot.cellWidth)
+    const cellHeight = Math.max(1, snapshot.cellHeight)
+    const contentLeft = rect.left + snapshot.paddingLeft
+    const contentTop = rect.top + snapshot.paddingTop
+    const endClientX = Math.min(rect.right - 1, contentLeft + candidate.terminal.cols * cellWidth - 1)
     candidate.element.dispatchEvent(new MouseEvent('mousedown', {
       bubbles: true,
       button: 0,
-      clientX: rect.left + 1,
-      clientY: rect.top + startRow * cellHeight + 1
+      clientX: contentLeft + 1,
+      clientY: contentTop + startRow * cellHeight + 1
     }))
     candidate.element.dispatchEvent(new MouseEvent('mousemove', {
       bubbles: true,
       button: 0,
       clientX: endClientX,
-      clientY: rect.top + endRow * cellHeight + 1
+      clientY: contentTop + endRow * cellHeight + 1
     }))
     window.dispatchEvent(new MouseEvent('mouseup', {
       bubbles: true,
       button: 0,
       clientX: endClientX,
-      clientY: rect.top + endRow * cellHeight + 1
+      clientY: contentTop + endRow * cellHeight + 1
     }))
     const selected = candidate.terminal.getSelection()
     if (selected !== path) throw new Error(`Soft-wrapped selection mismatch. expected="${path}" actual="${selected}"`)
@@ -1432,9 +1447,11 @@ const runTerminalStressHarness = async (
       errors.push(error instanceof Error ? error.message : String(error))
     } finally {
       switchProbeActive = false
-      if (pendingPaintProbe) {
+      if (running && pendingPaintProbe) {
         pendingPaintProbe = false
         void measureCurrentForegroundPaintLatency()
+      } else {
+        pendingPaintProbe = false
       }
     }
   }
@@ -1459,9 +1476,11 @@ const runTerminalStressHarness = async (
       )
     } finally {
       paintProbeActive = false
-      if (pendingSwitchProbe) {
+      if (running && pendingSwitchProbe) {
         pendingSwitchProbe = false
         void switchVisibleBackgroundPanel()
+      } else {
+        pendingSwitchProbe = false
       }
     }
   }
@@ -1486,6 +1505,15 @@ const runTerminalStressHarness = async (
   window.clearInterval(queueTimer)
   window.clearInterval(latencyTimer)
   if (switchTimer !== null) window.clearInterval(switchTimer)
+  pendingPaintProbe = false
+  pendingSwitchProbe = false
+  const probeDrainDeadline = nowMs() + 10_000
+  while ((paintProbeActive || switchProbeActive) && nowMs() < probeDrainDeadline) {
+    await new Promise((resolve) => window.setTimeout(resolve, 25))
+  }
+  if (paintProbeActive || switchProbeActive) {
+    errors.push(`Timed out draining terminal stress probes. paint=${paintProbeActive} switch=${switchProbeActive}`)
+  }
   input.flushAllTerminalIngressBatches()
   input.flushAllTerminalHistoryBatches()
   await realCat.waitForCompletion(Math.max(30_000, Math.min(120_000, Math.floor(durationMs / 5))))

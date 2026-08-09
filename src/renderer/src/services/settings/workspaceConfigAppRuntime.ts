@@ -291,9 +291,11 @@ export const normalizeOnboardingConfig = (source?: UserConfig['onboarding']) => 
 }
 
 export const stripBusinessDataConfig = (source: Partial<UserConfig>): Partial<UserConfig> => {
-  const { quickCommands, knowledgeBase, ...rest } = source
+  const { quickCommands, knowledgeBase, shortcuts, rules, ...rest } = source
   void quickCommands
   void knowledgeBase
+  void shortcuts
+  void rules
   return rest
 }
 

@@ -1320,7 +1320,7 @@ describe('threadedTerminalRuntime', () => {
     expect(surface).toBeTruthy()
     Object.defineProperty(surface, 'getBoundingClientRect', {
       configurable: true,
-      value: () => ({ left: 100, top: 50, width: 790, height: 400, right: 890, bottom: 450, x: 100, y: 50, toJSON: () => ({}) })
+      value: () => ({ left: 0, top: 0, width: 1200, height: 900, right: 1200, bottom: 900, x: 0, y: 0, toJSON: () => ({}) })
     })
     host.applySnapshot({
       terminalId: 'panel-1',

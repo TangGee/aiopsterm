@@ -9781,7 +9781,7 @@ describe('AppShell', () => {
     expect(invalidSettingsResponse).toEqual(expect.objectContaining({ ok: false, errorCode: 'SETTINGS_TARGET_INVALID' }))
 
     const settingsGetResponse = await invokeControlHandler({ id: 'settings-get', method: 'settings.get', params: { path: 'terminal.fontSize' } })
-    expect(settingsGetResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ setting: expect.objectContaining({ path: 'terminal.fontSize', value: 12 }) }) }))
+    expect(settingsGetResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ setting: expect.objectContaining({ path: 'terminal.fontSize', value: 13 }) }) }))
 
     vi.mocked(window.aiops.saveConfig).mockClear()
     const settingsPutResponse = await invokeControlHandler({ id: 'settings-put', method: 'settings.put', params: { path: 'terminal.fontSize', value: 15 } })
@@ -10424,14 +10424,14 @@ describe('AppShell', () => {
     await expect(store.updateTerminalSettings({ pinchZoomStatus: false })).resolves.toBe(true)
     await dispatchTerminalWheel(-120)
     await waitForAnimationFrames(2)
-    expect(firstTerminal.options.fontSize).toBe(12)
+    expect(firstTerminal.options.fontSize).toBe(13)
     await expect(store.updateTerminalSettings({ pinchZoomStatus: true })).resolves.toBe(true)
     await dispatchTerminalWheel(-120)
     await waitForAnimationFrames(2)
-    expect(firstTerminal.options.fontSize).toBe(13)
+    expect(firstTerminal.options.fontSize).toBe(14)
     await dispatchTerminalWheel(120)
     await waitForAnimationFrames(2)
-    expect(firstTerminal.options.fontSize).toBe(12)
+    expect(firstTerminal.options.fontSize).toBe(13)
 
     await wrapper.find('.terminal-tab.active .terminal-tab-close').trigger('click')
     await wrapper.vm.$nextTick()
@@ -10456,13 +10456,13 @@ describe('AppShell', () => {
 
     const sourceTerminal = mockXtermInstances.at(-2)!
     const splitTerminal = mockXtermInstances.at(-1)!
-    expect(sourceTerminal.options.fontSize).toBe(12)
-    expect(splitTerminal.options.fontSize).toBe(12)
+    expect(sourceTerminal.options.fontSize).toBe(13)
+    expect(splitTerminal.options.fontSize).toBe(13)
     await wrapper.find('.terminal-pane.active .xterm-host').trigger('contextmenu')
     await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('字体放大'))!.trigger('click')
     await waitForAnimationFrames(2)
-    expect(splitTerminal.options.fontSize).toBe(13)
-    expect(sourceTerminal.options.fontSize).toBe(12)
+    expect(splitTerminal.options.fontSize).toBe(14)
+    expect(sourceTerminal.options.fontSize).toBe(13)
 
     const secondSplitSourceId = store.activePanelId
     await wrapper.find('.terminal-pane.active .xterm-host').trigger('contextmenu')
@@ -10946,7 +10946,7 @@ describe('AppShell', () => {
     const firstHost = wrapper.find('.xterm-host')
     const styles = appStyles()
     expect(styles).toMatch(/\.xterm-host \{[\s\S]*?min-height: 0;[\s\S]*?min-width: 0;[\s\S]*?overflow: hidden;[\s\S]*?display: grid;[\s\S]*?box-sizing: border-box;[\s\S]*?\}/)
-    expect(styles).toContain('padding: 10px 10px 16px;')
+    expect(styles).toContain('padding: 6px 8px;')
     Object.defineProperty(firstHost.element, 'clientHeight', { configurable: true, value: 360 })
     xterm.rows = 20
     xterm.buffer.active.viewportY = 0
@@ -11560,10 +11560,10 @@ describe('AppShell', () => {
 
     const zoomInEvent = new KeyboardEvent('keydown', { key: '=', ctrlKey: true, bubbles: true, cancelable: true })
     expect(terminal.emitKeyEvent(zoomInEvent)).toBe(false)
-    expect(terminal.options.fontSize).toBe(13)
+    expect(terminal.options.fontSize).toBe(14)
     const zoomResetEvent = new KeyboardEvent('keydown', { key: '0', ctrlKey: true, bubbles: true, cancelable: true })
     expect(terminal.emitKeyEvent(zoomResetEvent)).toBe(false)
-    expect(terminal.options.fontSize).toBe(12)
+    expect(terminal.options.fontSize).toBe(13)
 
     const pageUpEvent = new KeyboardEvent('keydown', { key: 'PageUp', shiftKey: true, bubbles: true, cancelable: true })
     expect(terminal.emitKeyEvent(pageUpEvent)).toBe(false)
@@ -18179,12 +18179,12 @@ describe('AppShell', () => {
       terminal: savedTerminalSettings
     })
     const fontSizeInput = workspace.findAll('input.settings-number').at(0)!
-    expect((fontSizeInput.element as HTMLInputElement).value).toBe('12')
+    expect((fontSizeInput.element as HTMLInputElement).value).toBe('13')
     await fontSizeInput.setValue('18')
     await flushPromises()
     expect(store.settingsNotice).toBe('终端设置保存失败')
-    expect(store.terminalSettings.fontSize).toBe(12)
-    expect((fontSizeInput.element as HTMLInputElement).value).toBe('12')
+    expect(store.terminalSettings.fontSize).toBe(13)
+    expect((fontSizeInput.element as HTMLInputElement).value).toBe('13')
 
     vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
       ...store.config,

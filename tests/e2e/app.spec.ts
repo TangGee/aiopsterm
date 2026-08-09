@@ -1,7 +1,7 @@
 import { _electron as electron, expect, test, type Locator, type Page } from '@playwright/test'
 import { createServer } from 'http'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
-import { chmod, mkdir, readFile, readdir, rm, writeFile } from 'fs/promises'
+import { access, chmod, mkdir, readFile, rm, writeFile } from 'fs/promises'
 import { createConnection, type AddressInfo } from 'net'
 import os from 'os'
 import path from 'path'
@@ -103,20 +103,22 @@ const socketJsonRequest = <T extends JsonObject = JsonObject>(socketPath: string
     socket.on('error', reject)
   })
 
-const firstSocketFile = async (directory: string) => {
-  const entries = await readdir(directory).catch(() => [])
-  return entries.find((entry) => entry.endsWith('.sock')) || ''
-}
-
-const controlSocketPathForUserData = (userDataDir: string, pid = process.pid) =>
-  pollValue(
+const controlSocketPathForUserData = (userDataDir: string, pid = process.pid) => {
+  const preferredPath = path.join(userDataDir, 'control', `aiopsterm-control-${pid}.sock`)
+  const expectedPath = process.platform === 'win32'
+    ? `\\\\.\\pipe\\aiopsterm-control-${pid}`
+    : process.platform === 'darwin' && Buffer.byteLength(preferredPath) > 103
+      ? path.join('/tmp', `aiopsterm-${typeof process.getuid === 'function' ? process.getuid() : 0}`, `aiopsterm-control-${pid}.sock`)
+      : preferredPath
+  if (process.platform === 'win32') return Promise.resolve(expectedPath)
+  return pollValue(
     async () => {
-      if (process.platform === 'win32') return `\\\\.\\pipe\\aiopsterm-control-${pid}`
-      const socketFile = await firstSocketFile(path.join(userDataDir, 'control'))
-      return socketFile ? path.join(userDataDir, 'control', socketFile) : ''
+      await access(expectedPath)
+      return expectedPath
     },
     (value) => typeof value === 'string' && value.length > 0
   )
+}
 
 const terminalReplayText = async (controlSocket: string, params: JsonObject = {}) => {
   const response = await socketJsonRequest(controlSocket, {
@@ -756,7 +758,16 @@ test('focus ownership survives module and window transitions @quick', async () =
       .poll(() => page.evaluate(() => Boolean(document.activeElement?.closest('.terminal-pane.active .xterm-host'))))
       .toBe(true)
 
-    await page.locator('.window-control-button').nth(1).click()
+    if (process.platform === 'darwin') {
+      await app.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows()[0]
+        window.minimize()
+        window.restore()
+        window.focus()
+      })
+    } else {
+      await page.locator('.window-control-button').nth(1).click()
+    }
     await expect
       .poll(() => page.evaluate(() => Boolean(document.activeElement?.closest('.terminal-pane.active .xterm-host'))))
       .toBe(true)
@@ -937,7 +948,7 @@ test('control socket and external Codex MCP expose automation without browser co
   const userDataDir = e2eUserDataDir('automation')
   const externalSocketPath = process.platform === 'win32'
     ? `\\\\.\\pipe\\aiopsterm-e2e-external-${Date.now()}`
-    : path.join(userDataDir, 'external-codex-mcp.sock')
+    : path.join('/tmp', `aiopsterm-e2e-external-${process.pid}-${Date.now()}.sock`)
   const externalToken = `e2e-token-${Date.now()}`
   const app = await launchApp(
     'automation',
@@ -1524,8 +1535,9 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.getByRole('heading', { name: '知识库' })).toBeVisible()
     await expect(page.getByText('commands')).toBeVisible()
     await page.locator('.kb-search input').fill('interface')
-    await expect(page.getByText('interface.png')).toBeVisible()
-    await expect(page.getByText('Summary to Doc.md')).not.toBeVisible()
+    await expect(page.locator('.kb-search-results')).toBeVisible()
+    await expect(page.locator('.kb-tree-node').filter({ hasText: 'interface.png' })).toBeVisible()
+    await expect(page.locator('.kb-tree-node').filter({ hasText: 'Summary to Doc.md' })).toHaveCount(0)
     await page.locator('.kb-search input').fill('')
     await page.locator('.kb-add-button').click()
     await page.locator('.kb-add-menu button').filter({ hasText: '新建文件夹' }).click()
