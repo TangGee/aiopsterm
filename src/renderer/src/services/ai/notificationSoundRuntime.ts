@@ -2,6 +2,7 @@ import type { NotificationSoundPreset, NotificationUserConfig } from '@shared/co
 import { isSupportedLocale } from '@/i18n/runtime'
 import { translateStaticText } from '@/i18n/staticText'
 import type { SupportedLocale } from '@/i18n/messages'
+import approvalVoiceZhCnUrl from '@/assets/audio/notification-approval-voice-zh-CN.mp3'
 
 export type NotificationSoundContext = {
   title?: string
@@ -55,17 +56,24 @@ const playToneSequence = (frequencies: number[], durationMs = 90, gapMs = 28) =>
   }
 }
 
-const playCustomSound = (url: string) => {
+const playAudioFile = (url: string, volume: number) => {
   if (!url || typeof Audio === 'undefined') return false
   try {
     const audio = new Audio(url)
     audio.preload = 'auto'
-    audio.volume = 0.86
+    audio.volume = volume
     void audio.play().catch(() => undefined)
     return true
   } catch {
     return false
   }
+}
+
+const playCustomSound = (url: string) => playAudioFile(url, 0.86)
+
+const playBundledApprovalVoice = () => {
+  if (!documentLocale().startsWith('zh')) return false
+  return playAudioFile(approvalVoiceZhCnUrl, 0.96)
 }
 
 const speakApprovalVoice = () => {
@@ -87,9 +95,7 @@ const speakApprovalVoice = () => {
 const playBuiltInPreset = (preset: NotificationSoundPreset) => {
   if (preset === 'soft-ding') return playToneSequence([523, 659], 120, 42)
   if (preset === 'approval-voice') {
-    const tonePlayed = playToneSequence([659, 784, 988], 72, 24)
-    const voicePlayed = speakApprovalVoice()
-    return tonePlayed || voicePlayed
+    return playBundledApprovalVoice() || speakApprovalVoice() || playToneSequence([659, 784, 988], 72, 24)
   }
   return playToneSequence([880, 1175], 86, 28)
 }
