@@ -11,7 +11,19 @@ os.makedirs(OUT, exist_ok=True)
 
 ACCENT = (255, 109, 58, 255)      # orange
 BADGE_TEXT = (255, 255, 255, 255)
-FONT = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 20)
+
+def load_badge_font():
+    candidates = [
+        '/System/Library/Fonts/Supplemental/Arial Bold.ttf',
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+        'C:/Windows/Fonts/arialbd.ttf',
+    ]
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return ImageFont.truetype(candidate, 20)
+    return ImageFont.load_default(size=20)
+
+FONT = load_badge_font()
 
 def load(name):
     im = Image.open(f'{RAW}/{name}.png').convert('RGBA')
@@ -150,6 +162,12 @@ FIGS = [
   dict(src='08-ai-sessions', out='ai-sessions-inbox', crop=(0, 30, 460, 560), scale=1.5, callouts=[
     dict(n=1, box=dict(x=6, y=38, w=34, h=34), side='right', dist=55),
   ]),
+  dict(src='08b-ai-session-content', out='ai-session-content', callouts=[
+    dict(n=1, key='toolbar', side='bottom', dist=45),
+    dict(n=2, key='record', side='left', dist=45, pad=2),
+    dict(n=3, key='actions', side='left', dist=45),
+    dict(n=4, key='status', side='top', dist=45),
+  ]),
   dict(src='06b-ai-project-files', out='ai-project-files', crop=(930, 30, 1440, 900), scale=1.2, callouts=[
     dict(n=1, key='header', side='left', dist=50),
     dict(n=2, key='recent', side='left', dist=50),
@@ -160,6 +178,11 @@ FIGS = [
     dict(n=1, key='toolbarLeft', side='bottom', dist=45),
     dict(n=2, key='toolbarRight', side='bottom-right', dist=45),
     dict(n=3, key='item', side='bottom', dist=50),
+  ]),
+  dict(src='09b-files-workspace', out='files-workspace', callouts=[
+    dict(n=1, key='modeSwitch', side='bottom', dist=45),
+    dict(n=2, key='leftSide', side='top', dist=40, pad=2),
+    dict(n=3, key='rightSide', side='top', dist=40, pad=2),
   ]),
   # ---- knowledge ----
   dict(src='10-knowledge', out='knowledge-tree', crop=(0, 30, 460, 900), scale=1.4, callouts=[
@@ -173,17 +196,34 @@ FIGS = [
     dict(n=2, key='modeToggle', side='bottom-left', dist=55),
     dict(n=3, key='editor', side='bottom-left', dist=1, outline=False),
   ]),
+  # ---- extensions ----
+  dict(src='11a-extensions-workspace', out='extensions-workspace', callouts=[
+    dict(n=1, key='search', side='bottom', dist=45),
+    dict(n=2, key='item', side='bottom-right', dist=50),
+    dict(n=3, key='detail', side='top-left', dist=1, outline=False),
+    dict(n=4, key='dragTarget', side='bottom-right', dist=45),
+  ]),
   # ---- database and kubernetes ----
   dict(src='11b-database-workspace', out='database-workspace', callouts=[
     dict(n=1, key='sidebar', side='right', dist=50, pad=2),
     dict(n=2, key='tabs', side='bottom', dist=40),
     dict(n=3, key='overview', side='top-left', dist=1, outline=False),
   ]),
+  dict(src='11b2-database-ai-workflow', out='database-ai-workflow', callouts=[
+    dict(n=1, key='context', side='left', dist=50),
+    dict(n=2, key='composer', side='left', dist=50),
+    dict(n=3, key='sqlActions', side='left', dist=50),
+  ]),
   dict(src='11c-kubernetes-workspace', out='kubernetes-workspace', callouts=[
     dict(n=1, key='contexts', side='bottom', dist=40),
     dict(n=2, key='terminal', side='bottom', dist=40, pad=2),
     dict(n=3, key='clusterConfig', side='bottom', dist=40, pad=2),
     dict(n=4, key='resources', side='top', dist=40, pad=2),
+  ]),
+  dict(src='11d-kubernetes-ai-workflow', out='kubernetes-ai-workflow', callouts=[
+    dict(n=1, key='agentBar', side='bottom', dist=45),
+    dict(n=2, key='agentCommand', side='bottom', dist=45),
+    dict(n=3, key='sendAi', side='left', dist=55),
   ]),
   # ---- settings ----
   dict(src='12-settings-general', out='settings-general', callouts=[

@@ -12,8 +12,9 @@ type SettingsExternalActionsBackend = {
 
 let backend: SettingsExternalActionsBackend
 
-const makeRuntime = (root: string, opened: string[] = []) => ({
+const makeRuntime = (root: string, opened: string[] = [], resourcesPath?: string) => ({
   userDataPath: join(root, 'user-data'),
+  resourcesPath,
   cwd: root,
   version: '0.1.0',
   platform: 'linux',
@@ -42,6 +43,25 @@ describe('settings external action backend boundary', () => {
 
       expect(result).toEqual({ path: docsPath, title: 'aiopsterm Docs', content: '# aiopsterm Docs\n' })
       expect(opened).toEqual([])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('prefers packaged resources documentation over the process working directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-settings-resource-docs-'))
+    try {
+      const resourcesPath = join(root, 'resources')
+      const packagedPath = join(resourcesPath, 'docs', 'usage', 'settings', 'zh-CN', 'general.md')
+      const workingPath = join(root, 'docs', 'usage', 'settings', 'zh-CN', 'general.md')
+      await mkdir(join(resourcesPath, 'docs', 'usage', 'settings', 'zh-CN'), { recursive: true })
+      await mkdir(join(root, 'docs', 'usage', 'settings', 'zh-CN'), { recursive: true })
+      await writeFile(packagedPath, '# 打包通用设置\n', 'utf-8')
+      await writeFile(workingPath, '# 工作目录通用设置\n', 'utf-8')
+
+      const result = await backend.openSettingsDocumentation(makeRuntime(root, [], resourcesPath), { page: 'general', locale: 'zh-CN' })
+
+      expect(result).toEqual({ path: packagedPath, title: '打包通用设置', content: '# 打包通用设置\n' })
     } finally {
       await rm(root, { recursive: true, force: true })
     }

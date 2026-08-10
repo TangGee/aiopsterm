@@ -3,6 +3,7 @@
     ref="previewRef"
     class="kb-markdown-preview"
     v-html="html"
+    @click="handleClick"
   ></div>
 </template>
 
@@ -12,6 +13,10 @@ import 'highlight.js/styles/atom-one-dark.css'
 
 defineProps<{
   html: string
+}>()
+
+const emit = defineEmits<{
+  navigate: [href: string]
 }>()
 
 const previewRef = ref<HTMLDivElement | null>(null)
@@ -48,7 +53,25 @@ const renderMermaid = async (theme: 'dark' | 'default') => {
   }
 }
 
+const scrollToAnchor = (anchor: string) => {
+  if (!anchor || !previewRef.value) return false
+  const target = Array.from(previewRef.value.querySelectorAll<HTMLElement>('[id]')).find((element) => element.id === anchor)
+  target?.scrollIntoView({ block: 'start' })
+  return Boolean(target)
+}
+
+const handleClick = (event: MouseEvent) => {
+  const link = (event.target as HTMLElement | null)?.closest<HTMLAnchorElement>('a[href]')
+  if (!link) return
+  const href = link.getAttribute('href') || ''
+  if (!href) return
+  event.preventDefault()
+  event.stopPropagation()
+  emit('navigate', href)
+}
+
 defineExpose({
-  renderMermaid
+  renderMermaid,
+  scrollToAnchor
 })
 </script>

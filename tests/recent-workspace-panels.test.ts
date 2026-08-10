@@ -100,8 +100,8 @@ describe('RecentWorkspacePanels', () => {
 
     expect(workspace.triggerShortcutAction('navigatePanelBack')).toBe(true)
     expect(workspace.activePanelId).toBe(first.id)
-    expect(workspace.mode).toBe('terminal')
-    expect(workspace.activeModule).toBe('workspace')
+    expect(workspace.mode).toBe('agents')
+    expect(workspace.activeModule).toBe('settings')
     expect(workspace.panelFocusRequest).toEqual(expect.objectContaining({
       panelId: first.id,
       cause: 'keyboard'

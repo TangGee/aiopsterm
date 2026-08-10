@@ -2,7 +2,7 @@
 
 This page controls AI session discovery, notifications, hibernation, external notification protocol alerts, and notification automation entries for local-connection terminals.
 
-For operator workflows, see [AI Assistant And Sessions](../../best-practices/en-US/03-ai-assistant.md). Custom agent and script authors should use the [AI Session, File Change, And Notification Integration Guide](../../../developer/en-US/ai-notification-integration.md).
+For operator workflows, see [AI Session Management](../../best-practices/en-US/05-ai-sessions.md). Custom agent and script authors should use the [AI Session, File Change, And Notification Integration Guide](../../../developer/en-US/ai-notification-integration.md).
 
 ## Notification Preferences
 

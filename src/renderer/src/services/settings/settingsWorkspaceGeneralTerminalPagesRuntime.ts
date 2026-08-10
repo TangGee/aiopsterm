@@ -64,7 +64,7 @@ export const createSettingsWorkspaceGeneralTerminalPages = (
                     h('button', {
                       key: preset.id,
                       class: ['settings-bg-tile preset', { active: workspace.config.background.image === preset.id }],
-                      style: { background: preset.css },
+                      style: { backgroundImage: preset.css },
                       title: preset.label,
                       'data-onboarding-id': preset.id === settingsBackgroundPresets[0]?.id ? 'settings-background-preset' : undefined,
                       onClick: () => workspace.selectBackground('preset', preset.id)

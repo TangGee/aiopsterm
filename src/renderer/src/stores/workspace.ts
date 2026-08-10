@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import { createWorkspaceStoreState } from '@/stores/workspaceState'
+import { defaultCenterSurfaceForModule } from '@/config/navigation'
 import { createWorkspaceFilesController, type FilesUiMode } from '@/services/files/workspaceFilesController'
 import {
   createWorkspaceAiChatController,
@@ -175,6 +176,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const {
     mode,
     activeModule,
+    activeCenterSurface,
     leftPanelOpen,
     rightPanelOpen,
     agentsLeftOpen,
@@ -401,9 +403,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     userLoginCodeSending
   } = createWorkspaceStoreState()
 
+  watch(
+    activeModule,
+    (module) => {
+      activeCenterSurface.value = defaultCenterSurfaceForModule(module)
+    },
+    { flush: 'sync' }
+  )
+
   const panelNavigationRuntime = createWorkspacePanelNavigationRuntime({
     mode,
-    activeModule,
+    activeCenterSurface,
     activePanelId,
     panels
   })
@@ -539,6 +549,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     {
       mode,
       activeModule,
+      activeCenterSurface,
       leftPanelOpen,
       rightPanelOpen,
       agentsLeftOpen,
@@ -567,7 +578,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     {
       setTopNotice,
       i18nText,
-      activatePanelSurface: panelNavigationRuntime.activatePanelSurface,
+      activatePanelSurface: panelNavigationRuntime.revealPanelSurface,
       runTerminalCommand: (...args) => runTerminalCommand(...args)
     }
   )
@@ -617,6 +628,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     {
       mode,
       activeModule,
+      activeCenterSurface,
       activePanelId,
       panels,
       config,
@@ -1043,6 +1055,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   } = createWorkspaceAiChatController(
     {
       mode,
+      activeCenterSurface,
       config,
       aiPreferences,
       conversations,
@@ -1201,6 +1214,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     {
       mode,
       activeModule,
+      activeCenterSurface,
       leftPanelOpen,
       rightPanelOpen,
       agentsLeftOpen,
@@ -1291,12 +1305,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     switchToTerminalPanelIndex,
     triggerShortcutAction,
     setActiveModule,
+    setActiveCenterSurface,
+    showMainWorkspace,
     openAssetManagement,
     handleDeepLink
   } = createWorkspaceShellController(
     {
       mode,
       activeModule,
+      activeCenterSurface,
       leftPanelOpen,
       rightPanelOpen,
       agentsLeftOpen,
@@ -1385,6 +1402,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   return {
     mode,
     activeModule,
+    activeCenterSurface,
     leftPanelOpen,
     rightPanelOpen,
     agentsLeftOpen,
@@ -1828,6 +1846,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     confirmTrustedDeviceRevoke,
     toggleMode,
     setActiveModule,
+    setActiveCenterSurface,
+    showMainWorkspace,
     openAssetManagement,
     openAiSessionSettings,
     setFilesUiMode,

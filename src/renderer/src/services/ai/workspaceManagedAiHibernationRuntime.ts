@@ -183,8 +183,7 @@ export const createWorkspaceManagedAiHibernationRuntime = (input: {
     if (openLocalTerminalPanel) {
       const opened = await openLocalTerminalPanel({
         title: session.title,
-        cwd: session.cwd,
-        preserveActiveModule: true
+        cwd: session.cwd
       })
       panel = opened ? panels.value.find((item) => item.id === opened.id || item.sessionId === opened.sessionId) || opened : null
     }

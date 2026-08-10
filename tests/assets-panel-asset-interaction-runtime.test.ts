@@ -60,7 +60,8 @@ describe('assetsPanelAssetInteractionRuntime', () => {
       applySshTerminalSession: vi.fn(),
       registerSshSession: vi.fn(),
       nextOnboardingStep: vi.fn(),
-      setActiveModule: vi.fn()
+      setActiveModule: vi.fn(),
+      setTopNotice: vi.fn()
     } as any
     const openSshTerminalLaunch = vi.fn(async () => ({ id: 'panel-2' }))
     const runtime = createAssetsPanelAssetInteractionRuntime({
@@ -101,6 +102,7 @@ describe('assetsPanelAssetInteractionRuntime', () => {
 
     contextAssetId.value = 'org-1'
     await runtime.connectAsset('org-1')
+    expect(workspace.setActiveModule).toHaveBeenCalledWith('workspace')
     expect(selectedAssetId.value).toBe('org-1')
     expect(openSshTerminalLaunch).toHaveBeenCalled()
     expect(workspace.selectedContexts).toEqual([{
@@ -117,7 +119,7 @@ describe('assetsPanelAssetInteractionRuntime', () => {
     expect(editorOpen.value).toBe(false)
     expect(editMode.value).toBe(false)
     expect(workspace.nextOnboardingStep).toHaveBeenCalled()
-    expect(workspace.setActiveModule).toHaveBeenCalledWith('workspace')
+    expect(workspace.setActiveModule.mock.invocationCallOrder[0]).toBeLessThan(openSshTerminalLaunch.mock.invocationCallOrder[0])
 
     await runtime.refreshOrganizationAsset()
     expect(refreshOrganizationAssets).toHaveBeenCalledWith('org-1', '刷新堡垒机资源失败。')

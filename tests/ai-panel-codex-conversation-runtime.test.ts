@@ -492,7 +492,7 @@ describe('aiPanelCodexConversationRuntime', () => {
       ok: true,
       data: { session: { ...closedSession, ...input, updatedAt: 3 } }
     }))
-    const { panels, runtime, terminalRuntime } = createHarness()
+    const { openTerminalForAiHostContext, panels, runtime, terminalRuntime } = createHarness({ agentMode: true })
     panels[1].cwd = '/srv/other'
 
     runtime.startInitialMode()
@@ -500,6 +500,10 @@ describe('aiPanelCodexConversationRuntime', () => {
     terminalRuntime.calls.startSession.mockClear()
 
     await expect(runtime.restoreCodexProductSession(closedSession.id)).resolves.toBe(false)
+    expect(openTerminalForAiHostContext).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'asset-1', kind: 'hosts' }),
+      expect.objectContaining({ cwd: '/srv/app' })
+    )
     expect(runtime.activeCodexConversation.value).toBeNull()
     expect(terminalRuntime.calls.startSession).not.toHaveBeenCalled()
     runtime.dispose()
@@ -688,7 +692,7 @@ describe('aiPanelCodexConversationRuntime', () => {
         }
       }
     }))
-    const { activateTerminalPanel, runtime, terminalRuntime } = createHarness()
+    const { activateTerminalPanel, runtime, terminalRuntime } = createHarness({ agentMode: true })
 
     runtime.startInitialMode()
     await vi.waitFor(() => expect(runtime.codexSessionHistory.value).toContainEqual(closedSession))

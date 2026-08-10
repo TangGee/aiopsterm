@@ -59,7 +59,10 @@ type AiPanelCodexConversationRuntimeInput = {
   showNotice: (message: string) => void
   setTopNotice: (message: string) => void
   refreshAiContextCatalog: () => Promise<unknown>
-  openTerminalForAiHostContext: (host: AiContextOption, options?: { cwd?: string; silent?: boolean }) => Promise<TerminalPanel | null | undefined>
+  openTerminalForAiHostContext: (
+    host: AiContextOption,
+    options?: { cwd?: string; silent?: boolean }
+  ) => Promise<TerminalPanel | null | undefined>
   activateTerminalPanel: (panelId: string) => TerminalPanel | null | undefined
   upsertAiAttentionItem: (input: AiAttentionInput) => void
   removeAiAttentionItem: (id: string) => void | boolean
@@ -270,7 +273,9 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
       username: stored.username,
       assetName: stored.assetName,
       isLocalShell: stored.kind === 'local'
-    }, desiredCwd ? { cwd: desiredCwd } : undefined)
+    }, {
+      ...(desiredCwd ? { cwd: desiredCwd } : {})
+    })
     if (!panel?.sessionId || panel.status === 'closed' || panel.status === 'error') return null
     const target = codexTargetContextFromPanel(panel)
     if (stored.kind !== 'local' && !productTargetMatchesLiveTarget(stored, target)) return null
@@ -470,7 +475,8 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     if (aiPanelWorkspaceLinkMode.value !== 'follow-workspace') return false
     const target = conversation ? currentBoundCodexTarget(conversation) || conversation.boundTarget : null
     if (!target?.sessionId) return false
-    const panel = options.activateTerminalPanel(target.panelId || target.sessionId)
+    const panelId = target.panelId || target.sessionId
+    const panel = options.activateTerminalPanel(panelId)
     if (!panel) {
       if (conversation) conversation.error = t('ai.codexTargetClosed')
       return false
@@ -801,7 +807,8 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     if (!conversation) return
     const target = conversation.boundTarget
     if (!target?.sessionId) return
-    const panel = options.activateTerminalPanel(target.panelId || target.sessionId)
+    const panelId = target.panelId || target.sessionId
+    const panel = options.activateTerminalPanel(panelId)
     if (!panel) {
       conversation.error = t('ai.codexTargetClosed')
       return

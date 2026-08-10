@@ -1,6 +1,6 @@
 import { type Ref } from 'vue'
 import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
-import type { ModuleKey } from '@/config/navigation'
+import { defaultCenterSurfaceForModule, type CenterSurface, type ModuleKey } from '@/config/navigation'
 import type { SettingSectionKey } from '@/config/settings'
 import type { UserConfig } from '@shared/contracts/userConfig'
 import { isTerminalWorkspacePanel, type TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
@@ -18,6 +18,7 @@ export type AssetManagementOpenRequest = {
 type WorkspaceShellControllerState = {
   mode: Ref<'terminal' | 'agents'>
   activeModule: Ref<ModuleKey>
+  activeCenterSurface: Ref<CenterSurface>
   leftPanelOpen: Ref<boolean>
   rightPanelOpen: Ref<boolean>
   agentsLeftOpen: Ref<boolean>
@@ -49,6 +50,7 @@ export const createWorkspaceShellController = (
   const {
     mode,
     activeModule,
+    activeCenterSurface,
     leftPanelOpen,
     rightPanelOpen,
     agentsLeftOpen,
@@ -77,13 +79,14 @@ export const createWorkspaceShellController = (
     const terminalPanels = panels.value.filter((panel) => isTerminalWorkspacePanel(panel))
     const target = terminalPanels[index]
     if (!target) return false
+    if (mode.value !== 'agents') activeCenterSurface.value = 'main-workspace'
     return activatePanelSurface(target.id, { cause: 'keyboard' })
   }
 
   const triggerShortcutAction = (actionId: string, digit?: number) => {
     if (actionId === 'newTerminal') {
       mode.value = 'terminal'
-      activeModule.value = 'workspace'
+      activeCenterSurface.value = 'main-workspace'
       const source = panels.value.find((panel) => panel.id === activePanelId.value)
       const cwd = !source?.sshSession && source?.sessionId && source.cwd?.trim() ? source.cwd.trim() : undefined
       void openLocalTerminalPanel(cwd ? { cwd } : undefined).then((panel) => {
@@ -93,7 +96,7 @@ export const createWorkspaceShellController = (
     }
     if (actionId === 'toggleAi') {
       mode.value = 'terminal'
-      if (activeModule.value === 'database' || activeModule.value === 'user') activeModule.value = 'workspace'
+      activeCenterSurface.value = 'main-workspace'
       void toggleRight()
       return true
     }
@@ -121,10 +124,19 @@ export const createWorkspaceShellController = (
 
   const setActiveModule = (key: ModuleKey) => {
     activeModule.value = key
+    activeCenterSurface.value = defaultCenterSurfaceForModule(key)
     if (key !== 'settings') onboardingGuideOpen.value = false
     if (key === 'database') {
       rightPanelOpen.value = false
     }
+  }
+
+  const setActiveCenterSurface = (surface: CenterSurface) => {
+    activeCenterSurface.value = surface
+  }
+
+  const showMainWorkspace = () => {
+    if (mode.value !== 'agents') activeCenterSurface.value = 'main-workspace'
   }
 
   const openAssetManagement = (
@@ -134,6 +146,7 @@ export const createWorkspaceShellController = (
   ) => {
     mode.value = 'terminal'
     activeModule.value = 'assets'
+    activeCenterSurface.value = 'assets'
     leftPanelOpen.value = true
     rightPanelOpen.value = config.value.rightPanelOpen
     onboardingGuideOpen.value = false
@@ -162,6 +175,7 @@ export const createWorkspaceShellController = (
     const targetModule = payload.module || payload.target
     mode.value = 'terminal'
     activeModule.value = targetModule
+    activeCenterSurface.value = defaultCenterSurfaceForModule(targetModule)
     if (targetModule === 'settings') {
       rightPanelOpen.value = false
       setActiveSettingsSection(payload.settingsSection || 'general')
@@ -181,6 +195,8 @@ export const createWorkspaceShellController = (
     switchToTerminalPanelIndex,
     triggerShortcutAction,
     setActiveModule,
+    setActiveCenterSurface,
+    showMainWorkspace,
     openAssetManagement,
     handleDeepLink
   }

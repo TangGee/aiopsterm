@@ -88,6 +88,7 @@ export const createAssetsPanelAssetInteractionRuntime = (deps: AssetsPanelAssetI
       return
     }
     deps.selectedAssetId.value = asset.id
+    deps.workspace.setActiveModule('workspace')
     const previousActivePanelId = deps.workspace.activePanelId
     deps.workspace.createPanel()
     deps.workspace.renamePanel(deps.workspace.activePanelId, asset.name || asset.title, 'auto')
@@ -101,6 +102,7 @@ export const createAssetsPanelAssetInteractionRuntime = (deps: AssetsPanelAssetI
         discardPendingPanel,
         setNotice: (message) => {
           deps.importNotice.value = message
+          deps.workspace.setTopNotice(message)
           deps.closeAssetContextMenus()
         },
         applyLocalTerminalSession: deps.workspace.applyLocalTerminalSession,
@@ -132,7 +134,6 @@ export const createAssetsPanelAssetInteractionRuntime = (deps: AssetsPanelAssetI
     if (deps.workspace.onboardingActiveTour === 'addAndConnectHost') {
       deps.workspace.nextOnboardingStep()
     }
-    deps.workspace.setActiveModule('workspace')
     deps.closeAssetContextMenus()
   }
 

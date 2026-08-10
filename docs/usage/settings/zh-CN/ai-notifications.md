@@ -2,7 +2,7 @@
 
 本页控制 AI 会话被发现、提醒和休眠的行为，以及外部通知协议产生的提醒和本地连接终端里的通知自动化入口。
 
-按用户场景配置请看 [AI 助手与会话管理](../../best-practices/zh-CN/03-ai-assistant.md)；自研 Agent 或脚本接入请看 [AI 会话、文件变更与通知开发指南](../../../developer/zh-CN/ai-notification-integration.md)。
+按用户场景配置请看 [AI 会话管理](../../best-practices/zh-CN/05-ai-sessions.md)；自研 Agent 或脚本接入请看 [AI 会话、文件变更与通知开发指南](../../../developer/zh-CN/ai-notification-integration.md)。
 
 ## 通知偏好
 

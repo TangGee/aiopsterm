@@ -87,6 +87,7 @@ configureRuntimeLog({ getLogDir: getLogDirPath })
 const settingsExternalActionRuntime = () => ({
   userDataPath: app.getPath('userData'),
   appPath: app.getAppPath(),
+  resourcesPath: process.resourcesPath,
   cwd: process.cwd(),
   moduleDir: __dirname,
   version: app.getVersion(),
@@ -137,7 +138,7 @@ const knowledgeBaseRuntime = createKnowledgeBaseRuntime({
   saveKnowledgeBase: (knowledgeBase) => store.set('config', mergeConfig(getConfig(), { knowledgeBase })),
   bundledDocsPath: () =>
     app.isPackaged
-      ? join(process.resourcesPath || '', 'docs', 'best-practices')
+      ? join(process.resourcesPath || '', 'docs', 'usage', 'best-practices')
       : join(app.getAppPath(), 'docs', 'usage', 'best-practices'),
   bundledDocsVersion: () => app.getVersion()
 })
@@ -354,6 +355,11 @@ app.whenReady().then(async () => {
     normalizeMcpConfigFile,
     broadcastAiAgentSessionEvent,
     broadcastManagedAiSessionFocusRequest
+  })
+  await knowledgeBaseRuntime.ensureKnowledgeBaseDirectory().catch((error) => {
+    logRuntimeEvent('warn', 'knowledge-base.bundled-docs-sync-failed', {
+      error: error instanceof Error ? error.message : String(error)
+    })
   })
   await ensureControlSocketServer(app.getPath('userData'))
   await ensureAiAgentSessionServer({

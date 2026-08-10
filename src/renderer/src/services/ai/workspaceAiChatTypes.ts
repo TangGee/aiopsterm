@@ -1,4 +1,5 @@
 import type { Ref } from 'vue'
+import type { CenterSurface } from '@/config/navigation'
 import type { I18nKey } from '@/i18n/messages'
 import type { TerminalCommandSource, TerminalSecurityDecision } from '@/services/terminal/terminalExecutionRuntime'
 import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
@@ -82,6 +83,7 @@ export type WorkspaceAiChatTerminalPanel = Pick<
 
 export type WorkspaceAiChatControllerState = {
   mode: Ref<'terminal' | 'agents'>
+  activeCenterSurface: Ref<CenterSurface>
   config: Ref<UserConfig>
   aiPreferences: Ref<AiPreferenceSettings>
   conversations: Ref<ConversationItem[]>
@@ -109,7 +111,10 @@ export type WorkspaceAiChatControllerDeps = {
   terminalPanels?: () => WorkspaceAiChatTerminalPanel[]
   resolveActiveWritableTerminalPanel: () => WorkspaceAiChatTerminalPanel | null | undefined
   resolveClassicHostTerminalPanel: (context: AiContextOption) => WorkspaceAiChatTerminalPanel | null | undefined
-  openTerminalForAiHostContext: (context: AiContextOption, options?: { cwd?: string; silent?: boolean }) => Promise<WorkspaceAiChatTerminalPanel | null | undefined>
+  openTerminalForAiHostContext: (
+    context: AiContextOption,
+    options?: { cwd?: string; silent?: boolean }
+  ) => Promise<WorkspaceAiChatTerminalPanel | null | undefined>
   restoreTerminalPanelSelection: (panelIdOrSessionId: string) => boolean
   runActiveTerminalCommand: (command: string, source?: TerminalCommandSource) => Promise<TerminalSecurityDecision | null>
   waitForTerminalOutputAfter: (panelId: string, startLength: number, timeoutMs?: number) => Promise<string>

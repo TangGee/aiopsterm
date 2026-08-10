@@ -159,7 +159,7 @@ export const createTerminalControlSurfacePaneHandlers = ({
 
   const focusControlPanel = async (panel: TerminalPanel, action: string) => {
     const previousActivePanelId = workspace.activePanelId
-    workspace.activatePanelSurface(panel.id, { cause: 'external' })
+    workspace.revealPanelSurface(panel.id, { cause: 'external' })
     await nextTick()
     if (isTerminalWorkspacePanel(panel)) requestExternalTerminalFocus(panel.id)
     return selectedPanePayload(panel, action, previousActivePanelId)
@@ -291,7 +291,7 @@ export const createTerminalControlSurfacePaneHandlers = ({
       if (Object.keys(workspaceEnv).length) {
         controlWorkspaceEnvironment.value = { env: workspaceEnv, updatedAt: Date.now() }
       }
-      if (focus) workspace.activatePanelSurface(panel.id, { cause: 'external' })
+      if (focus) workspace.revealPanelSurface(panel.id, { cause: 'external' })
       await nextTick()
       return managementPanelPayload(panel, 'new-window', 'createdPane', { previousActivePanelId })
     }
@@ -314,7 +314,7 @@ export const createTerminalControlSurfacePaneHandlers = ({
       if (title) workspace.renamePanel(panel.id, title)
       const cwd = controlText(params.cwd || params.workingDirectory || params.working_directory)
       if (cwd) panel.cwd = cwd
-      if (focus) workspace.activatePanelSurface(panel.id, { cause: 'external' })
+      if (focus) workspace.revealPanelSurface(panel.id, { cause: 'external' })
       await nextTick()
       if (focus) requestExternalTerminalFocus(panel.id)
       return managementPanelPayload(panel, 'surface.create', 'createdPane', {
@@ -357,7 +357,7 @@ export const createTerminalControlSurfacePaneHandlers = ({
       if (title) workspace.renamePanel(panel.id, title)
       const cwd = controlText(params.cwd || params.workingDirectory || params.working_directory)
       if (cwd) panel.cwd = cwd
-      if (focus) workspace.activatePanelSurface(panel.id, { cause: 'external' })
+      if (focus) workspace.revealPanelSurface(panel.id, { cause: 'external' })
       await nextTick()
       return managementPanelPayload(panel, method === 'pane.create' ? 'pane.create' : 'split-window', 'createdPane', {
         targetPane: surfaceSummaryForControl(target),
@@ -444,7 +444,7 @@ export const createTerminalControlSurfacePaneHandlers = ({
       if (!panel) return controlFail('PANE_NOT_FOUND', 'Pane not found.')
       const focus = controlBool(params.focus, false)
       const changed = workspace.unsplitPanel(panel.id, { activation: 'preserve' })
-      if (focus) workspace.activatePanelSurface(panel.id, { cause: 'external' })
+      if (focus) workspace.revealPanelSurface(panel.id, { cause: 'external' })
       await nextTick()
       if (focus) requestExternalTerminalFocus(panel.id)
       return paneLayoutPayload(panel, null, { changed, broken: changed })
@@ -463,7 +463,7 @@ export const createTerminalControlSurfacePaneHandlers = ({
         normalizePaneLayoutDirection(params.direction || params.split),
         { activation: 'preserve' }
       )
-      if (focus) workspace.activatePanelSurface(panel.id, { cause: 'external' })
+      if (focus) workspace.revealPanelSurface(panel.id, { cause: 'external' })
       await nextTick()
       if (focus) requestExternalTerminalFocus(panel.id)
       return paneLayoutPayload(panel, targetPanel, { changed, joined: changed })
@@ -492,7 +492,7 @@ export const createTerminalControlSurfacePaneHandlers = ({
       targetPanel.splitOrder = sourceSplitOrder
       workspace.swapPanelPositions(panel.id, targetPanel.id)
       if (controlBool(params.focus, false)) {
-        workspace.activatePanelSurface(targetPanel.id, { cause: 'external' })
+        workspace.revealPanelSurface(targetPanel.id, { cause: 'external' })
       }
       await nextTick()
       if (controlBool(params.focus, false)) requestExternalTerminalFocus(workspace.activePanelId)

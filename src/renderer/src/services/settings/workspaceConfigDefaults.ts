@@ -109,7 +109,7 @@ const defaultWorkspacePreferencesUserConfig: WorkspaceUserConfig = defaultWorksp
 const defaultModelSettingsUserConfig: ModelSettingsUserConfig = defaultModelSettingsData()
 
 export const defaultConfig: UserConfig = {
-  language: 'zh-CN',
+  language: 'system',
   theme: 'dark',
   defaultMode: 'terminal',
   leftPanelOpen: true,

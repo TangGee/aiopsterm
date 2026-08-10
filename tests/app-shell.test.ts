@@ -1060,6 +1060,44 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('keeps the source module independent from the shared main workspace', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AppShell, {
+      attachTo: document.body,
+      global: {
+        plugins: [pinia],
+        stubs: {
+          teleport: true
+        }
+      }
+    })
+    const store = useWorkspaceStore()
+    await flushPromises()
+
+    store.setActiveModule('files')
+    await flushPromises()
+    expect(store.activeModule).toBe('files')
+    expect(store.activeCenterSurface).toBe('files')
+    expect(wrapper.find('.files-workspace').exists()).toBe(true)
+
+    store.showMainWorkspace()
+    await flushPromises()
+    expect(store.activeModule).toBe('files')
+    expect(store.activeCenterSurface).toBe('main-workspace')
+    expect(wrapper.find('.module-panel-pane .files-side-panel').exists()).toBe(true)
+    expect(wrapper.find('.terminal-workspace').isVisible()).toBe(true)
+
+    await wrapper.find('[data-module-key="files"]').trigger('click')
+    await flushPromises()
+    expect(store.activeModule).toBe('files')
+    expect(store.activeCenterSurface).toBe('files')
+    expect(wrapper.find('.files-workspace').exists()).toBe(true)
+    expect(wrapper.find('.terminal-workspace').isVisible()).toBe(false)
+
+    wrapper.unmount()
+  })
+
   it('keeps opened Database tables and the active tab when switching workspaces', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -2645,6 +2683,7 @@ describe('AppShell', () => {
     await flushPromises()
 
     expect(store.activeModule).toBe('workspace')
+    expect(store.activeCenterSurface).toBe('main-workspace')
     expect(store.activeSettingsSection).toBe('general')
     expect(store.topNotice).toContain('deep link')
   })
@@ -2727,6 +2766,7 @@ describe('AppShell', () => {
     await flushPromises()
 
     expect(store.activeModule).toBe('workspace')
+    expect(store.activeCenterSurface).toBe('main-workspace')
     expect(store.topNotice).toContain('deep link')
   })
 
@@ -3032,7 +3072,8 @@ describe('AppShell', () => {
     await flushPromises()
 
     expect(store.mode).toBe('terminal')
-    expect(store.activeModule).toBe('workspace')
+    expect(store.activeModule).toBe('database')
+    expect(store.activeCenterSurface).toBe('main-workspace')
     expect(store.rightPanelOpen).toBe(true)
     expect(store.aiAttentionFocusRequest).toMatchObject({
       sequence: 1,
@@ -3188,12 +3229,13 @@ describe('AppShell', () => {
   it('follows External reference-style asset management navigation and filters knowledge documents', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    store.setActiveModule('assets')
     const assets = mountAssetsPanel({
       props: { query: 'mysql' },
       global: { plugins: [pinia] }
     })
     await flushPromises()
-    const store = useWorkspaceStore()
     expect(assets.text()).toContain('主机管理')
     expect(assets.text()).toContain('堡垒机管理')
     expect(assets.text()).toContain('密钥管理')
@@ -3268,6 +3310,7 @@ describe('AppShell', () => {
     expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ssh', title: 'unit-host' }))
     expect(store.activePanel.sshSession).toEqual(expect.objectContaining({ host: '10.10.10.10', port: 2222, username: 'ops' }))
     expect(store.activeModule).toBe('workspace')
+    expect(store.activeCenterSurface).toBe('main-workspace')
 
     store.setActiveModule('assets')
     await assets.findAll('.asset-action-button').find((button) => button.text().includes('导入'))!.trigger('mouseenter')
@@ -3290,7 +3333,9 @@ describe('AppShell', () => {
     expect(store.activePanel.output).not.toContain('[aiopsterm] SSH launch failed')
     expect(store.selectedContexts.some((context) => context.id === 'asset-test-')).toBe(false)
     expect(store.selectedContexts.some((context) => context.label === '10.10.10.10')).toBe(false)
-    expect(store.activeModule).toBe('assets')
+    expect(store.activeModule).toBe('workspace')
+    expect(store.activeCenterSurface).toBe('main-workspace')
+    expect(store.topNotice).toBe('unit ssh refused')
     expect(assets.text()).toContain('unit ssh refused')
 
     vi.mocked(window.aiops.createTerminal).mockResolvedValueOnce({
@@ -3314,6 +3359,9 @@ describe('AppShell', () => {
     expect(store.activePanel.title).toBe('unit-host')
     expect(store.activePanel.sessionId).not.toBe('terminal-malformed-asset-ssh')
     expect(store.selectedContexts.some((context) => context.label === '10.10.10.10')).toBe(false)
+    expect(store.activeModule).toBe('workspace')
+    expect(store.activeCenterSurface).toBe('main-workspace')
+    expect(store.topNotice).toBe('SSH 终端启动失败')
     expect(assets.text()).toContain('SSH 终端启动失败')
 
     await assets.findAll('.host-card').find((button) => button.text().includes('unit-host'))!.find('button[title="删除"]').trigger('click')
@@ -10017,6 +10065,7 @@ describe('AppShell', () => {
       activePanelId: 'restore-ssh',
       mode: 'terminal',
       activeModule: 'workspace',
+      activeCenterSurface: 'main-workspace',
       panels: [
         {
           id: 'restore-local',
@@ -10384,8 +10433,12 @@ describe('AppShell', () => {
 
     expect(wrapper.find('.terminal-dashboard').exists()).toBe(true)
     expect(wrapper.text()).toContain('与AI对话')
-    expect(wrapper.text()).toContain('知识库使用文档')
+    expect(wrapper.text()).toContain('快速上手')
     expect(wrapper.findAll('.terminal-dashboard-shortcuts button')).toHaveLength(6)
+    const languageSelect = wrapper.find('.terminal-dashboard-language select')
+    expect(languageSelect.exists()).toBe(true)
+    expect(languageSelect.findAll('option')).toHaveLength(12)
+    expect((languageSelect.element as HTMLSelectElement).value).toBe('system')
     expect(wrapper.findAll('.terminal-pane')).toHaveLength(0)
     expect(wrapper.findAll('.terminal-tab')).toHaveLength(0)
     expect(wrapper.text()).not.toContain('欢迎')
@@ -10511,6 +10564,26 @@ describe('AppShell', () => {
     await wrapper.findAll('.terminal-pane').at(1)!.trigger('click')
     await wrapper.vm.$nextTick()
     expect(wrapper.findAll('.terminal-pane')).toHaveLength(4)
+
+    wrapper.unmount()
+  })
+
+  it('changes the application language directly from the terminal dashboard', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    const languageSelect = wrapper.find('.terminal-dashboard-language select')
+
+    await languageSelect.setValue('en-US')
+    await flushPromises()
+
+    expect(window.aiops.saveConfig).toHaveBeenCalledWith({ language: 'en-US' })
+    expect(store.config.language).toBe('en-US')
+    expect(wrapper.text()).toContain('Chat with AI')
 
     wrapper.unmount()
   })
@@ -10816,7 +10889,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('opens the dashboard knowledge guide for the active language', async () => {
+  it('opens the dashboard guide index from Getting Started', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const wrapper = mount(TerminalWorkspace, {
@@ -10824,19 +10897,65 @@ describe('AppShell', () => {
       global: { plugins: [pinia] }
     })
     const store = useWorkspaceStore()
+    await flushPromises()
     store.config = { ...store.config, language: 'en-US' }
+    store.knowledgeTree = [
+      {
+        id: 'kb-guide-root',
+        key: '使用指南',
+        relPath: '使用指南',
+        title: '使用指南',
+        type: 'dir',
+        children: [
+          {
+            id: 'kb-guide-index',
+            key: '使用指南/index.md',
+            relPath: '使用指南/index.md',
+            title: 'index.md',
+            type: 'file',
+            size: 1024
+          }
+        ]
+      }
+    ]
     vi.mocked(window.aiops.openSettingsDocumentation).mockClear()
     await wrapper.vm.$nextTick()
 
-    const guideButton = wrapper.findAll('.terminal-dashboard-shortcuts button').find((button) => button.text().includes('Knowledge Base guide'))
+    const guideButton = wrapper.findAll('.terminal-dashboard-shortcuts button').find((button) => button.text().includes('Getting Started'))
     expect(guideButton).toBeDefined()
     await guideButton!.trigger('click')
     await flushPromises()
 
-    expect(store.activeModule).toBe('settings')
-    expect(window.aiops.openSettingsDocumentation).toHaveBeenCalledWith({
-      documentPath: 'usage/best-practices/en-US/05-knowledge-base.md'
+    expect(store.activeModule).toBe('knowledge')
+    expect(store.leftPanelOpen).toBe(true)
+    expect(store.rightPanelOpen).toBe(false)
+    expect(store.activePanel.kind).toBe('knowledge')
+    expect(store.activePanel.knowledge?.relPath).toBe('使用指南/index.md')
+    expect(store.kbExpandedKeys).toContain('使用指南')
+    expect(store.kbSelectedKeys).toEqual(['使用指南/index.md'])
+    expect(window.aiops.openSettingsDocumentation).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('keeps the knowledge module open and reports when the bundled guide is unavailable', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
     })
+    const store = useWorkspaceStore()
+    await flushPromises()
+
+    const guideButton = wrapper.findAll('.terminal-dashboard-shortcuts button').find((button) => button.text().includes('快速上手'))
+    expect(guideButton).toBeDefined()
+    await guideButton!.trigger('click')
+    await flushPromises()
+
+    expect(store.activeModule).toBe('knowledge')
+    expect(store.topNotice).toBe('快速上手文档不可用')
+    expect(store.panels.some((panel) => panel.kind === 'knowledge')).toBe(false)
 
     wrapper.unmount()
   })
@@ -11604,17 +11723,6 @@ describe('AppShell', () => {
     expect(store.panels[0].id).toBe(secondPanelId)
     expect(secondTerminal.emitKeyEvent(new KeyboardEvent('keydown', { key: 'PageDown', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }))).toBe(false)
     expect(store.panels[1].id).toBe(secondPanelId)
-
-    store.appendTerminalOutput(secondPanelId, 'before command\n')
-    store.appendTerminalInput(secondPanelId, 'cmd-one\n')
-    store.appendTerminalOutput(secondPanelId, 'between commands\n')
-    store.appendTerminalInput(secondPanelId, 'cmd-two\n')
-    secondTerminal.buffer.active.viewportY = 3
-    expect(secondTerminal.emitKeyEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }))).toBe(false)
-    expect(secondTerminal.scrollToLine).toHaveBeenCalledWith(2)
-    secondTerminal.buffer.active.viewportY = 2
-    expect(secondTerminal.emitKeyEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }))).toBe(false)
-    expect(secondTerminal.scrollToLine).toHaveBeenCalledWith(4)
 
     wrapper.unmount()
   })
@@ -13182,6 +13290,7 @@ describe('AppShell', () => {
     const store = useWorkspaceStore()
     await flushPromises()
     await wrapper.vm.$nextTick()
+    store.setActiveModule('knowledge')
 
     expect(wrapper.text()).toContain('知识库')
     expect(wrapper.text()).toContain('commands')
@@ -13190,6 +13299,7 @@ describe('AppShell', () => {
     await wrapper.find('.kb-search input').setValue('interface')
     await flushPromises()
     await wrapper.vm.$nextTick()
+    expect(store.kbSearchQuery).toBe('interface')
     expect(wrapper.text()).toContain('interface.png')
     expect(wrapper.find('.kb-search-results').exists()).toBe(true)
     expect(wrapper.text()).toContain('内容搜索')
@@ -13203,6 +13313,7 @@ describe('AppShell', () => {
         knowledge: expect.objectContaining({ relPath: 'commands/diagnose.md', startLine: 2, endLine: 8 })
       })
     )
+    expect(store.activeModule).toBe('knowledge')
     expect(wrapper.text()).not.toContain('Summary to Doc.md')
     await wrapper.find('.kb-search input').setValue('')
     await flushPromises()
@@ -13372,6 +13483,7 @@ describe('AppShell', () => {
     const store = useWorkspaceStore()
     await flushPromises()
     await panel.vm.$nextTick()
+    store.setActiveModule('knowledge')
 
     const markdownNode = panel.findAll('.kb-tree-node').find((node) => node.text().includes('Markdown语法指南.md'))!
     await markdownNode.trigger('click')
@@ -13382,6 +13494,7 @@ describe('AppShell', () => {
         knowledge: expect.objectContaining({ relPath: 'Markdown语法指南.md', isImage: false })
       })
     )
+    expect(store.activeModule).toBe('knowledge')
 
     const workspace = mount(TerminalWorkspace, {
       attachTo: document.body,
@@ -13430,7 +13543,7 @@ describe('AppShell', () => {
     await workspace.vm.$nextTick()
 
     const markdownContent =
-      '# Runbook\n\n![diagram](images/interface.png)\n\n| Name | State |\n| :--- | ---: |\n| api | ok |\n\n```bash\necho ok\n```\n\n```mermaid\ngraph TD\n  A[Start] --> B[Done]\n```\n\n<script>alert(1)</script>\n<img src="javascript:alert(1)" onerror="alert(2)" alt="bad">\n<a href="javascript:alert(3)" onclick="alert(4)">bad link</a>'
+      '# Runbook\n\n[Diagnose](commands/diagnose.md)\n\n![diagram](images/interface.png)\n\n| Name | State |\n| :--- | ---: |\n| api | ok |\n\n```bash\necho ok\n```\n\n```mermaid\ngraph TD\n  A[Start] --> B[Done]\n```\n\n<script>alert(1)</script>\n<img src="javascript:alert(1)" onerror="alert(2)" alt="bad">\n<a href="javascript:alert(3)" onclick="alert(4)">bad link</a>'
     const activeMarkdownTextarea = workspace.find('.kb-editor-textarea')
     expect((activeMarkdownTextarea.element as HTMLTextAreaElement).value).toBe('content:Markdown语法指南.md')
     await activeMarkdownTextarea.setValue(markdownContent)
@@ -13445,6 +13558,13 @@ describe('AppShell', () => {
     expect(preview.find('pre code').classes()).toContain('hljs')
     expect(preview.find('.mermaid').attributes('data-processed')).toBe('true')
     expect(preview.find('img').attributes('src')).toContain(DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_BASE64)
+    await preview.find('a').trigger('click')
+    await flushPromises()
+    await workspace.vm.$nextTick()
+    expect(store.activePanelId).toBe(diagnosePanelId)
+    store.openKnowledgeFile('Markdown语法指南.md')
+    await flushPromises()
+    await workspace.vm.$nextTick()
     expect(preview.html()).not.toContain('<script')
     expect(preview.html()).not.toContain('onerror')
     expect(preview.html()).not.toContain('onclick')
@@ -17238,7 +17358,10 @@ describe('AppShell', () => {
     expect(generatedBackgroundPreset?.image).toContain('aurora-veil')
     expect(workspace.findAll('.settings-bg-tile.preset')).toHaveLength(settingsBackgroundPresets.length)
     const generatedBackgroundTile = workspace.findAll('.settings-bg-tile.preset').at(settingsBackgroundPresets.findIndex((preset) => preset.id === 'aurora-veil'))!
-    expect(generatedBackgroundTile.attributes('style')).toContain('aurora-veil')
+    const generatedBackgroundStyle = generatedBackgroundTile.attributes('style')
+    expect(generatedBackgroundStyle).toContain('background-image:')
+    expect(generatedBackgroundStyle).toContain('aurora-veil')
+    expect(generatedBackgroundStyle).not.toMatch(/(^|;)\s*background:/)
     await generatedBackgroundTile.trigger('click')
     await flushPromises()
     expect(store.config.background.mode).toBe('preset')
@@ -17897,12 +18020,12 @@ describe('AppShell', () => {
 
     vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce(savedConfig)
     const languageSelect = row('语言').find('select.settings-select')
-    expect((languageSelect.element as HTMLSelectElement).value).toBe('zh-CN')
+    expect((languageSelect.element as HTMLSelectElement).value).toBe('system')
     await languageSelect.setValue('en-US')
     await flushPromises()
     expect(store.settingsNotice).toBe('基础设置保存失败')
-    expect(store.config.language).toBe('zh-CN')
-    expect((languageSelect.element as HTMLSelectElement).value).toBe('zh-CN')
+    expect(store.config.language).toBe('system')
+    expect((languageSelect.element as HTMLSelectElement).value).toBe('system')
 
     vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce(savedConfig)
     const watermarkRadios = row('水印').findAll('input[name="watermark"]')

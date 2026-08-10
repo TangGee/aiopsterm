@@ -27,6 +27,7 @@ export const createWorkspaceManagedAiController = (
   const {
     mode,
     activeModule,
+    activeCenterSurface,
     rightPanelOpen,
     agentsLeftOpen,
     aiAttentionFocusRequest
@@ -146,7 +147,7 @@ export const createWorkspaceManagedAiController = (
       void attentionRuntime.openControlNotification(item.notificationId)
     } else if (item.surfaceId === 'terminal-ai-panel') {
       mode.value = 'terminal'
-      activeModule.value = 'workspace'
+      activeCenterSurface.value = 'main-workspace'
       rightPanelOpen.value = true
     } else {
       mode.value = 'agents'

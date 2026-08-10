@@ -15,6 +15,16 @@ export type ModuleKey =
   | 'settings'
   | 'user'
 
+export type CenterSurface =
+  | 'main-workspace'
+  | 'assets'
+  | 'files'
+  | 'extensions'
+  | 'kubernetes'
+  | 'database'
+  | 'settings'
+  | 'user'
+
 export type MenuItem = {
   key: ModuleKey
   label: string
@@ -23,12 +33,30 @@ export type MenuItem = {
   position: 'main' | 'bottom'
 }
 
-const terminalWorkspaceModules = new Set<ModuleKey>(['workspace', 'aiSessions', 'snippets', 'knowledge'])
+const moduleCenterSurfaces: Record<ModuleKey, CenterSurface> = {
+  workspace: 'main-workspace',
+  aiSessions: 'main-workspace',
+  assets: 'assets',
+  files: 'files',
+  snippets: 'main-workspace',
+  knowledge: 'main-workspace',
+  extensions: 'extensions',
+  kubernetes: 'kubernetes',
+  database: 'database',
+  settings: 'settings',
+  user: 'user'
+}
 
-export const isTerminalWorkspaceModule = (key: ModuleKey) => terminalWorkspaceModules.has(key)
+export const defaultCenterSurfaceForModule = (key: ModuleKey): CenterSurface => moduleCenterSurfaces[key]
 
-export const isTerminalWorkspaceSurfaceVisible = (mode: 'terminal' | 'agents', key: ModuleKey) =>
-  mode === 'agents' || isTerminalWorkspaceModule(key)
+export const isModuleKey = (value: unknown): value is ModuleKey =>
+  typeof value === 'string' && value in moduleCenterSurfaces
+
+export const isCenterSurface = (value: unknown): value is CenterSurface =>
+  typeof value === 'string' && Object.values(moduleCenterSurfaces).includes(value as CenterSurface)
+
+export const isMainWorkspaceSurfaceVisible = (mode: 'terminal' | 'agents', surface: CenterSurface) =>
+  mode === 'agents' || surface === 'main-workspace'
 
 export const menuItems: MenuItem[] = [
   { key: 'workspace', label: '工作区', labelKey: 'module.workspace', icon: Server, position: 'main' },

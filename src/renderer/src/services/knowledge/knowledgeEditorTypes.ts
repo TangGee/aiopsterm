@@ -11,4 +11,5 @@ export type KnowledgeImageViewerApi = {
 
 export type KnowledgeMarkdownPreviewApi = {
   renderMermaid: (theme: 'dark' | 'default') => Promise<void>
+  scrollToAnchor: (anchor: string) => boolean
 }

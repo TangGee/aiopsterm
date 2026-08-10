@@ -15,7 +15,7 @@ import { createWorkspaceSshSettingsController } from '@/services/settings/worksp
 import { type QuickCommandSnippet, type SnippetGroup } from '@/services/quick-commands/quickCommandsRuntime'
 import { resolveLocale } from '@/i18n/runtime'
 import type { OnboardingModuleId } from '@/config/onboarding'
-import type { ModuleKey } from '@/config/navigation'
+import type { CenterSurface, ModuleKey } from '@/config/navigation'
 import type { SettingSectionKey } from '@/config/settings'
 import {
   defaultConfig,
@@ -70,6 +70,7 @@ export type WorkspaceAboutSettings = {
 type WorkspaceAppSettingsState = {
   mode: Ref<'terminal' | 'agents'>
   activeModule: Ref<ModuleKey>
+  activeCenterSurface: Ref<CenterSurface>
   leftPanelOpen: Ref<boolean>
   rightPanelOpen: Ref<boolean>
   agentsLeftOpen: Ref<boolean>
@@ -178,6 +179,7 @@ export const createWorkspaceAppSettingsController = (state: WorkspaceAppSettings
   const {
     mode,
     activeModule,
+    activeCenterSurface,
     leftPanelOpen,
     rightPanelOpen,
     agentsLeftOpen,
@@ -590,6 +592,7 @@ export const createWorkspaceAppSettingsController = (state: WorkspaceAppSettings
     {
       mode,
       activeModule,
+      activeCenterSurface,
       leftPanelOpen,
       rightPanelOpen,
       agentsLeftOpen,

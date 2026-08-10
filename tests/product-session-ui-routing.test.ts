@@ -14,6 +14,7 @@ import AppShell from '@/components/AppShell.vue'
 const makeRuntime = () => {
   const workspace = reactive({
     activeModule: 'workspace',
+    activeCenterSurface: 'main-workspace',
     agentsLeftOpen: true,
     config: { background: { mode: 'none' }, watermark: 'closed' },
     isLeftVisible: false,
@@ -24,6 +25,7 @@ const makeRuntime = () => {
     }),
     setActiveModule: vi.fn((module: string) => {
       workspace.activeModule = module
+      workspace.activeCenterSurface = module === 'workspace' ? 'main-workspace' : module
     })
   })
   return {
@@ -103,7 +105,7 @@ describe('AppShell product session routing', () => {
       action: 'restore', surface: 'classic', sessionId: 'classic-1', sequence: 1
     }))
     expect(assistantPanel.props('agentMode')).toBe(true)
-    expect(appShellContext.runtime.workspace.setActiveModule).toHaveBeenCalledWith('workspace')
+    expect(appShellContext.runtime.workspace.setActiveModule).not.toHaveBeenCalledWith('workspace')
     assistantPanel.vm.$emit('productSessionRequestConsumed', 1)
     await wrapper.vm.$nextTick()
     expect(assistantPanel.props('productSessionRequest')).toBeNull()

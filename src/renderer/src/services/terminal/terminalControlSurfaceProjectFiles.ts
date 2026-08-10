@@ -61,7 +61,7 @@ export const createTerminalControlSurfaceProjectFileHandlers = ({
   }
 
   const focusControlSurfacePanel = async (panel: TerminalPanel, requestedFocus = true) => {
-    workspace.activatePanelSurface(panel.id, {
+    workspace.revealPanelSurface(panel.id, {
       cause: 'external',
       focusPolicy: requestedFocus ? 'target-primary' : 'preserve'
     })

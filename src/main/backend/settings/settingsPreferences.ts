@@ -14,6 +14,7 @@ import type {
   UserRuleConfig
 } from '@shared/contracts/settingsPreferences'
 import { defaultSettingsRuleSeedData, shouldUseSettingsPreferencesSeedData } from '@shared/settingsPreferencesSeed'
+import { defaultSettingsShortcuts, SETTINGS_SHORTCUT_DEFAULTS_VERSION } from '@shared/settingsShortcutDefaults'
 
 type SettingsPreferencesStoreShape = {
   preferences?: SettingsPreferencesSnapshot
@@ -23,6 +24,7 @@ type SettingsPreferencesSeedInput = {
   shortcuts?: unknown
   rules?: unknown
   customInstructions?: unknown
+  shortcutDefaultsVersion?: unknown
 }
 
 type SettingsPreferencesRuntimeConfig = {
@@ -41,18 +43,7 @@ type SqliteDatabase = {
   prepare(sql: string): SqliteStatement
 }
 
-const defaultShortcuts: ShortcutUserConfig[] = [
-  { id: 'newTerminal', action: '新建终端', shortcut: 'Ctrl+Shift+T' },
-  { id: 'toggleAi', action: '显示/隐藏 AI 侧边栏', shortcut: 'Ctrl+Shift+A' },
-  { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
-  { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' },
-  { id: 'closeCurrentPanel', action: '关闭当前面板', shortcut: 'Ctrl+Shift+W' },
-  { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+Tab' },
-  { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
-  { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' },
-  { id: 'navigatePanelByOrderBack', action: '按标签栏顺序切换到左侧面板', shortcut: 'Ctrl+Shift+Left' },
-  { id: 'navigatePanelByOrderForward', action: '按标签栏顺序切换到右侧面板', shortcut: 'Ctrl+Shift+Right' }
-]
+const defaultShortcuts = defaultSettingsShortcuts(process.platform)
 
 const defaultRules = () => defaultSettingsRuleSeedData()
 
@@ -70,18 +61,20 @@ const cloneShortcut = (shortcut: ShortcutUserConfig): ShortcutUserConfig => ({ .
 const cloneRule = (rule: UserRuleConfig): UserRuleConfig => ({ ...rule })
 const clonePreferences = (preferences: SettingsPreferencesSnapshot): SettingsPreferencesSnapshot => ({
   shortcuts: preferences.shortcuts.map(cloneShortcut),
-  rules: preferences.rules.map(cloneRule)
+  rules: preferences.rules.map(cloneRule),
+  shortcutDefaultsVersion: preferences.shortcutDefaultsVersion
 })
 const defaultPreferences = (): SettingsPreferencesSnapshot => ({
   shortcuts: defaultShortcuts.map(cloneShortcut),
-  rules: runtimeConfig.useSeedData ? defaultRules().map(cloneRule) : []
+  rules: runtimeConfig.useSeedData ? defaultRules().map(cloneRule) : [],
+  shortcutDefaultsVersion: SETTINGS_SHORTCUT_DEFAULTS_VERSION
 })
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 const normalizeText = (value: unknown) => String(value || '').trim()
 const normalizeShortcutText = (value: unknown) => normalizeText(value).replace(/\s+/g, '').toLowerCase()
 const getShortcutParts = (shortcut: string) => shortcut.split('+').map((part) => part.trim()).filter(Boolean)
-const platformKey = () => (process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'windows' : 'linux')
+const platformKey = (platform: string = process.platform) => (platform === 'darwin' ? 'mac' : platform === 'win32' ? 'windows' : 'linux')
 const stableValue = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(stableValue)
   if (!isRecord(value)) return value
@@ -105,28 +98,36 @@ const isValidShortcutForAction = (actionId: string, shortcut: string) => {
   return !hasDigit && hasModifier
 }
 
-const resolveShortcutSource = (source: unknown) => {
+const resolveShortcutSource = (source: unknown, platform: string = process.platform) => {
   if (!isRecord(source)) return source
   if (!platformKeys.some((key) => isRecord(source[key]))) return source
-  return source[platformKey()] || source.linux || source.windows || source.mac
+  return source[platformKey(platform)] || source.linux || source.windows || source.mac
 }
 
-export const normalizeSettingsShortcuts = (source?: unknown): ShortcutUserConfig[] => {
-  const resolved = resolveShortcutSource(source)
+type NormalizeSettingsShortcutsOptions = {
+  platform?: string
+  migrateLegacyDefaults?: boolean
+}
+
+export const normalizeSettingsShortcuts = (source?: unknown, options: NormalizeSettingsShortcutsOptions = {}): ShortcutUserConfig[] => {
+  const platform = options.platform || process.platform
+  const platformDefaults = defaultSettingsShortcuts(platform)
+  const platformDefaultsById = new Map(platformDefaults.map((shortcut) => [shortcut.id, shortcut]))
+  const resolved = resolveShortcutSource(source, platform)
   const shortcutsById = new Map<string, string>()
 
   if (Array.isArray(resolved)) {
     resolved.forEach((item) => {
       if (!isRecord(item)) return
       const id = normalizeText(item.id)
-      const defaultShortcut = shortcutDefaultsById.get(id)
+      const defaultShortcut = platformDefaultsById.get(id)
       const shortcut = normalizeText(item.shortcut)
       if (!defaultShortcut || !shortcut || shortcutsById.has(id) || !isValidShortcutForAction(id, shortcut)) return
       shortcutsById.set(id, shortcut)
     })
   } else if (isRecord(resolved)) {
     Object.entries(resolved).forEach(([id, value]) => {
-      const defaultShortcut = shortcutDefaultsById.get(id)
+      const defaultShortcut = platformDefaultsById.get(id)
       const shortcut = normalizeText(value)
       if (!defaultShortcut || !shortcut || shortcutsById.has(id) || !isValidShortcutForAction(id, shortcut)) return
       shortcutsById.set(id, shortcut)
@@ -140,7 +141,16 @@ export const normalizeSettingsShortcuts = (source?: unknown): ShortcutUserConfig
     shortcutsById.set('recentPanels', ctrlTabTaken ? 'Ctrl+Shift+E' : 'Ctrl+Tab')
   }
 
-  return defaultShortcuts.map((defaultShortcut) => ({
+  if (platform === 'darwin' && options.migrateLegacyDefaults) {
+    if (normalizeShortcutText(shortcutsById.get('navigatePanelBack')) === 'ctrl+left') {
+      shortcutsById.set('navigatePanelBack', 'Cmd+[')
+    }
+    if (normalizeShortcutText(shortcutsById.get('navigatePanelForward')) === 'ctrl+right') {
+      shortcutsById.set('navigatePanelForward', 'Cmd+]')
+    }
+  }
+
+  return platformDefaults.map((defaultShortcut) => ({
     ...defaultShortcut,
     shortcut: shortcutsById.get(defaultShortcut.id) || defaultShortcut.shortcut
   }))
@@ -194,10 +204,16 @@ const stripLegacySeedSettingsRules = (rules: UserRuleConfig[]) => {
   })
 }
 
-export const normalizeSettingsPreferences = (source?: SettingsPreferencesSeedInput): SettingsPreferencesSnapshot => ({
-  shortcuts: normalizeSettingsShortcuts(source?.shortcuts),
-  rules: stripLegacySeedSettingsRules(normalizeSettingsRules(source?.rules, source?.customInstructions))
-})
+export const normalizeSettingsPreferences = (source?: SettingsPreferencesSeedInput): SettingsPreferencesSnapshot => {
+  const storedDefaultsVersion = Number(source?.shortcutDefaultsVersion || 0)
+  return {
+    shortcuts: normalizeSettingsShortcuts(source?.shortcuts, {
+      migrateLegacyDefaults: storedDefaultsVersion < SETTINGS_SHORTCUT_DEFAULTS_VERSION
+    }),
+    rules: stripLegacySeedSettingsRules(normalizeSettingsRules(source?.rules, source?.customInstructions)),
+    shortcutDefaultsVersion: SETTINGS_SHORTCUT_DEFAULTS_VERSION
+  }
+}
 
 class FallbackSettingsPreferencesStore {
   private store: Store<SettingsPreferencesStoreShape> | null = null

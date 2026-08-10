@@ -1,5 +1,5 @@
 import type { Ref } from 'vue'
-import type { ModuleKey } from '@/config/navigation'
+import type { CenterSurface, ModuleKey } from '@/config/navigation'
 import type { I18nKey } from '@/i18n/messages'
 import type { TerminalCommandExecutionOptions, TerminalSecurityDecision } from '@/services/terminal/terminalExecutionRuntime'
 import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
@@ -40,7 +40,7 @@ export type AiAttentionFocusRequest = {
 }
 export type ManagedAiSessionState = ManagedAiSessionRecord['state']
 export type ManagedAiSession = ManagedAiSessionRecord
-export type ManagedAiLocalTerminalOpenOptions = { title?: string; cwd?: string; preserveActiveModule?: boolean }
+export type ManagedAiLocalTerminalOpenOptions = { title?: string; cwd?: string }
 
 export const defaultAgentHibernationConfig: AgentHibernationConfig = {
   enabled: false,
@@ -52,6 +52,7 @@ export const defaultAgentHibernationConfig: AgentHibernationConfig = {
 export type WorkspaceManagedAiControllerState = {
   mode: Ref<'terminal' | 'agents'>
   activeModule: Ref<ModuleKey>
+  activeCenterSurface: Ref<CenterSurface>
   leftPanelOpen: Ref<boolean>
   rightPanelOpen: Ref<boolean>
   agentsLeftOpen: Ref<boolean>

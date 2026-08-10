@@ -1,6 +1,6 @@
 # Database Workspace
 
-For connection, SQL, DB AI, and exported read-only MCP workflows, start with [Database And SQL](best-practices/en-US/11-database-sql.md).
+For connection, SQL, DB AI, and exported read-only MCP workflows, start with [Database And DB AI](best-practices/en-US/15-database.md).
 
 The Database workspace manages saved connections, schema browsing, table data, and SQL consoles through backend-owned runtimes.
 

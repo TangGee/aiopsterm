@@ -3,8 +3,8 @@
 The Assets module opens as a main workspace, not as a narrow left-side panel.
 
 - The Assets workspace uses top tabs for `主机管理`, `堡垒机管理`, `密钥管理`, and `代理管理`. Organization asset management can also be opened from a bastion/organization host context menu.
-- Double-clicking a host card or SSH-capable bastion/organization entry creates a real SSH terminal through the preload/backend terminal bridge, then returns to the terminal workspace so the new tab is visible.
-- Failed SSH creation leaves the Assets workspace open and shows the backend error instead of fabricating a terminal tab.
+- Double-clicking a host card or SSH-capable bastion/organization entry immediately leaves Assets and switches both the left source and central surface to Workspace, then creates a real SSH terminal through the preload/backend terminal bridge.
+- Failed or malformed SSH creation remains in Workspace, removes the pending terminal tab, and shows the backend error instead of returning to Assets or fabricating a connected terminal.
 - Host creation is launched from the host tree context menu or empty-state action, not from a top `新建主机` toolbar button. Group context-menu creation pre-fills the target group.
 - Right-click blank host-tree space to create a top-level directory. Right-click a group to create a child directory or host. Empty directories and child directories come from the backend asset-folder snapshot and remain visible after refresh.
 - Direct host management shows real backend groups and folders only. Hosts with an empty group or legacy `Hosts` value are normalized into `未分组`; aiopsterm no longer injects a default `主机` group. Group counts include descendant hosts from child folders.

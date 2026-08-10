@@ -189,7 +189,7 @@ export const createTerminalControlSurfaceAgentHandlers = ({
     }
 
     const group = createAgentTeamGroup(params, panelIds, source, cwd)
-    if (focus && panelIds[0]) workspace.activatePanelSurface(panelIds[0], { cause: 'external' })
+    if (focus && panelIds[0]) workspace.revealPanelSurface(panelIds[0], { cause: 'external' })
     const team: ControlAgentTeamLaunchResult = {
       source,
       ...(cwd ? { cwd } : {}),

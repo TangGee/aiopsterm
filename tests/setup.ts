@@ -52,10 +52,55 @@ import {
 import { defaultModelSettingsSeedData } from '@shared/modelSettingsSeed'
 import { defaultWorkspacePreferencesSeedData } from '@shared/workspacePreferencesSeed'
 import { createHash, scryptSync } from 'crypto'
+import { transferableAbortController } from 'node:util'
 import { vi } from 'vitest'
 
 process.env.AIOPSTERM_WORKSPACE_PREFERENCES_ENABLE_SEED = '1'
 process.env.AIOPSTERM_MODEL_SETTINGS_ENABLE_SEED = '1'
+
+class TestMemoryStorage implements Storage {
+  private readonly values = new Map<string, string>()
+
+  get length() {
+    return this.values.size
+  }
+
+  clear() {
+    this.values.clear()
+  }
+
+  getItem(key: string) {
+    return this.values.get(String(key)) ?? null
+  }
+
+  key(index: number) {
+    return Array.from(this.values.keys())[index] ?? null
+  }
+
+  removeItem(key: string) {
+    this.values.delete(String(key))
+  }
+
+  setItem(key: string, value: string) {
+    this.values.set(String(key), String(value))
+  }
+}
+
+const nativeAbortController = Object.getPrototypeOf(transferableAbortController()).constructor
+const nativeAbortSignal = Object.getPrototypeOf(transferableAbortController().signal).constructor
+const nativeFetch = globalThis.fetch.bind(globalThis)
+globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+  const signal = init?.signal
+  if (!signal || signal instanceof nativeAbortSignal) return nativeFetch(input, init)
+  const controller = new nativeAbortController()
+  if (signal.aborted) controller.abort(signal.reason)
+  else signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true })
+  return nativeFetch(input, { ...init, signal: controller.signal })
+}) as typeof fetch
+Object.defineProperty(globalThis, 'localStorage', { configurable: true, writable: true, value: new TestMemoryStorage() })
+
+Object.defineProperty(navigator, 'language', { configurable: true, value: 'zh-CN' })
+Object.defineProperty(navigator, 'languages', { configurable: true, value: ['zh-CN'] })
 
 type TestAppUpdateProgressEvent = {
   status: 'downloading' | 'downloaded' | 'error'

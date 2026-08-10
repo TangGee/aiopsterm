@@ -1,50 +1,12 @@
-# MCP Integration Best Practices
+# Export MCP To External Agents
 
-aiopsterm's MCP story has two directions: **consuming third-party MCP servers** for the internal Agent, and **exporting** aiopsterm's own capabilities to external coding agents.
+This guide focuses on exporting aiopsterm capabilities to external coding agents. Consuming third-party MCP inside the embedded Agent is a separate path.
 
-## Configuring Third-Party MCP Servers
+## Where To Open It
 
-![Host Agent settings](../images/settings-hostagent.png)
+Click the lower-left **Settings gear -> Export MCP**. The header manages gateway and Token; three cards below represent Hosts, AI Sessions, and Databases. Install Codex or Claude Code from the individual card—there is no bulk install button. Third-party MCP for the embedded Agent lives under **Settings -> Host Agent -> MCP**.
 
-Open **① Settings -> 主机Agent (Host Agent)**. The **② sub-tabs** are `对话与主机` (Conversation & Hosts), `MCP`, `Skills`, and `规则` (Rules).
-
-![MCP settings](../images/settings-mcp.png)
-
-On the **① MCP sub-tab**:
-
-- **② Add Server** opens the JSON editor for `setting/mcp_settings.json` under the app user-data directory.
-- **③ Server and tool list** — after main-process discovery (`initialize` → `tools/list` → `resources/list`), each server's tools and resources appear here; tool rows expand to show parameters and a per-tool Auto Approve switch.
-
-`stdio` and `streamableHttp` examples:
-
-```json
-{
-  "mcpServers": {
-    "local-tools": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["/absolute/path/to/server.js"],
-      "timeout": 10
-    },
-    "remote-tools": {
-      "type": "streamableHttp",
-      "url": "https://mcp.example.com/mcp",
-      "headers": { "Authorization": "Bearer ${TOKEN}" }
-    }
-  }
-}
-```
-
-Practical rules:
-
-- Omitted `type`: `url` without `command` is treated as `streamableHttp`; aliases `http`, `streamable_http`, `streamable-http` are normalized on save; both `command` and `url` without an explicit type keeps the safer stdio interpretation.
-- A server without a valid backend `connected` status displays `disconnected`, and its Run/Read actions stay blocked — being present in JSON does not mean connected.
-- Legacy `sse` servers use the same shape with `"type": "sse"`.
-- The seeded `ops-inventory` name is a dev/test example; if it lingers in a local config without the command installed it fails with ENOENT and can simply be deleted.
-
-> Security boundary: the Agent can only read exact resource URIs already listed on an enabled server, and every read requires an explicit click on its approval card. MCP transport commands, env vars, headers, and credentials are never exposed to the model.
-
-## Exporting MCP To External Agents
+## The Three Independent Exports
 
 ![Export MCP](../images/settings-export-mcp.png)
 
@@ -73,3 +35,7 @@ The three servers share the local socket, bundled runtime, and current token, wh
 - Database handles change after an app restart. External agents must list connections again instead of persisting a handle.
 
 > Best practice: give the token only to a trusted local agent and regenerate it on any suspicion of leakage. Host commands remain bounded by connection and authentication rules; database access stays read-only; AI-session tools do not close the owning terminal or kill the agent process.
+
+Third-party MCP Servers use a different direction and entry. Follow [Third-party MCP Servers](09-third-party-mcp.md), and do not place their JSON in Export MCP.
+
+Previous: [Keyboard Shortcuts](07-shortcuts.md) · Next: [Third-party MCP Servers](09-third-party-mcp.md) · [Back to index](../index.md)

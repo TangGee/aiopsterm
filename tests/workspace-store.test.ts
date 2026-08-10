@@ -425,7 +425,8 @@ describe('workspace store', () => {
 
     expect(item?.id).toBe('codex:error:terminal')
     expect(store.mode).toBe('terminal')
-    expect(store.activeModule).toBe('workspace')
+    expect(store.activeModule).toBe('database')
+    expect(store.activeCenterSurface).toBe('main-workspace')
     expect(store.rightPanelOpen).toBe(true)
     expect(store.aiAttentionFocusRequest).toMatchObject({
       sequence: 1,
@@ -860,7 +861,8 @@ describe('workspace store', () => {
 
     expect(panel).toEqual(expect.objectContaining({ kind: 'managed-ai-session' }))
     expect(store.mode).toBe('terminal')
-    expect(store.activeModule).toBe('workspace')
+    expect(store.activeModule).toBe('settings')
+    expect(store.activeCenterSurface).toBe('main-workspace')
     expect(store.activePanelId).toBe(panel?.id)
   })
 
@@ -1998,6 +2000,11 @@ describe('workspace store', () => {
     store.setActiveModule('database')
     await expect(store.toggleRight()).resolves.toBe(false)
     expect(store.rightPanelOpen).toBe(false)
+    store.showMainWorkspace()
+    await expect(store.toggleRight()).resolves.toBe(true)
+    expect(store.activeModule).toBe('database')
+    expect(store.activeCenterSurface).toBe('main-workspace')
+    expect(store.rightPanelOpen).toBe(true)
     await store.checkTopUpdate()
     expect(store.topUpdateState).toBe('local')
     vi.mocked(window.aiops.checkUpdate).mockResolvedValueOnce({
@@ -8777,9 +8784,11 @@ describe('workspace store', () => {
     expectNoBusinessDataConfigWrites(['knowledgeBase'])
     const knowledgeBytesAfterFolder = store.kbUsedBytes
 
+    store.setActiveModule('knowledge')
     const file = (await store.createKnowledgeNode('file', 'Runbooks', 'Deploy.md'))!
     expect(store.findKnowledgeNode('Runbooks/Deploy.md')).toBeTruthy()
     expect(store.activePanel).toEqual(expect.objectContaining({ kind: 'knowledge', id: 'kb:Runbooks/Deploy.md' }))
+    expect(store.activeModule).toBe('knowledge')
     expect(store.kbUsedBytes).toBeGreaterThan(knowledgeBytesAfterFolder)
     expect(window.aiops.kbCreateFile).toHaveBeenCalledWith('Runbooks', 'Deploy.md', '')
 

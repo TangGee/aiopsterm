@@ -1,59 +1,148 @@
-# Getting Started
+# Product Tour And Getting Started
 
-This guide gets you from install to your first connection in about ten minutes and introduces the four main regions of the UI. Screenshots show the Chinese UI; English label translations are given inline.
+aiopsterm combines local terminals, SSH assets, AI operations, external AI-session observation, files, knowledge, Kubernetes, and databases in one desktop workspace. This page identifies every entry button before linking to the complete workflow.
 
-## Install And Launch
-
-The aiopsterm desktop package bundles the Electron runtime, the native terminal module, and the built-in Codex runtime. **No user-installed Node.js or npm is required.** Install and launch directly.
-
-Local terminals created by aiopsterm expose `aio`, `aictl`, `aiopsterm-control`, and `aiossh` on PATH. Prefer the short `aio` command day to day; `aiossh <saved-host>` connects straight to a host already saved in aiopsterm.
-
-## The Main Window
+## Start With The Main Window
 
 ![Main window](../images/main-window.png)
 
-| # | Region | Description |
+| # | Region | Purpose |
 | --- | --- | --- |
-| ① | SideRail (module navigation) | Icon-only rail on the far left; switches Workspace, Assets, Files, Quick Commands, Knowledge, Database, and more |
-| ② | Module panel | Left functional panel of the active module; shows the host resource tree in Workspace |
-| ③ | Main workspace | Where terminals, files, database and knowledge documents live |
-| ④ | AI panel | Right-side AI assistant; supports Codex CLI and Classic conversations |
-| ⑤ | Agents entry | Enters Agents mode, the catalog of all AI Product Sessions |
-| ⑥ | Settings button | Opens the settings workspace (`Ctrl+,`) |
+| ① | Module rail | Workspace, Assets, Files, Quick Commands, Knowledge, Plugins, Kubernetes, and Database |
+| ② | Source panel | Hosts, sessions, files, or documents for the selected module |
+| ③ | Main workspace | Shared tabs for terminals, knowledge documents, AI-session content, and project files |
+| ④ | AI panel | Embedded Codex or Classic, bindable to the active terminal |
+| ⑤ | Agents | aiopsterm-owned Codex, Classic, and DB AI product sessions |
+| ⑥ | Settings | Models, terminal, notifications, MCP, shortcuts, themes, and policy |
 
-The welcome dashboard lists the everyday shortcuts: assets list `Ctrl+B`, settings `Ctrl+,`, inline AI command `Ctrl+Shift+K`, and recent panels `Ctrl+Tab`.
+The welcome page lets users select a language. **Getting Started** opens the bilingual guide index first, where users can choose the corresponding language. Source and center are normally independent; double-clicking an Assets host is the exception and switches both to Workspace before SSH starts.
 
-## Your First Connection
+## 1. Terminal And SSH
 
-![Connect to a host](../images/connect-host.png)
+**Entry:** click **Workspace**, then double-click `127.0.0.1` for a local shell or a saved host for SSH. Right-click a terminal for command input, AI Command, split, search, file management, and global execution.
 
-1. Switch between the **① 直接连接 (Direct connections) / 堡垒机资源 (Bastion resources)** trees at the top of the resource panel.
-2. Use the **② search box** to filter hosts by name.
-3. **③ Double-click a host row** (for example `prod-bastion`) to open an SSH session; the row's `⋯` menu offers edit, clone, and more.
-4. **④ 本地连接 (Local connections)** contains `127.0.0.1`; double-click for a local shell — a safe place to explore first.
+![Split terminal](../images/terminal-split.png)
 
-> Best practice: save your jump hosts and production entry points as grouped assets (production / staging / maintenance). "Recent connections" keeps the last 10 successful connections, so frequent hosts never need tree digging.
+Tabs, splits, proxies, keys, SSH Agent, standard jumps, relay-shell, `aio`, and `aiossh` are covered in [Terminal And Main Workspace](02-terminal-workspace.md).
 
-Connection behavior worth knowing:
+## 2. Host Agent
 
-- Password-auth hosts without a saved password open the global authentication dialog; with `记住密码并更新该主机` (remember password) checked, the password is stored only after the SSH connection actually reaches ready.
-- Bastions that request an OTP / dynamic password use the same global dialog; clicking the backdrop does not dismiss it.
-- SSH sessions send keepalives by default, reducing idle disconnects caused by NAT, firewalls, or bastion cleanup.
+**Entry:** open a terminal, use the mode control at the top of the right AI panel, and select **Codex CLI** or **Classic**. Configure a provider first under **Settings -> Models**.
 
-## Managing Assets Centrally
+![Host AI](../images/ai-panel.png)
 
-![Assets workspace](../images/assets-workspace.png)
+Embedded Codex uses terminal-bound remote tools. Classic offers Chat, Command, and Agent permission levels. The remote host needs no installed agent, including proxy and jump-host targets. See [Host Agent](03-host-agent.md).
 
-The **Assets** module opens as a full workspace with four top tabs: **① 主机管理 (Hosts), ② 堡垒机管理 (Bastions), ③ 密钥管理 (Keys), ④ 代理管理 (Proxies)**. Double-clicking a **⑤ host row** creates a real SSH terminal and returns you to the terminal workspace.
+## 3. Agents Product Sessions
 
-Recommendations:
+**Entry:** click **Agents** at the top of the module rail. Use `+` to create Classic, Codex, or DB AI sessions, and select history to restore and continue.
 
-- Create folders and hosts from context menus: right-click blank tree space for a top-level directory, right-click a group for child directories or hosts — new hosts inherit the clicked group.
-- Keep private keys in Key management (KeyChain); the host form no longer accepts pasted private-key text, and one key can serve many hosts.
-- The host form supports SSH proxies (HTTP/SOCKS/raw TCP) and jump hosts, and can create keys/proxies/jump hosts in place — successful creation returns and preselects the new resource.
-- Use connection tests to validate configuration: password-disabled servers, wrong passwords, rejected keys, missing auth methods, and network failures each return a distinct actionable message.
+![Agents mode](../images/agents-mode.png)
 
-## Next Steps
+Agents stores conversations created by aiopsterm with their terminal, project, or database bindings. See [Agents Product Sessions](04-agents-product-sessions.md).
 
-- Splits, broadcast, and search: [Terminal Workspace Best Practices](02-terminal-workspace.md).
-- Let AI generate and run commands: [AI Assistant And Sessions](03-ai-assistant.md).
+## 4. AI Session Management
+
+**Entry:** click **AI Sessions** on the rail. Use **Settings -> AI Notifications** to install hooks and configure desktop and sound alerts.
+
+![AI Sessions](../images/ai-sessions-inbox.png)
+
+Track pending, running, and historical external-agent sessions. Right-click **Open Session Content** to inspect the complete conversation, switch source/rendered views, and revise its transcript; use **Project Files** for recent changes and the real project tree. Live state and notifications require the matching trusted Agent Hook. See [AI Session Management](05-ai-sessions.md).
+
+## 5. Quick Commands And Macros
+
+**Entry:** click **Quick Commands** and use its toolbar add button. Terminal context actions send input or execute globally.
+
+![Quick Commands](../images/quick-commands.png)
+
+Store operational commands, record macros, broadcast safely, and reference commands with `/` in AI. See [Quick Commands](06-quick-commands.md).
+
+## 6. Keyboard Shortcuts
+
+**Entry:** open **Settings -> Shortcuts** and click the key field beside an action.
+
+![Shortcuts](../images/settings-shortcuts.png)
+
+Bindings preserve plain shell control keys and can be remapped per OS. See [Keyboard Shortcuts](07-shortcuts.md).
+
+## 7. Export MCP
+
+**Entry:** open **Settings -> Export MCP**, then install each capability card independently for Codex or Claude Code.
+
+![Export MCP](../images/settings-export-mcp.png)
+
+The three servers expose hosts/SSH, managed AI sessions, and authorized read-only databases to external Agents. See [Export MCP](08-export-mcp.md).
+
+## 8. Third-party MCP Servers
+
+**Entry:** open **Settings -> Host Agent -> MCP**, use **Add Server** for a stdio or HTTP Server, then inspect connection state and tool approval.
+
+![MCP settings](../images/settings-mcp.png)
+
+This imports third-party tools into embedded Classic, the opposite direction from Export MCP. See [Third-party MCP Servers](09-third-party-mcp.md).
+
+## 9. File Management
+
+**Entry:** click **Files**, or right-click an SSH terminal and choose **File Management**.
+
+![Files](../images/files-workspace.png)
+
+Browse local and remote SFTP sides, transfer with progress, edit, rename, and manage permissions. See [File Management](10-files.md).
+
+## 10. Asset Management
+
+**Entry:** click **Assets**, then use the top tabs for hosts, bastions, keys, and proxies.
+
+![Assets](../images/assets-workspace.png)
+
+Save connection settings, credential references, proxies, standard SSH jump hosts, and JumpServer sources. See [Assets](11-assets.md).
+
+## 11. Knowledge Base
+
+**Entry:** click **Knowledge**. Search and add controls are at the top of its source panel; selecting a file opens the source/preview editor in the center.
+
+![Knowledge](../images/knowledge-editor.png)
+
+Markdown, images, search, Mermaid, internal links, and AI context are covered in [Knowledge Base](12-knowledge-base.md).
+
+## 12. Plugins And Extensions
+
+**Entry:** click **Plugins**, select a card, then install, enable, or disable it from details.
+
+![Plugins](../images/extensions-workspace.png)
+
+Plugins contribute pages, tools, and aliases after manifest validation and trust. See [Plugins And Extensions](13-extensions.md).
+
+## 13. Kubernetes
+
+**Entry:** click **Kubernetes**, use the add control in the cluster area to import kubeconfig, then connect.
+
+![Kubernetes](../images/kubernetes-workspace.png)
+
+Resources, logs, Describe, isolated kubectl terminals, the cluster Agent command bar, and sending output to AI are covered in [Kubernetes](14-kubernetes.md).
+
+## 14. Database And DB AI
+
+**Entry:** click **Database**, use the add control in the connection sidebar, choose an engine, and test the connection.
+
+![Database](../images/database-workspace.png)
+
+Catalog browsing, SQL, result editing, and DB AI generation, explanation, optimization, conversion, and diagnosis are covered in [Database And DB AI](15-database.md).
+
+## 15. Themes And Terminal Appearance
+
+**Entry:** use **Settings -> General** for theme/background and **Settings -> Terminal** for font, line height, cursor, and terminal options.
+
+![Theme](../images/settings-general.png)
+
+System/light/dark themes, bundled and custom backgrounds, and cross-platform typography are covered in [Themes](16-themes.md).
+
+## Recommended First Run
+
+1. Configure an AI provider under **Settings -> Models** if needed.
+2. Save a test host under **Assets -> Host Management** and run Connection Test.
+3. Double-click it in **Workspace**, then try search, split, and file management.
+4. Bind the right AI panel and begin with a read-only diagnostic task.
+5. If you use an external coding agent, install its hook under **Settings -> AI Notifications**.
+
+Next: [Terminal And Main Workspace](02-terminal-workspace.md) · [Back to index](../index.md)

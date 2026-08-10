@@ -276,6 +276,23 @@
       >
         <div class="terminal-dashboard-icon"><Terminal /></div>
         <div class="terminal-dashboard-shortcuts">
+          <div class="terminal-dashboard-language">
+            <label for="terminal-dashboard-language">{{ t('settings.general.language') }}</label>
+            <select
+              id="terminal-dashboard-language"
+              :value="workspace.config.language"
+              :aria-label="t('settings.general.language')"
+              @change="selectTerminalDashboardLanguage"
+            >
+              <option
+                v-for="option in settingsLanguageOptions"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.labelKey ? t(option.labelKey) : option.label }}
+              </option>
+            </select>
+          </div>
           <button type="button" @click="openTerminalDashboardChat">
             <span>{{ t('terminal.dashboard.chatWithAi') }}</span>
           </button>
@@ -292,7 +309,7 @@
             <span>{{ t('terminal.dashboard.toggleLayout') }}</span>
           </button>
           <button type="button" @click="openKnowledgeBaseDocumentation">
-            <span>{{ t('terminal.dashboard.knowledgeDocs') }}</span>
+            <span>{{ t('terminal.dashboard.gettingStarted') }}</span>
           </button>
         </div>
       </div>
@@ -316,6 +333,7 @@
           :start-line="panel.knowledge.startLine"
           :end-line="panel.knowledge.endLine"
           :jump-token="panel.knowledge.jumpToken"
+          :anchor="panel.knowledge.anchor"
         />
         <ManagedAiSessionContentWorkspace
           v-else-if="panel.kind === 'managed-ai-session' && panel.managedAiSession"
@@ -700,6 +718,8 @@ const {
   togglePanelConnection,
   toggleTabConnectionFromMenu,
   scrollTerminalTabs,
+  selectTerminalDashboardLanguage,
+  settingsLanguageOptions,
   updateTerminalTabScrollState,
   triggerAiSuggestion,
   unsplitFromTermMenu,

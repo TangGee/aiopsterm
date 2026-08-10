@@ -49,7 +49,7 @@ import {
   type WorkspaceUserLoginTab
 } from '@/services/user/workspaceUserController'
 import { createDefaultOnboardingCompleted, onboardingTourSteps, type OnboardingModuleId } from '@/config/onboarding'
-import type { ModuleKey } from '@/config/navigation'
+import type { CenterSurface, ModuleKey } from '@/config/navigation'
 import { type SettingSectionKey } from '@/config/settings'
 import {
   defaultAiPreferences,
@@ -117,6 +117,7 @@ const createRendererLocalId = (prefix: RendererLocalIdPrefix) => `${prefix}-${Ma
 export const createWorkspaceStoreState = () => {
   const mode = ref<'terminal' | 'agents'>('terminal')
   const activeModule = ref<ModuleKey>('workspace')
+  const activeCenterSurface = ref<CenterSurface>('main-workspace')
   const leftPanelOpen = ref(true)
   const rightPanelOpen = ref(true)
   const agentsLeftOpen = ref(true)
@@ -388,6 +389,7 @@ export const createWorkspaceStoreState = () => {
   return {
     mode,
     activeModule,
+    activeCenterSurface,
     leftPanelOpen,
     rightPanelOpen,
     agentsLeftOpen,

@@ -2,6 +2,10 @@
 
 Use this guide to save database connections, browse objects, execute SQL, and ask AI for help within a fixed database scope.
 
+## Where To Open It
+
+Click **Database** on the module rail. Add and test a connection, then open SQL from a table menu or the main `+` control. Click **Toggle DB AI Pane** on the Database workspace to bind the active connection. Before DB AI, configure, Check, and Save a working Provider under **Settings -> Models**.
+
 ![Database workspace](../images/database-workspace.png)
 
 **①** is the connection and object tree, **②** manages SQL, data, and result tabs, and **③** is the current database workspace.
@@ -27,7 +31,18 @@ Run all recognizes common statement boundaries. Semicolons inside strings, comme
 
 Generated SQL can run directly only when it is read-only and the active tab still matches the captured connection, database, and schema.
 
-## Scenario 3: Explain With DB AI
+## Scenario 3: Generate SQL From Natural Language
+
+![DB AI workflow](../images/database-ai-workflow.png)
+
+1. Open a connection and select database/schema, then click **Toggle DB AI Pane**.
+2. Confirm connection, database, and schema in **① context**; sending is disabled without context.
+3. Click **Generate SELECT** or describe a query in **② the composer**, such as “count each order status over the last 24 hours”.
+4. DB AI returns target-dialect SQL. Use **③ actions** to copy, replace the current selection/statement, insert into the editor, or run read-only SQL when safe.
+
+Run remains disabled unless the active SQL tab still matches the captured connection, database, and schema. Prefer insert/replace, inspect filters and row limits, then execute.
+
+## Scenario 4: Explain, Optimize, Convert, And Diagnose
 
 Select SQL and use Explain or Optimize, or ask DB AI:
 
@@ -35,11 +50,22 @@ Select SQL and use Explain or Optimize, or ask DB AI:
 Why is this query not using an index? Inspect the table and indexes before proposing a rewrite.
 ```
 
-The DB AI session is bound to the current connection, database, and schema. It can discover catalog objects, read table descriptions and DDL, sample bounded rows, count, inspect indexes, and request supported explain data. It cannot switch connections through tool arguments or run arbitrary SQL and writes.
+Core actions include:
 
-A context change rotates to a new DB AI session. Restore fails read-only when the original connection or schema is unavailable instead of substituting another database.
+- **Explain** with schema, indexes, and supported plans.
+- **Optimize** with semantics-preserving rewrites and index suggestions.
+- **Complete** an unfinished SQL statement.
+- **Convert** to a selected SQL dialect and label the result dialect.
+- **Diagnose** SQL, errors, or execution evidence.
+- **Schema Summary** for important objects and relationships.
 
-## Scenario 4: Read Through An External Agent
+DB AI can discover catalogs, describe tables/DDL, sample bounded rows, count, inspect indexes, and request supported explain data. It cannot switch connections through tool arguments or execute arbitrary SQL or writes. Drop/Truncate intent yields explanation or a controlled plan, not execution by read-only DB AI tools.
+
+## Scenario 5: Restore A DB AI Product Session
+
+Changing database context rotates to a new DB AI session. Restore the original from [Agents Product Sessions](04-agents-product-sessions.md). If its connection or schema is unavailable, it opens read-only and asks to repair the original binding rather than substituting another database.
+
+## Scenario 6: Read Through An External Agent
 
 Install `aiopsterm_databases` and enable `Allow external Agents to read databases` under Export MCP. The Agent discovers process-scoped handles and uses catalog, describe, and structured query tools.
 
@@ -52,3 +78,5 @@ The permission is off by default. Credentials and endpoints are never returned, 
 - Generated SQL cannot run: scope changed or SQL is not read-only.
 - External reads are disabled: explicitly enable the Export MCP permission.
 - Results are truncated: narrow, page, or export the data.
+
+Previous: [Kubernetes](14-kubernetes.md) · Next: [Themes And Terminal Appearance](16-themes.md) · [Back to index](../index.md)

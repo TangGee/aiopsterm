@@ -109,6 +109,13 @@ const requiredFiles = [
   join(clineSidecar, 'CLINE-ATTRIBUTION.txt'),
   join(resourcesDir, 'builtin-plugins', 'linux-incident-runbook', 'aiopsterm.plugin.json'),
   join(resourcesDir, 'builtin-plugins', 'generic-cmdb-assets', 'aiopsterm.plugin.json'),
+  join(resourcesDir, 'docs', 'index.md'),
+  join(resourcesDir, 'docs', 'usage', 'settings', 'zh-CN', 'general.md'),
+  join(resourcesDir, 'docs', 'usage', 'settings', 'en-US', 'general.md'),
+  join(resourcesDir, 'docs', 'usage', 'best-practices', 'index.md'),
+  join(resourcesDir, 'docs', 'usage', 'best-practices', 'zh-CN', '01-getting-started.md'),
+  join(resourcesDir, 'docs', 'usage', 'best-practices', 'en-US', '01-getting-started.md'),
+  join(resourcesDir, 'docs', 'technical', 'control-socket.md'),
   sqlitePackagePath,
   sqliteManifestPath,
   ...nativeModuleFilesForPlatform(resourcesDir)

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   renderKnowledgeMarkdownPreview,
+  resolveKnowledgeMarkdownDocumentLink,
   resolveKnowledgeMarkdownResource,
   sanitizeKnowledgeMarkdownHtml
 } from '@/services/knowledge/knowledgeMarkdownPreviewRuntime'
@@ -38,5 +39,27 @@ describe('knowledgeMarkdownPreviewRuntime', () => {
     expect(doc.querySelector('code')?.classList.contains('language-javascript')).toBe(true)
     expect(doc.querySelector('.mermaid')?.textContent).toContain('flowchart TD')
     expect(result.hasMermaid).toBe(true)
+  })
+
+  it('preserves safe internal document links and resolves them without escaping the knowledge root', async () => {
+    const result = await renderKnowledgeMarkdownPreview({
+      relPath: '使用指南/index.md',
+      content: '[中文](zh-CN/01-getting-started.md)\n\n[section](zh-CN/02-terminal-workspace.md#ssh-认证)\n\n[bad](javascript:alert(1))\n\n# SSH 认证',
+      loadImageDataUrl: vi.fn(async () => null)
+    })
+    const doc = new DOMParser().parseFromString(result.html, 'text/html')
+    const links = Array.from(doc.querySelectorAll('a'))
+
+    expect(links[0].getAttribute('data-knowledge-doc-link')).toBe('zh-CN/01-getting-started.md')
+    expect(links[0].hasAttribute('target')).toBe(false)
+    expect(links[1].getAttribute('data-knowledge-doc-link')).toBe('zh-CN/02-terminal-workspace.md#ssh-%E8%AE%A4%E8%AF%81')
+    expect(links[2].hasAttribute('href')).toBe(false)
+    expect(doc.querySelector('h1')?.id).toBe('ssh-认证')
+    expect(resolveKnowledgeMarkdownDocumentLink('../en-US/01-getting-started.md', '使用指南/zh-CN/index.md')).toEqual({
+      relPath: '使用指南/en-US/01-getting-started.md',
+      anchor: ''
+    })
+    expect(resolveKnowledgeMarkdownDocumentLink('../../../outside.md', '使用指南/zh-CN/index.md')).toBeNull()
+    expect(resolveKnowledgeMarkdownDocumentLink('/absolute.md', '使用指南/index.md')).toBeNull()
   })
 })

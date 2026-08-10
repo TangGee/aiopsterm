@@ -2,9 +2,9 @@
 
 Start with the scenario-based [Best Practices / 最佳实践](best-practices/index.md):
 
-- AI work: [AI sessions](best-practices/zh-CN/03-ai-assistant.md), [Host Agent](best-practices/zh-CN/09-host-agent.md), and [three exported MCP servers](best-practices/zh-CN/06-mcp.md)
-- Infrastructure: [hosts, jump hosts, and JumpServer](best-practices/zh-CN/10-host-management-jumpserver.md), [database and SQL](best-practices/zh-CN/11-database-sql.md), and [Kubernetes](best-practices/zh-CN/12-kubernetes.md)
-- Daily operation: [terminal workspace](best-practices/zh-CN/02-terminal-workspace.md), [commands and macros](best-practices/zh-CN/04-quick-commands.md), and [troubleshooting](best-practices/zh-CN/08-troubleshooting.md)
+- AI work: [Host Agent](best-practices/zh-CN/03-host-agent.md), [AI sessions](best-practices/zh-CN/05-ai-sessions.md), and [three exported MCP servers](best-practices/zh-CN/08-export-mcp.md)
+- Infrastructure: [assets and JumpServer](best-practices/zh-CN/11-assets.md), [database and DB AI](best-practices/zh-CN/15-database.md), and [Kubernetes](best-practices/zh-CN/14-kubernetes.md)
+- Daily operation: [terminal workspace](best-practices/zh-CN/02-terminal-workspace.md), [commands and macros](best-practices/zh-CN/06-quick-commands.md), [files](best-practices/zh-CN/10-files.md), and [troubleshooting](best-practices/zh-CN/17-troubleshooting.md)
 
 Detailed reference:
 

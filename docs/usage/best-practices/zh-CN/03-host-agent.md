@@ -1,6 +1,22 @@
-# 用 AI 操作远程主机
+# 主机 Agent：用 AI 操作本地与远程主机
 
 本章适合这样的任务：你已经在 aiopsterm 中保存并连接了一台主机，希望让 AI 帮你完成诊断、命令生成或多步运维，同时保留明确的目标主机和审批边界。
+
+## 从哪里打开与必要配置
+
+主机 Agent 必须先有可用模型，只有 SSH 连接没有模型配置不能发送对话。
+
+![模型设置](../images/settings-models.png)
+
+1. 点击 **设置齿轮 -> 模型 -> 添加模型**。
+2. 使用内嵌 Codex 时，选择 **OpenAI Compatible**，填写 Base URL、API Key 和 Model，并把 **API Format** 设为 **Responses**。Codex 不使用该 Provider 的 Chat Completions 格式。
+3. 点击 **Check** 验证 Responses 端点，再点击 **Save**，并确认模型出现在模型列表。Ollama、启用 OpenAI Compatible Server 的 LM Studio，以及产品明确支持的 Bedrock OpenAI 模型走各自专用适配。
+4. Classic 可以使用其支持的 Chat Completions、Responses、Anthropic 等 Provider；同样应先 Check/Save。
+5. 点击 **工作区**，双击本地或 SSH 主机，等待终端可用。
+6. 在右侧 AI 面板顶部选择 **Codex CLI** 或 **Classic**。面板关闭时，从顶栏布局控制重新显示。
+7. Codex 在目标绑定区域选择当前终端；Classic 从输入框上方的 `@` 入口添加主机。
+
+远程主机无需安装 Codex 或 Classic。Agent 在本机运行，远程操作通过已连接终端及其代理/跳板路径完成。
 
 ![主机 AI 面板](../images/ai-panel.png)
 
@@ -60,7 +76,11 @@ Classic 提供三种不同权限的工作方式：
 - 需要完整终端式编码代理体验、远程文件读取和持续会话时，使用内嵌 Codex。
 - 需要结构化命令卡、清晰的 Chat/Command/Agent 分级和多主机上下文时，使用 Classic。
 - 只想快速得到一条命令时，使用 Classic Command 或终端右键菜单中的 AI 命令。
-- 需要长期管理会话时，从 Agents 模式恢复对应的 Codex、Classic 或 DB AI 会话。
+- 需要长期管理会话时，从[Agents 产品会话](04-agents-product-sessions.md)恢复对应 Codex 或 Classic。
+
+## 为 Classic 增加第三方工具
+
+需要 CMDB、监控或内部平台工具时，打开 **设置 -> 主机Agent -> MCP** 添加第三方 MCP Server。这个入口把外部工具提供给内嵌 Classic，不是把 aiopsterm 导出给外部 Codex；完整步骤见[第三方 MCP Server](09-third-party-mcp.md)。
 
 ## 常见失败
 
@@ -69,3 +89,5 @@ Classic 提供三种不同权限的工作方式：
 - 只读命令仍要求确认：主进程安全策略覆盖了模型的低风险声明。
 - Codex 只给出建议：目标可能未绑定、已断开或正在恢复。
 - 长命令超时：调整 Shell Integration Timeout，或让 Agent 使用适合长任务的执行方式。
+
+上一篇：[终端与主工作区](02-terminal-workspace.md) · 下一篇：[Agents 产品会话](04-agents-product-sessions.md) · [返回目录](../index.md)

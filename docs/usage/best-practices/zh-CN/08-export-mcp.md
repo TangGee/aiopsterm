@@ -1,50 +1,12 @@
-# MCP 集成最佳实践
+# 导出 MCP 给外部 Agent
 
-aiopsterm 的 MCP 相关能力有两个方向：**接入第三方 MCP Server** 给内部 Agent 使用，以及把 aiopsterm 自身能力**导出**给外部编码代理。
+本文重点介绍把 aiopsterm 自身能力导出给外部编码代理。内部 Agent 接入第三方 MCP 是另一条链路，不要混用两个设置入口。
 
-## 配置第三方 MCP Server
+## 从哪里打开
 
-![主机Agent 设置页](../images/settings-hostagent.png)
+点击左下角 **设置齿轮 -> 导出 MCP**。页面顶部管理网关和 Token，下方三个能力卡分别对应 Hosts、AI Sessions 和 Databases；必须在目标卡片内点击 Codex 或 Claude Code 安装按钮，没有批量安装按钮。内部 Agent 的第三方 MCP 配置位于 **设置 -> 主机Agent -> MCP**。
 
-打开 **① 设置 -> 主机Agent**，页内 **② 子页签** 依次是 `对话与主机`、`MCP`、`Skills`、`规则`。
-
-![MCP 设置页](../images/settings-mcp.png)
-
-切到 **① MCP 子页签**：
-
-- **② Add Server** 打开 JSON 编辑器，直接编辑用户数据目录下的 `setting/mcp_settings.json`。
-- **③ 服务器与工具列表**：主进程完成发现（`initialize` → `tools/list` → `resources/list`）后，这里展示每个 Server 的 Tools/Resources，工具行可展开查看参数并单独控制 Auto Approve。
-
-`stdio` 与 `streamableHttp` 配置示例：
-
-```json
-{
-  "mcpServers": {
-    "local-tools": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["/absolute/path/to/server.js"],
-      "timeout": 10
-    },
-    "remote-tools": {
-      "type": "streamableHttp",
-      "url": "https://mcp.example.com/mcp",
-      "headers": { "Authorization": "Bearer ${TOKEN}" }
-    }
-  }
-}
-```
-
-实用规则：
-
-- 省略 `type` 时：有 `url` 无 `command` 按 `streamableHttp` 处理；`http`、`streamable_http`、`streamable-http` 别名保存时归一化；`command` 与 `url` 同时存在且无显式类型时按更安全的 stdio 解释。
-- 后端没有返回有效 `connected` 状态的 Server 一律显示 `disconnected`，其 Run/Read 操作被禁用——不要以为写进 JSON 就等于连上了。
-- 旧版 `sse` 服务器继续用 `"type": "sse"` 同样的字段。
-- 种子示例 `ops-inventory` 只是开发/测试用名字；若本地配置里有它且命令不存在，会报 ENOENT，可直接删掉。
-
-> 安全边界：Agent 只能读取已启用 Server 上明确列出的资源 URI，且每次读取都要在资源审批卡上显式点击；MCP 的传输命令、环境变量、请求头与凭据从不暴露给模型。
-
-## 导出 MCP 给外部代理
+## 三个独立的导出能力
 
 ![导出 MCP](../images/settings-export-mcp.png)
 
@@ -73,3 +35,7 @@ aiopsterm 的 MCP 相关能力有两个方向：**接入第三方 MCP Server** �
 - 应用重启后数据库随机句柄会变化；外部 Agent 应重新调用连接列表，不能持久化旧句柄。
 
 > 最佳实践：只把 Token 发给可信本地 Agent，疑似泄露时立即重新生成。主机命令仍受连接和认证边界约束；数据库保持只读；AI 会话工具不会关闭对应终端或杀死代理进程。
+
+第三方 MCP Server 的方向和入口完全不同，请使用[第三方 MCP Server](09-third-party-mcp.md)，不要把它的 JSON 配置写进导出页面。
+
+上一篇：[快捷键](07-shortcuts.md) · 下一篇：[第三方 MCP Server](09-third-party-mcp.md) · [返回目录](../index.md)

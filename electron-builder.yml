@@ -50,8 +50,8 @@ extraResources:
     to: builtin-plugins
   - from: build/cline-sidecar
     to: cline-sidecar
-  - from: docs/usage/best-practices
-    to: docs/best-practices
+  - from: docs
+    to: docs
 asar: true
 npmRebuild: false
 afterPack: scripts/prune-packaged-native-modules.mjs
@@ -79,6 +79,7 @@ win:
         - aiopsterm
 mac:
   hardenedRuntime: true
+  notarize: true
   entitlements: resources/entitlements.mac.plist
   entitlementsInherit: resources/entitlements.mac.plist
   target:

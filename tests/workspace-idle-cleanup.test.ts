@@ -17,6 +17,7 @@ const createController = () => {
   const state = {
     mode: ref<'terminal' | 'agents'>('terminal'),
     activeModule: ref<any>('workspace'),
+    activeCenterSurface: ref<any>('main-workspace'),
     activePanelId: ref('panel-active'),
     panels,
     config: ref({ ...defaultConfig, workspaceIdleCleanup: { enabled: false, timeoutMinutes: 20 } }),

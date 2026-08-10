@@ -88,6 +88,7 @@ const createHarness = (overrides: Partial<AppShellRuntimeOptions> = {}, workspac
   }
   const workspace = {
     activeModule: 'workspace',
+    activeCenterSurface: 'main-workspace',
     agentsLeftOpen: true,
     agentsLeftWidth: 286,
     config: {
@@ -220,18 +221,30 @@ describe('appShellRuntime', () => {
 
   it('keeps the terminal workspace visible for terminal modules and throughout Agents mode', () => {
     ;(['workspace', 'aiSessions', 'snippets', 'knowledge'] as const).forEach((module) => {
-      const { runtime } = createHarness({}, { activeModule: module })
+      const { runtime } = createHarness({}, { activeModule: module, activeCenterSurface: 'main-workspace' })
       expect(runtime.showTerminalWorkspace.value).toBe(true)
     })
     ;(['assets', 'files', 'extensions', 'kubernetes', 'settings', 'database', 'user'] as const).forEach((module) => {
-      const { runtime } = createHarness({}, { activeModule: module })
+      const { runtime } = createHarness({}, { activeModule: module, activeCenterSurface: module })
       expect(runtime.showTerminalWorkspace.value).toBe(false)
     })
 
     ;(['workspace', 'assets', 'files', 'database', 'user'] as const).forEach((module) => {
-      const { runtime } = createHarness({}, { mode: 'agents', activeModule: module })
+      const { runtime } = createHarness({}, { mode: 'agents', activeModule: module, activeCenterSurface: module === 'workspace' ? 'main-workspace' : module })
       expect(runtime.showTerminalWorkspace.value).toBe(true)
     })
+  })
+
+  it('never renders Assets as a terminal left pane', () => {
+    const { runtime } = createHarness({}, {
+      activeModule: 'assets',
+      activeCenterSurface: 'main-workspace',
+      isLeftVisible: true
+    })
+
+    expect(runtime.showTerminalLeftPane.value).toBe(false)
+    expect(runtime.hasLeftPane.value).toBe(false)
+    expect(runtime.showTerminalWorkspace.value).toBe(true)
   })
 
   it('keeps the Agents terminal and right AI pane visible without allowing a drag-to-close', async () => {

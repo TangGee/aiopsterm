@@ -197,7 +197,7 @@ export const createTerminalControlSurfaceGroupHandlers = ({
     if (method === 'workspace.group.focus') {
       const group = resolveWorkspaceGroup(params.groupId || params.group_id || params.id)
       if (!group) return controlFail('WORKSPACE_GROUP_NOT_FOUND', 'Workspace group not found.')
-      workspace.activatePanelSurface(group.anchorPanelId, { cause: 'external' })
+      workspace.revealPanelSurface(group.anchorPanelId, { cause: 'external' })
       return controlOk(workspaceGroupPayload(group))
     }
     return controlFail('UNKNOWN_CONTROL_RENDERER_METHOD', `Unknown renderer control method: ${method}`)

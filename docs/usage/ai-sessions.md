@@ -1,6 +1,6 @@
 # AI Sessions
 
-For the task-oriented workflow, including project-file review and notification sounds, see [AI Assistant And Sessions](best-practices/en-US/03-ai-assistant.md). Agent integrators should use the [developer integration guide](../developer/en-US/ai-notification-integration.md).
+For the task-oriented workflow, including project-file review and notification sounds, see [AI Session Management](best-practices/en-US/05-ai-sessions.md). Agent integrators should use the [developer integration guide](../developer/en-US/ai-notification-integration.md).
 
 The `AI 会话` module is the left-side index for managed coding-agent sessions. It keeps row double-click focused on the existing terminal behavior: locate the owning terminal when it is open, or restore a restorable idle/history session by writing its resume command into a local terminal.
 

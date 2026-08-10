@@ -6,6 +6,7 @@ import type { OpenPathResult, OpenSettingsDocumentationInput, SettingsDocumentat
 type SettingsExternalActionRuntime = {
   userDataPath: string
   appPath?: string
+  resourcesPath?: string
   cwd?: string
   moduleDir?: string
   version: string
@@ -71,7 +72,7 @@ const normalizeDocumentationLocale = (locale: unknown): SupportedDocumentationLo
 }
 
 const documentationRoots = (runtime: SettingsExternalActionRuntime) =>
-  uniquePaths([runtime.cwd, runtime.appPath, runtime.moduleDir ? resolve(runtime.moduleDir, '..', '..') : undefined]).map((root) => join(root, 'docs'))
+  uniquePaths([runtime.resourcesPath, runtime.cwd, runtime.appPath, runtime.moduleDir ? resolve(runtime.moduleDir, '..', '..') : undefined]).map((root) => join(root, 'docs'))
 
 const documentationCandidates = (runtime: SettingsExternalActionRuntime) =>
   documentationRoots(runtime).map((root) => join(root, 'index.md'))

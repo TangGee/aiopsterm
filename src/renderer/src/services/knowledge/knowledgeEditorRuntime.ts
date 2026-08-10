@@ -4,7 +4,11 @@ import {
   knowledgeEditorImageMimeFromPath,
   knowledgeEditorLanguageFromPath
 } from '@/services/knowledge/knowledgeEditorPathRuntime'
-import { renderKnowledgeMarkdownPreview } from '@/services/knowledge/knowledgeMarkdownPreviewRuntime'
+import {
+  isInternalKnowledgeMarkdownHref,
+  renderKnowledgeMarkdownPreview,
+  resolveKnowledgeMarkdownDocumentLink
+} from '@/services/knowledge/knowledgeMarkdownPreviewRuntime'
 import {
   isKnowledgePastedImageResultData,
   isKnowledgeReadResultData,
@@ -12,6 +16,7 @@ import {
   malformedKnowledgeBackendResultMessage
 } from '@/services/knowledge/knowledgeBackendGuards'
 import { knowledgeClient } from '@/services/knowledge/knowledgeClient'
+import { useI18n } from '@/i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { KnowledgeEditorMode, KnowledgeImageViewerApi, KnowledgeMarkdownPreviewApi, KnowledgeTextEditorApi } from '@/services/knowledge/knowledgeEditorTypes'
 
@@ -21,6 +26,7 @@ type KnowledgeEditorRuntimeProps = {
   startLine?: number
   endLine?: number
   jumpToken?: number
+  anchor?: string
 }
 
 type KnowledgeEditorRuntimeOptions = {
@@ -59,6 +65,7 @@ export const initialKnowledgeEditorMode = (relPath: string, isImage?: boolean): 
 
 export const useKnowledgeEditorRuntime = (props: KnowledgeEditorRuntimeProps, options: KnowledgeEditorRuntimeOptions) => {
   const workspace = useWorkspaceStore()
+  const { t } = useI18n()
   const content = ref('')
   const imageDataUrl = ref('')
   const loading = ref(false)
@@ -153,6 +160,44 @@ export const useKnowledgeEditorRuntime = (props: KnowledgeEditorRuntimeProps, op
       await nextTick()
       if (token === previewToken) await options.markdownPreviewRef.value?.renderMermaid(mermaidTheme.value)
     }
+    if (props.anchor) {
+      await nextTick()
+      if (token === previewToken) options.markdownPreviewRef.value?.scrollToAnchor(props.anchor)
+    }
+  }
+
+  const expandKnowledgeParents = (targetRelPath: string) => {
+    const parts = targetRelPath.split('/').filter(Boolean)
+    const parents = parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join('/'))
+    workspace.setKnowledgeBrowserState({
+      expandedKeys: [...new Set([...workspace.kbExpandedKeys, ...parents])],
+      selectedKeys: [targetRelPath]
+    })
+  }
+
+  const handleMarkdownLink = async (href: string) => {
+    if (/^https?:/i.test(href)) {
+      await window.aiops.openExternalUrl(href)
+      return
+    }
+    if (href.startsWith('#')) {
+      const anchor = href.slice(1)
+      options.markdownPreviewRef.value?.scrollToAnchor(anchor)
+      return
+    }
+    if (!isInternalKnowledgeMarkdownHref(href)) return
+    const target = resolveKnowledgeMarkdownDocumentLink(href, relPath.value)
+    if (!target || workspace.findKnowledgeNode(target.relPath)?.type !== 'file') {
+      workspace.setTopNotice(t('knowledge.linkTargetMissing'))
+      return
+    }
+    workspace.setActiveModule('knowledge')
+    const panel = workspace.openKnowledgeFile(target.relPath, target.anchor ? { anchor: target.anchor } : undefined)
+    if (!panel) {
+      workspace.setTopNotice(t('knowledge.linkTargetMissing'))
+      return
+    }
+    expandKnowledgeParents(target.relPath)
   }
 
   const loadFile = async () => {
@@ -269,8 +314,13 @@ export const useKnowledgeEditorRuntime = (props: KnowledgeEditorRuntimeProps, op
   watch(
     () => props.jumpToken,
     () => {
-      if (props.startLine) mode.value = 'editor'
-      void jumpToRequestedLineRange()
+      if (props.startLine) {
+        mode.value = 'editor'
+        void jumpToRequestedLineRange()
+      } else if (props.anchor) {
+        mode.value = 'preview'
+        void renderMarkdownPreview()
+      }
     }
   )
 
@@ -313,6 +363,7 @@ export const useKnowledgeEditorRuntime = (props: KnowledgeEditorRuntimeProps, op
     statusText,
     updateContent,
     saveNow,
-    handlePaste
+    handlePaste,
+    handleMarkdownLink
   }
 }

@@ -78,7 +78,11 @@ type WorkspaceKnowledgeControllerState = {
 type WorkspaceKnowledgeControllerDeps = {
   setTopNotice: (message: string) => void
   imageLimitMessage?: () => string
-  openKnowledgeFile: (relPath: string, range?: { startLine?: number; endLine?: number }) => TerminalPanel | null
+  openKnowledgeFile: (
+    relPath: string,
+    range?: { startLine?: number; endLine?: number },
+    options?: { activation?: 'activate' | 'preserve' }
+  ) => TerminalPanel | null
   syncKnowledgePanelsAfterRename: (oldRelPath: string, newRelPath: string) => void
   closeKnowledgePanelsForRemoved: (relPaths: string[]) => void
 }

@@ -468,6 +468,8 @@ const normalizeWorkspaceGroupSnapshot = (value: unknown): ControlSessionSnapshot
 const normalizeSessionSnapshot = (value: unknown, fallbackId = 'latest'): ControlSessionSnapshot | null => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const record = value as Record<string, unknown>
+  const activeCenterSurface = cleanText(record.activeCenterSurface)
+  if (!activeCenterSurface) return null
   const panels = Array.isArray(record.panels) ? record.panels.map(normalizeSessionPanelSnapshot).filter((item): item is ControlSessionSnapshot['panels'][number] => Boolean(item)) : []
   if (!panels.length) return null
   const panelIds = new Set(panels.map((panel) => panel.id))
@@ -492,6 +494,7 @@ const normalizeSessionSnapshot = (value: unknown, fallbackId = 'latest'): Contro
     activePanelId: panelIds.has(cleanText(record.activePanelId)) ? cleanText(record.activePanelId) : panels[0].id,
     mode: cleanText(record.mode) || 'terminal',
     activeModule: cleanText(record.activeModule) || 'workspace',
+    activeCenterSurface,
     panels,
     workspaceGroups,
     ...(record.agentHibernation && typeof record.agentHibernation === 'object' && !Array.isArray(record.agentHibernation) ? { agentHibernation: record.agentHibernation as ControlSessionSnapshot['agentHibernation'] } : {}),

@@ -87,6 +87,10 @@ const mustContain = [
   'appImage:',
   'compression: zstd',
   'mac:',
+  'hardenedRuntime: true',
+  'notarize: true',
+  'entitlements: resources/entitlements.mac.plist',
+  'entitlementsInherit: resources/entitlements.mac.plist',
   '- dmg',
   '- zip',
   'win:',
@@ -107,6 +111,8 @@ const mustContain = [
   'to: builtin-plugins',
   'from: build/cline-sidecar',
   'to: cline-sidecar',
+  'from: docs',
+  'to: docs',
   'afterPack: scripts/prune-packaged-native-modules.mjs',
   'schemes:',
   '- aiopsterm'
@@ -168,6 +174,7 @@ const nativeRuntimeHelpersScript = readFileSync(resolve('scripts/native-runtime-
 const afterPackScript = readFileSync(resolve('scripts/prune-packaged-native-modules.mjs'), 'utf8')
 const packageTargetsScript = readFileSync(resolve('scripts/package-targets.mjs'), 'utf8')
 const packagedAppAuditScript = readFileSync(resolve('scripts/audit-packaged-app.mjs'), 'utf8')
+const packagedSmokeScript = readFileSync(resolve('scripts/smoke-packaged-app.mjs'), 'utf8')
 const packagedE2eSpec = readFileSync(resolve('tests/packaged-e2e/packaged-app.spec.ts'), 'utf8')
 const codexPackagingRequirements = [
   { label: 'Cline sidecar build entrypoint', source: packageScripts['build:cline-sidecar'], text: 'node scripts/build-cline-sidecar.mjs' },
@@ -187,6 +194,8 @@ const codexPackagingRequirements = [
   { label: 'packaged app Cline bundle audit', source: packagedAppAuditScript, text: "join(clineSidecar, 'cline-agent-sidecar.cjs')" },
   { label: 'packaged app Cline SBOM audit', source: packagedAppAuditScript, text: "join(clineSidecar, 'sbom.cdx.json')" },
   { label: 'packaged app Cline hash audit', source: packagedAppAuditScript, text: 'Packaged Cline sidecar hashes do not match its manifest.' },
+  { label: 'packaged settings documentation audit', source: packagedAppAuditScript, text: "join(resourcesDir, 'docs', 'usage', 'settings', 'zh-CN', 'general.md')" },
+  { label: 'packaged settings documentation smoke', source: packagedSmokeScript, text: "openSettingsDocumentation({ page: 'general', locale: 'zh-CN' })" },
   { label: 'packaged app Cline Linux dynamic-link audit', source: packagedAppAuditScript, text: "execFileSync('ldd', [clineNode]" },
   { label: 'linux appimage audit entrypoint', source: packageScripts['audit:linux-appimage'], text: 'node scripts/audit-linux-appimage-package.mjs' },
   { label: 'linux deb audit entrypoint', source: packageScripts['audit:linux-deb'], text: 'node scripts/audit-linux-deb-package.mjs' },
@@ -219,6 +228,7 @@ const codexPackagingRequirements = [
   { label: 'packaged SQLite Node ABI removal', source: afterPackScript, text: 'delete packagedManifest.node' },
   { label: 'packaged native build-noise pruning', source: afterPackScript, text: 'prunePackagedNativeBuildNoise(context)' },
   { label: 'macOS local ad-hoc signing fallback', source: afterPackScript, text: 'signMacAppForLocalUse(context)' },
+  { label: 'macOS forced local ad-hoc signing', source: afterPackScript, text: "AIOPSTERM_MAC_FORCE_ADHOC_SIGN === '1'" },
   { label: 'packaged SQLite manifest requirement', source: packagedAppAuditScript, text: "'aiopsterm-native-manifest.json'" },
   { label: 'packaged SQLite unique Electron binding gate', source: packagedAppAuditScript, text: 'must contain only its Electron ABI binding' },
   { label: 'packaged SQLite Electron runtime probe', source: packagedAppAuditScript, text: 'Packaged Electron better-sqlite3 probe failed' },

@@ -37,6 +37,7 @@
       v-else-if="mode === 'preview' && isMarkdown"
       ref="markdownPreviewRef"
       :html="markdownHtml"
+      @navigate="handleMarkdownLink"
     />
 
     <KnowledgeMonacoEditor
@@ -86,7 +87,8 @@ const {
   statusText,
   updateContent,
   saveNow,
-  handlePaste
+  handlePaste,
+  handleMarkdownLink
 } = useKnowledgeEditorRuntime(props, {
   textEditorRef: editorRef,
   imageViewerRef,

@@ -273,8 +273,14 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     showNotice: showChatExportNotice,
     setTopNotice: (message) => workspace.setTopNotice(message),
     refreshAiContextCatalog: () => workspace.refreshAiContextCatalog({ hydrateSelection: false }),
-    openTerminalForAiHostContext: (host, restoreOptions) => workspace.openTerminalForAiHostContext(host, restoreOptions),
-    activateTerminalPanel: (panelId) => workspace.activateTerminalPanel(panelId),
+    openTerminalForAiHostContext: (host, restoreOptions) => {
+      workspace.showMainWorkspace()
+      return workspace.openTerminalForAiHostContext(host, restoreOptions)
+    },
+    activateTerminalPanel: (panelId) => {
+      workspace.showMainWorkspace()
+      return workspace.activateTerminalPanel(panelId)
+    },
     upsertAiAttentionItem: (input) => workspace.upsertAiAttentionItem(input),
     removeAiAttentionItem: (id) => workspace.removeAiAttentionItem(id),
     markAiAttentionHandled: (id) => workspace.markAiAttentionHandled(id),

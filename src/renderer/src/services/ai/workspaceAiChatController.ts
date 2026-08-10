@@ -88,6 +88,7 @@ export const createWorkspaceAiChatController = (
 ) => {
   const {
     mode,
+    activeCenterSurface,
     config,
     conversations,
     selectedConversationId,
@@ -527,6 +528,7 @@ export const createWorkspaceAiChatController = (
         if (!canonicalTarget) {
           let pendingOpen = classicHostOpenQueues.get(expectedTargetId)
           if (!pendingOpen) {
+            if (mode.value !== 'agents') activeCenterSurface.value = 'main-workspace'
             pendingOpen = Promise.resolve(openTerminalForAiHostContext(context))
               .finally(() => {
                 if (classicHostOpenQueues.get(expectedTargetId) === pendingOpen) {
@@ -592,6 +594,7 @@ export const createWorkspaceAiChatController = (
           context = null
         }
         if (!panel) {
+          if (mode.value !== 'agents') activeCenterSurface.value = 'main-workspace'
           panel = await openTerminalForAiHostContext(catalogBinding, { silent: true })
           const panelContext = panel ? classicHostContextFromTerminalPanel(panel) : null
           context = panelContext ? classicHostContextWithCatalog(panelContext, catalog) : null

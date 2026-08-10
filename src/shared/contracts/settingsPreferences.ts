@@ -16,6 +16,7 @@ export type UserRuleConfig = {
 export type SettingsPreferencesSnapshot = {
   shortcuts: ShortcutUserConfig[]
   rules: UserRuleConfig[]
+  shortcutDefaultsVersion?: number
 }
 
 export type SettingsPreferencesResult = AiopsMutationResult<SettingsPreferencesSnapshot>

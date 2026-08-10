@@ -1,7 +1,8 @@
 import { computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useTerminalControlSurface, type TerminalControlSurfaceView } from '@/composables/useTerminalControlSurface'
 import { useWorkspaceStore, type TerminalPanel } from '@/stores/workspace'
-import { isTerminalWorkspaceSurfaceVisible } from '@/config/navigation'
+import { isMainWorkspaceSurfaceVisible } from '@/config/navigation'
+import { settingsLanguageOptions } from '@/config/settings'
 import { copyTextToClipboard } from '@/services/app/clipboardRuntime'
 import { controlClient } from '@/services/app/controlClient'
 import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
@@ -28,6 +29,10 @@ import type { TerminalStressQueueSample } from '@/services/terminal/terminalStre
 import type { TerminalDataEvent } from '@shared/contracts/terminalSessions'
 import { shouldUseTerminalDebugLogs, shouldUseTerminalStressHarness } from '@shared/runtimeSwitches'
 import { registerUiFocusScope } from '@/services/app/uiFocusCoordinator'
+import {
+  BUNDLED_KNOWLEDGE_DOCS_TARGET_DIR,
+  BUNDLED_KNOWLEDGE_GUIDE_INDEX_REL_PATH
+} from '@shared/knowledgeBaseGuide'
 
 type TerminalDataPerfSummary = {
   chunks: number
@@ -179,7 +184,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   const terminalDataSummaryIntervalMs = terminalDebugLogs ? terminalDataSummaryDebugIntervalMs : terminalDataSummaryFormalIntervalMs
   const terminalDataSummaryChunkThreshold = terminalDebugLogs ? terminalDataSummaryDebugChunkThreshold : terminalDataSummaryFormalChunkThreshold
   const terminalDataSummaryByteThreshold = terminalDebugLogs ? terminalDataSummaryDebugByteThreshold : terminalDataSummaryFormalByteThreshold
-  const terminalWorkspaceVisible = computed(() => isTerminalWorkspaceSurfaceVisible(workspace.mode, workspace.activeModule))
+  const terminalWorkspaceVisible = computed(() => isMainWorkspaceSurfaceVisible(workspace.mode, workspace.activeCenterSurface))
 
   const logTerminalDataSummary = (sessionId: string, summary: TerminalDataPerfSummary, reason: string) => {
     if (!terminalDebugLogs) return
@@ -662,6 +667,13 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     workspace.setActiveSettingsSection('general')
   }
 
+  const selectTerminalDashboardLanguage = async (event: Event) => {
+    const select = event.currentTarget as HTMLSelectElement
+    const previousLanguage = workspace.config.language
+    const saved = await workspace.updateLanguage(select.value)
+    if (!saved) select.value = previousLanguage
+  }
+
   const openTerminalDashboardInlineCommand = async () => {
     const panel = await workspace.openLocalTerminalPanel()
     if (!panel) return
@@ -673,11 +685,18 @@ export const useTerminalWorkspaceContainerRuntime = () => {
 
   const openKnowledgeBaseDocumentation = async () => {
     workspace.setWorkspaceMode('terminal')
-    workspace.setActiveModule('settings')
+    workspace.setLeftPanelOpen(true)
     workspace.setRightPanelOpen(false)
-    workspace.setActiveSettingsSection('general')
-    const documentationLocale = locale.value === 'zh-CN' || locale.value === 'zh-TW' ? 'zh-CN' : 'en-US'
-    await workspace.openSettingsDocumentationFile(`usage/best-practices/${documentationLocale}/05-knowledge-base.md`)
+    workspace.setActiveModule('knowledge')
+    const panel = workspace.openKnowledgeFile(BUNDLED_KNOWLEDGE_GUIDE_INDEX_REL_PATH)
+    if (!panel) {
+      workspace.setTopNotice(t('terminal.dashboard.gettingStartedUnavailable'))
+      return
+    }
+    workspace.setKnowledgeBrowserState({
+      expandedKeys: [...new Set([...workspace.kbExpandedKeys, BUNDLED_KNOWLEDGE_DOCS_TARGET_DIR])],
+      selectedKeys: [BUNDLED_KNOWLEDGE_GUIDE_INDEX_REL_PATH]
+    })
   }
 
   const {
@@ -1376,6 +1395,8 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     togglePanelConnection,
     toggleTabConnectionFromMenu,
     scrollTerminalTabs,
+    selectTerminalDashboardLanguage,
+    settingsLanguageOptions,
     updateTerminalTabScrollState,
     triggerAiSuggestion,
     unsplitFromTermMenu,

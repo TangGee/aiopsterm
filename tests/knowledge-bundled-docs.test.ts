@@ -88,6 +88,41 @@ describe('bundled best-practices docs sync', () => {
     expect(await exists(join(kbRoot, 'images', 'main-window.png'))).toBe(true)
     expect(await exists(join(kbRoot, '.hidden.md'))).toBe(false)
     expect((await readFile(join(userData, 'knowledgebase', '.aiopsterm-bundled-docs-synced'), 'utf-8')).trim()).toBe('1.0.0')
+    const manifest = JSON.parse(await readFile(join(userData, 'knowledgebase', '.aiopsterm-bundled-docs-manifest.json'), 'utf-8'))
+    expect(Object.keys(manifest.files)).toEqual([
+      'images/main-window.png',
+      'index.md',
+      'zh-CN/01-getting-started.md'
+    ])
+  })
+
+  it('updates an unchanged bundled file after a version change', async () => {
+    const { BUNDLED_DOCS_TARGET_DIR } = await loadRuntimeModule()
+    const userData = await createTempDir('aiopsterm-kb-user-')
+    const bundled = await createBundledDocsFixture()
+
+    await (await createRuntime(userData, bundled, '1.0.0')).ensureKnowledgeBaseDirectory()
+    await writeFile(join(bundled, 'zh-CN', '01-getting-started.md'), '# 新版快速上手\n', 'utf-8')
+    await (await createRuntime(userData, bundled, '1.1.0')).ensureKnowledgeBaseDirectory()
+
+    const target = join(userData, 'knowledgebase', BUNDLED_DOCS_TARGET_DIR, 'zh-CN', '01-getting-started.md')
+    expect(await readFile(target, 'utf-8')).toBe('# 新版快速上手\n')
+  })
+
+  it('upgrades pre-manifest bundled docs even when the legacy marker has the same app version', async () => {
+    const { BUNDLED_DOCS_TARGET_DIR } = await loadRuntimeModule()
+    const userData = await createTempDir('aiopsterm-kb-user-')
+    const bundled = await createBundledDocsFixture()
+    const knowledgeRoot = join(userData, 'knowledgebase')
+    const targetRoot = join(knowledgeRoot, BUNDLED_DOCS_TARGET_DIR)
+    await mkdir(targetRoot, { recursive: true })
+    await writeFile(join(targetRoot, 'index.md'), '# 旧版目录\n', 'utf-8')
+    await writeFile(join(knowledgeRoot, '.aiopsterm-bundled-docs-synced'), '1.0.0\n', 'utf-8')
+
+    await (await createRuntime(userData, bundled, '1.0.0')).ensureKnowledgeBaseDirectory()
+
+    expect(await readFile(join(targetRoot, 'index.md'), 'utf-8')).toBe('# index\n')
+    expect(await exists(join(knowledgeRoot, '.aiopsterm-bundled-docs-manifest.json'))).toBe(true)
   })
 
   it('does not overwrite user-edited files when re-syncing after a version change', async () => {
@@ -107,7 +142,7 @@ describe('bundled best-practices docs sync', () => {
     expect(await exists(join(userData, 'knowledgebase', BUNDLED_DOCS_TARGET_DIR, 'zh-CN', '02-new-doc.md'))).toBe(true)
   })
 
-  it('skips re-scanning while the sync marker matches the current version', async () => {
+  it('syncs changed bundled docs even when the app version is unchanged', async () => {
     const { BUNDLED_DOCS_TARGET_DIR } = await loadRuntimeModule()
     const userData = await createTempDir('aiopsterm-kb-user-')
     const bundled = await createBundledDocsFixture()
@@ -116,7 +151,44 @@ describe('bundled best-practices docs sync', () => {
     await writeFile(join(bundled, 'zh-CN', '02-new-doc.md'), '# 新文档\n', 'utf-8')
     await (await createRuntime(userData, bundled, '1.0.0')).ensureKnowledgeBaseDirectory()
 
-    expect(await exists(join(userData, 'knowledgebase', BUNDLED_DOCS_TARGET_DIR, 'zh-CN', '02-new-doc.md'))).toBe(false)
+    expect(await exists(join(userData, 'knowledgebase', BUNDLED_DOCS_TARGET_DIR, 'zh-CN', '02-new-doc.md'))).toBe(true)
+  })
+
+  it('preserves user edits while syncing changed bundled docs at the same app version', async () => {
+    const { BUNDLED_DOCS_TARGET_DIR } = await loadRuntimeModule()
+    const userData = await createTempDir('aiopsterm-kb-user-')
+    const bundled = await createBundledDocsFixture()
+
+    await (await createRuntime(userData, bundled, '1.0.0')).ensureKnowledgeBaseDirectory()
+    const targetRoot = join(userData, 'knowledgebase', BUNDLED_DOCS_TARGET_DIR)
+    const editedPath = join(targetRoot, 'zh-CN', '01-getting-started.md')
+    await writeFile(editedPath, '# 用户自己的修改\n', 'utf-8')
+    await writeFile(join(bundled, 'zh-CN', '01-getting-started.md'), '# 同版本新版快速上手\n', 'utf-8')
+    await writeFile(join(bundled, 'zh-CN', '02-new-doc.md'), '# 新文档\n', 'utf-8')
+
+    await (await createRuntime(userData, bundled, '1.0.0')).ensureKnowledgeBaseDirectory()
+
+    expect(await readFile(editedPath, 'utf-8')).toBe('# 用户自己的修改\n')
+    expect(await readFile(join(targetRoot, 'zh-CN', '02-new-doc.md'), 'utf-8')).toBe('# 新文档\n')
+  })
+
+  it('removes retired unchanged docs but preserves retired user edits', async () => {
+    const { BUNDLED_DOCS_TARGET_DIR } = await loadRuntimeModule()
+    const userData = await createTempDir('aiopsterm-kb-user-')
+    const bundled = await createBundledDocsFixture()
+    await writeFile(join(bundled, 'zh-CN', '02-retired.md'), '# 即将停用\n', 'utf-8')
+    await writeFile(join(bundled, 'zh-CN', '03-edited-retired.md'), '# 即将停用并修改\n', 'utf-8')
+
+    await (await createRuntime(userData, bundled, '1.0.0')).ensureKnowledgeBaseDirectory()
+    const targetRoot = join(userData, 'knowledgebase', BUNDLED_DOCS_TARGET_DIR, 'zh-CN')
+    await writeFile(join(targetRoot, '03-edited-retired.md'), '# 用户保留\n', 'utf-8')
+    await rm(join(bundled, 'zh-CN', '02-retired.md'))
+    await rm(join(bundled, 'zh-CN', '03-edited-retired.md'))
+
+    await (await createRuntime(userData, bundled, '1.1.0')).ensureKnowledgeBaseDirectory()
+
+    expect(await exists(join(targetRoot, '02-retired.md'))).toBe(false)
+    expect(await readFile(join(targetRoot, '03-edited-retired.md'), 'utf-8')).toBe('# 用户保留\n')
   })
 
   it('leaves the knowledge base untouched when no bundled docs path is configured', async () => {

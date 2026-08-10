@@ -13,6 +13,7 @@
       :class="[
         `mode-${workspace.mode}`,
         `module-${workspace.activeModule}`,
+        `surface-${workspace.activeCenterSurface}`,
         { 'has-left-pane': hasLeftPane, 'has-right-pane': hasRightPane }
       ]"
     >
@@ -52,22 +53,22 @@
         aria-label="调整左侧面板宽度"
         @mousedown="startResize('left', $event)"
       ></button>
-      <FilesWorkspace v-if="workspace.mode === 'terminal' && workspace.activeModule === 'files'" />
-      <AssetsWorkspace v-else-if="workspace.mode === 'terminal' && workspace.activeModule === 'assets'" />
-      <ExtensionsWorkspace v-else-if="workspace.mode === 'terminal' && workspace.activeModule === 'extensions'" />
-      <KubernetesWorkspace v-else-if="workspace.mode === 'terminal' && workspace.activeModule === 'kubernetes'" />
-      <SettingsWorkspace v-else-if="workspace.mode === 'terminal' && workspace.activeModule === 'settings'" />
-      <UserPanel v-else-if="workspace.mode === 'terminal' && workspace.activeModule === 'user'" />
+      <FilesWorkspace v-if="workspace.mode === 'terminal' && workspace.activeCenterSurface === 'files'" />
+      <AssetsWorkspace v-else-if="workspace.mode === 'terminal' && workspace.activeCenterSurface === 'assets'" />
+      <ExtensionsWorkspace v-else-if="workspace.mode === 'terminal' && workspace.activeCenterSurface === 'extensions'" />
+      <KubernetesWorkspace v-else-if="workspace.mode === 'terminal' && workspace.activeCenterSurface === 'kubernetes'" />
+      <SettingsWorkspace v-else-if="workspace.mode === 'terminal' && workspace.activeCenterSurface === 'settings'" />
+      <UserPanel v-else-if="workspace.mode === 'terminal' && workspace.activeCenterSurface === 'user'" />
       <KeepAlive>
         <DatabaseWorkspace
-          v-if="workspace.mode === 'terminal' && workspace.activeModule === 'database'"
+          v-if="workspace.mode === 'terminal' && workspace.activeCenterSurface === 'database'"
           :product-session-request="productSessionRequest"
           @product-session-request-consumed="handleProductSessionRequestConsumed"
         />
       </KeepAlive>
       <TerminalWorkspace v-show="showTerminalWorkspace" />
       <div
-        v-if="workspace.mode === 'agents' || !['assets', 'database', 'user'].includes(workspace.activeModule)"
+        v-if="workspace.mode === 'agents' || !['assets', 'database', 'user'].includes(workspace.activeCenterSurface)"
         v-show="showRightPane"
         class="layout-pane layout-pane-right ai-panel-pane"
         :style="{ width: `${displayRightPanelWidth}px` }"
@@ -196,7 +197,7 @@ import OnboardingSpotlight from '@/components/onboarding/OnboardingSpotlight.vue
 import RecentWorkspacePanels from '@/components/RecentWorkspacePanels.vue'
 import type { ProductSessionUiRequest, ProductSessionUiRequestInput } from '@/components/productSessionUiTypes'
 import { useAppShellRuntime } from '@/services/app/appShellRuntime'
-import { isTerminalWorkspaceSurfaceVisible } from '@/config/navigation'
+import { isMainWorkspaceSurfaceVisible } from '@/config/navigation'
 import { requestUiFocus } from '@/services/app/uiFocusCoordinator'
 
 const {
@@ -230,14 +231,14 @@ const productSessionRequest = ref<ProductSessionUiRequest | null>(null)
 let productSessionRequestSequence = 0
 
 const activeFocusScope = () => {
-  if (workspace.mode === 'agents' || isTerminalWorkspaceSurfaceVisible(workspace.mode, workspace.activeModule)) {
+  if (workspace.mode === 'agents' || isMainWorkspaceSurfaceVisible(workspace.mode, workspace.activeCenterSurface)) {
     return 'workspace-terminal'
   }
   return workspace.activeModule
 }
 
 watch(
-  () => `${workspace.mode}:${workspace.activeModule}`,
+  () => `${workspace.mode}:${workspace.activeModule}:${workspace.activeCenterSurface}`,
   () => {
     requestUiFocus({
       scopeId: activeFocusScope(),
@@ -267,7 +268,6 @@ const handleProductSessionRequest = async (request: ProductSessionUiRequestInput
     workspace.setWorkspaceMode('terminal')
     workspace.setActiveModule('database')
   } else {
-    workspace.setActiveModule('workspace')
     workspace.setWorkspaceMode('agents')
   }
   await nextTick()

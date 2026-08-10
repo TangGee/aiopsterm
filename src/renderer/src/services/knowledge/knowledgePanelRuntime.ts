@@ -12,7 +12,7 @@ type KnowledgePanelRuntimeProps = {
   query?: string
 }
 
-export const useKnowledgePanelRuntime = (props: KnowledgePanelRuntimeProps) => {
+export const useKnowledgePanelRuntime = (props: KnowledgePanelRuntimeProps = {}) => {
   const workspace = useWorkspaceStore()
   const addMenuOpen = ref(false)
   const showCapacityDetail = ref(false)

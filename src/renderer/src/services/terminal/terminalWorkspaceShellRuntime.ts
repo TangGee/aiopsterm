@@ -595,33 +595,6 @@ export const createTerminalWorkspaceShellRuntime = (
     return false
   }
 
-  const commandMarkerLinesForPanel = (panel: TerminalPanel) => {
-    let line = 0
-    const markers: number[] = []
-    const segments = panel.outputSegments?.length ? panel.outputSegments : [{ text: panel.output, scope: 'output' as const }]
-    segments.forEach((segment) => {
-      if (segment.scope === 'input' && segment.text.trim()) markers.push(line)
-      line += (segment.text.match(/\n/g) || []).length
-    })
-    return markers.filter((marker, index, list) => index === 0 || marker !== list[index - 1])
-  }
-
-  const jumpToKnownCommand = (panelId: string, direction: -1 | 1) => {
-    const panel = panelById(panelId)
-    const terminal = terminalViews.get(panelId)?.terminal
-    if (!panel || !terminal?.scrollToLine) return false
-    const markers = commandMarkerLinesForPanel(panel)
-    if (!markers.length) return true
-    const viewportY = terminal.buffer.active.viewportY || 0
-    const target =
-      direction < 0
-        ? [...markers].reverse().find((line) => line < viewportY) ?? markers.at(-1)
-        : markers.find((line) => line > viewportY) ?? markers[0]
-    if (target === undefined) return true
-    terminal.scrollToLine(target)
-    return true
-  }
-
   const moveActiveTab = (panelId: string, direction: -1 | 1) => {
     const index = workspace.panels.findIndex((panel) => panel.id === panelId)
     if (index < 0) return false
@@ -739,10 +712,6 @@ export const createTerminalWorkspaceShellRuntime = (
       case 'scrollTop':
       case 'scrollBottom':
         return scrollTerminalViewport(panelId, action.type)
-      case 'previousCommand':
-        return jumpToKnownCommand(panelId, -1)
-      case 'nextCommand':
-        return jumpToKnownCommand(panelId, 1)
       case 'reconnect':
         if (panel.sessionId || !panel.sshSession || (panel.status !== 'closed' && panel.status !== 'error')) return false
         void togglePanelConnection(panelId)

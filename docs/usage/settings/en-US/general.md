@@ -10,9 +10,11 @@ This page controls app-wide appearance, language, default layout, and built-in e
 - Opacity: Appears only when a background is selected. Lower values make the background less visible.
 - Brightness: Appears only when a background is selected. Use it to keep text readable.
 - Default Layout: Chooses whether the app prefers `Terminal` or `Agents` on startup or restore.
-- Language: Changes the UI language. `Follow System` resolves from the operating system language.
+- Language: Changes the UI language. New installations default to `Follow System`, which resolves a supported locale from the operating system and falls back to Simplified Chinese when no locale matches. Existing saved language choices are preserved. The terminal welcome dashboard also provides this selector directly.
 - Watermark: Shows or hides the `aiopsterm` watermark in the app background.
 - Onboarding: Opens the interactive onboarding guide.
+- Automatically Close Idle Windows: Disabled by default. When enabled, the app checks background panels once per minute and closes panels that exceed the idle timeout. The active panel is always preserved. A panel that fails to close remains in the workspace and has its activity time refreshed before a later check.
+- Idle Timeout in Minutes: Determines how long a panel can remain inactive before automatic cleanup. The allowed range is `1` to `1440` minutes and the default is `20` minutes. The `aioic` workspace idle-cleanup command uses the same value.
 
 ## Editor Settings
 

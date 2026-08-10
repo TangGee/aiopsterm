@@ -369,8 +369,7 @@ describe('managed AI session terminal switch telemetry', () => {
 
       expect(openTerminal).toHaveBeenCalledWith({
         title: 'Claude Code - project',
-        cwd: '/work/project',
-        preserveActiveModule: true
+        cwd: '/work/project'
       })
       expect(window.aiops.ensureLocalDirectory).toHaveBeenCalledWith({
         directoryPath: '/work/project',

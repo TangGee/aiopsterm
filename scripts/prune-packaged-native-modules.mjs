@@ -115,7 +115,8 @@ const hasConfiguredMacSigningIdentity = () => {
 
 const signMacAppForLocalUse = (context) => {
   if (context?.electronPlatformName !== 'darwin' || process.env.AIOPSTERM_MAC_ADHOC_SIGN === '0') return
-  if (hasConfiguredMacSigningIdentity()) return
+  const forceAdHocSigning = process.env.AIOPSTERM_MAC_FORCE_ADHOC_SIGN === '1'
+  if (!forceAdHocSigning && hasConfiguredMacSigningIdentity()) return
 
   const appOutDir = context?.appOutDir
   const productFilename = context?.packager?.appInfo?.productFilename || context?.packager?.appInfo?.productName || 'aiopsterm'
@@ -123,7 +124,7 @@ const signMacAppForLocalUse = (context) => {
   const projectDir = context?.packager?.projectDir || process.cwd()
   const entitlementsPath = resolve(projectDir, 'resources/entitlements.mac.plist')
 
-  console.warn(`[aiopsterm] no Apple signing identity found; applying local ad-hoc signature to ${appPath}`)
+  console.warn(`[aiopsterm] applying local ad-hoc signature to ${appPath}`)
   execFileSync('/usr/bin/codesign', [
     '--force',
     '--deep',

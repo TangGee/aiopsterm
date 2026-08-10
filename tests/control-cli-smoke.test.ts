@@ -1332,6 +1332,7 @@ describe('aio CLI', () => {
           snapshot: {
             mode: 'terminal',
             activeModule: 'workspace',
+            activeCenterSurface: 'main-workspace',
             activePanelId: 'panel-1',
             counts: { terminals: 1, surfaces: 1, splitGroups: 0, managedAiSessions: 0, attentionItems: 0 },
             surfaces: [{ panelId: 'panel-1', surfaceKind: 'terminal', connected: true, active: true, title: 'Local' }],

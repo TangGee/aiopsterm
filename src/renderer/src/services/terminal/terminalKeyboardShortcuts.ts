@@ -30,8 +30,6 @@ export type TerminalShortcutAction =
   | { type: 'scrollPageDown' }
   | { type: 'scrollTop' }
   | { type: 'scrollBottom' }
-  | { type: 'previousCommand' }
-  | { type: 'nextCommand' }
   | { type: 'reconnect' }
 
 const keyName = (event: TerminalKeyboardEvent) => event.key.toLowerCase()
@@ -90,8 +88,6 @@ export const terminalShortcutActionForEvent = (event: TerminalKeyboardEvent): Te
     if (key === 'pagedown') return { type: 'moveTabRight' }
     if (key === 'arrowup') return { type: 'scrollLineUp' }
     if (key === 'arrowdown') return { type: 'scrollLineDown' }
-    if (key === 'arrowleft') return { type: 'previousCommand' }
-    if (key === 'arrowright') return { type: 'nextCommand' }
   }
 
   if (primary && !event.altKey) {

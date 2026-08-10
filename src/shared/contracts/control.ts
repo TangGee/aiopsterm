@@ -339,6 +339,7 @@ export type ControlWorkspaceSummary = {
   active: boolean
   mode: string
   activeModule: string
+  activeCenterSurface: string
   activePanelId: string
   remoteDisplayTarget?: string | null
   remote_display_target?: string | null
@@ -351,6 +352,7 @@ export type ControlWorkspaceSnapshot = {
   generatedAt: number
   mode: string
   activeModule: string
+  activeCenterSurface: string
   activePanelId: string
   workspaces: ControlWorkspaceSummary[]
   terminals: ControlTerminalSummary[]
@@ -437,6 +439,7 @@ export type ControlSessionSnapshot = {
   activePanelId: string
   mode: string
   activeModule: string
+  activeCenterSurface: string
   panels: ControlSessionPanelSnapshot[]
   workspaceGroups: Omit<ControlWorkspaceGroupSummary, 'ref' | 'memberCount' | 'active'>[]
   agentHibernation?: AgentHibernationConfig

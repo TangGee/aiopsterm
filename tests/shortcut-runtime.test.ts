@@ -100,6 +100,33 @@ describe('ShortcutRuntime', () => {
     terminal.remove()
   })
 
+  it('supports macOS history navigation inside knowledge preview and source editor targets', () => {
+    const runtime = new ShortcutRuntime()
+    runtimes.push(runtime)
+    const navigatePanelBack = vi.fn()
+    const navigatePanelForward = vi.fn()
+    runtime.install(
+      [
+        { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Cmd+[' },
+        { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Cmd+]' }
+      ],
+      { navigatePanelBack, navigatePanelForward }
+    )
+    const preview = document.createElement('div')
+    preview.className = 'kb-markdown-preview'
+    const editor = document.createElement('textarea')
+    editor.className = 'kb-editor-textarea'
+    document.body.append(preview, editor)
+
+    expect(dispatchShortcutFrom(preview, '[', { metaKey: true, code: 'BracketLeft' })).toBe(true)
+    expect(dispatchShortcutFrom(editor, ']', { metaKey: true, code: 'BracketRight' })).toBe(true)
+    expect(navigatePanelBack).toHaveBeenCalledTimes(1)
+    expect(navigatePanelForward).toHaveBeenCalledTimes(1)
+
+    preview.remove()
+    editor.remove()
+  })
+
   it('keeps unrelated plain control shortcuts available to the terminal', () => {
     const runtime = new ShortcutRuntime()
     runtimes.push(runtime)

@@ -3,7 +3,7 @@ import { appRuntimeClient } from '@/services/app/appRuntimeClient'
 import { applyBackgroundToDocument, backgroundStyleVars } from '@/services/app/backgroundRuntime'
 import { managedAiClient } from '@/services/ai/managedAiClient'
 import { terminalClient } from '@/services/terminal/terminalClient'
-import { isTerminalWorkspaceSurfaceVisible } from '@/config/navigation'
+import { isMainWorkspaceSurfaceVisible, type CenterSurface } from '@/config/navigation'
 import { layoutWidthLimits, useWorkspaceStore } from '@/stores/workspace'
 import { applyDocumentLocale, useI18n, type I18nKey, type SupportedLocale } from '@/i18n'
 import { installStaticTextI18n } from '@/i18n/staticText'
@@ -25,6 +25,7 @@ type TerminalMfaDialogState = {
 type AppShellWorkspace = Pick<
   ReturnType<typeof useWorkspaceStore>,
   | 'activeModule'
+  | 'activeCenterSurface'
   | 'agentsLeftOpen'
   | 'agentsLeftWidth'
   | 'config'
@@ -99,13 +100,15 @@ export const createAppShellRuntime = (options: AppShellRuntimeOptions) => {
 
   const showAgentsLeftPane = computed(() => workspace.mode === 'agents' && workspace.agentsLeftOpen)
   const showTerminalLeftPane = computed(
-    () => workspace.mode === 'terminal' && workspace.isLeftVisible && !['assets', 'settings', 'database', 'user'].includes(workspace.activeModule)
+    () => workspace.mode === 'terminal' && workspace.isLeftVisible &&
+      !['assets', 'settings', 'database', 'user'].includes(workspace.activeModule)
   )
   const showTerminalRightPane = computed(
-    () => workspace.mode === 'terminal' && workspace.isRightVisible && !['assets', 'database', 'user'].includes(workspace.activeModule)
+    () => workspace.mode === 'terminal' && workspace.isRightVisible &&
+      !['assets', 'database', 'user'].includes(workspace.activeCenterSurface as CenterSurface)
   )
   const showRightPane = computed(() => workspace.mode === 'agents' ? true : showTerminalRightPane.value)
-  const showTerminalWorkspace = computed(() => isTerminalWorkspaceSurfaceVisible(workspace.mode, workspace.activeModule))
+  const showTerminalWorkspace = computed(() => isMainWorkspaceSurfaceVisible(workspace.mode, workspace.activeCenterSurface))
   const hasLeftPane = computed(() => showAgentsLeftPane.value || showTerminalLeftPane.value)
   const hasRightPane = computed(() => showRightPane.value)
   const displayLeftPanelWidth = computed(() => draftLeftPanelWidth.value ?? workspace.leftPanelWidth)

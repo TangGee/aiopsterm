@@ -1,6 +1,6 @@
 # Kubernetes
 
-For the operator workflow from kubeconfig import through logs and terminal access, start with [Kubernetes Daily Operations](best-practices/en-US/12-kubernetes.md).
+For the operator workflow from kubeconfig import through logs and terminal access, start with [Kubernetes Daily Operations](best-practices/en-US/14-kubernetes.md).
 
 Kubernetes clusters are added from a real kubeconfig source.
 

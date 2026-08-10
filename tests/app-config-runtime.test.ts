@@ -5,6 +5,7 @@ describe('main app config runtime', () => {
     const modulePath = '../src/main/appConfigRuntime'
     const { defaultConfig, mergeConfig } = await import(modulePath)
 
+    expect(defaultConfig.language).toBe('system')
     expect(defaultConfig.workspaceIdleCleanup).toEqual({ enabled: false, timeoutMinutes: 20 })
     expect(mergeConfig(defaultConfig, { workspaceIdleCleanup: { enabled: true, timeoutMinutes: 0 } }).workspaceIdleCleanup).toEqual({
       enabled: true,

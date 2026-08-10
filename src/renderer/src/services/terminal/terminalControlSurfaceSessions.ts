@@ -11,6 +11,7 @@ import {
   type WorkspaceStore
 } from '@/services/terminal/terminalControlSurfaceCore'
 import { terminalClient } from '@/services/terminal/terminalClient'
+import { isCenterSurface, isModuleKey } from '@/config/navigation'
 import type {
   ControlResponse,
   ControlSessionPanelSnapshot,
@@ -110,6 +111,7 @@ export const createTerminalControlSurfaceSessionHandlers = ({
       activePanelId: panels.some((panel) => panel.id === workspace.activePanelId) ? workspace.activePanelId : panels[0]?.id || 'panel-main',
       mode: workspace.mode,
       activeModule: workspace.activeModule,
+      activeCenterSurface: workspace.activeCenterSurface,
       panels: panels.length
         ? panels
         : [
@@ -129,7 +131,14 @@ export const createTerminalControlSurfaceSessionHandlers = ({
   }
 
   const normalizeSessionRestoreSnapshot = (value: unknown): ControlSessionSnapshot | null => {
-    if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.panels) || !value.panels.length) return null
+    if (
+      !isRecord(value) ||
+      value.version !== 1 ||
+      !isModuleKey(value.activeModule) ||
+      !isCenterSurface(value.activeCenterSurface) ||
+      !Array.isArray(value.panels) ||
+      !value.panels.length
+    ) return null
     const panels = value.panels.filter((panel): panel is ControlSessionPanelSnapshot => {
       if (!isRecord(panel) || !controlText(panel.id) || !controlText(panel.title)) return false
       return panel.kind === 'terminal' || panel.kind === 'knowledge' || panel.kind === 'managed-ai-session'
@@ -165,7 +174,8 @@ export const createTerminalControlSurfaceSessionHandlers = ({
       updatedAt: typeof value.updatedAt === 'number' ? value.updatedAt : Date.now(),
       activePanelId: panelIds.has(controlText(value.activePanelId)) ? controlText(value.activePanelId) : panels[0].id,
       mode: controlText(value.mode) || 'terminal',
-      activeModule: controlText(value.activeModule) || 'workspace',
+      activeModule: value.activeModule,
+      activeCenterSurface: value.activeCenterSurface,
       panels,
       workspaceGroups,
       ...(isRecord(value.agentHibernation) ? { agentHibernation: value.agentHibernation as ControlSessionSnapshot['agentHibernation'] } : {}),
@@ -272,7 +282,8 @@ export const createTerminalControlSurfaceSessionHandlers = ({
     const restoredPanels = panels.length ? panels : [panelFromSessionSnapshot({ id: 'panel-main', title: 'Terminal', cwd: '~', kind: 'terminal', status: 'ready', terminalKind: 'unknown' })]
     workspace.restorePanelCollection(restoredPanels, snapshot.activePanelId)
     workspace.setWorkspaceMode(snapshot.mode === 'agents' ? 'agents' : 'terminal')
-    if (snapshot.activeModule === 'workspace') workspace.setActiveModule('workspace')
+    workspace.setActiveModule(snapshot.activeModule as Parameters<typeof workspace.setActiveModule>[0])
+    workspace.setActiveCenterSurface(snapshot.activeCenterSurface as Parameters<typeof workspace.setActiveCenterSurface>[0])
     controlWorkspaceGroups.value = snapshot.workspaceGroups.map((group, index) => ({ ...group, index }))
     controlSurfaceResumeBindings.value = Object.fromEntries(
       snapshot.panels

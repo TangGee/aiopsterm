@@ -1,12 +1,14 @@
 import type { BrowserWindow } from 'electron'
+import { createHash } from 'crypto'
 import { basename, dirname, extname, isAbsolute, join, posix, resolve, sep } from 'path'
-import { access, copyFile, mkdir, readFile, readdir, stat, writeFile } from 'fs/promises'
+import { access, copyFile, mkdir, readFile, readdir, stat, unlink, writeFile } from 'fs/promises'
 import {
   DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_REL_PATH,
   defaultKnowledgeSeedTree,
   getDefaultKnowledgeSeedFile,
   shouldUseKnowledgeSeedData
 } from '@shared/knowledgeBaseSeed'
+import { BUNDLED_KNOWLEDGE_DOCS_TARGET_DIR } from '@shared/knowledgeBaseGuide'
 import { sendWindowEvent } from '@shared/windowEvents'
 import type {
   KnowledgeBaseCreateResult,
@@ -47,12 +49,13 @@ type KnowledgeBaseRuntimeOptions = {
   bundledDocsVersion?: () => string
 }
 
-export const BUNDLED_DOCS_TARGET_DIR = '使用指南'
+export const BUNDLED_DOCS_TARGET_DIR = BUNDLED_KNOWLEDGE_DOCS_TARGET_DIR
 
 export const createKnowledgeBaseRuntime = (options: KnowledgeBaseRuntimeOptions) => {
   const getKnowledgeBasePath = () => join(options.userDataPath(), 'knowledgebase')
   const getKnowledgeBaseInitMarkerPath = () => join(getKnowledgeBasePath(), '.aiopsterm-knowledge-initialized')
   const getBundledDocsSyncMarkerPath = () => join(getKnowledgeBasePath(), '.aiopsterm-bundled-docs-synced')
+  const getBundledDocsManifestPath = () => join(getKnowledgeBasePath(), '.aiopsterm-bundled-docs-manifest.json')
 
   const blockedKnowledgeImportExtensions = new Set([
     '.exe',
@@ -413,6 +416,44 @@ export const createKnowledgeBaseRuntime = (options: KnowledgeBaseRuntimeOptions)
 
   let bundledDocsSyncChecked = false
 
+  type BundledDocsManifest = {
+    version: 1
+    files: Record<string, string>
+  }
+
+  const retiredPreReleaseBundledDocs = [
+    'en-US/03-ai-assistant.md',
+    'en-US/04-quick-commands.md',
+    'en-US/05-knowledge-base.md',
+    'en-US/06-mcp.md',
+    'en-US/07-settings.md',
+    'en-US/08-troubleshooting.md',
+    'en-US/09-host-agent.md',
+    'en-US/10-host-management-jumpserver.md',
+    'en-US/11-database-sql.md',
+    'zh-CN/03-ai-assistant.md',
+    'zh-CN/04-quick-commands.md',
+    'zh-CN/05-knowledge-base.md',
+    'zh-CN/06-mcp.md',
+    'zh-CN/07-settings.md',
+    'zh-CN/08-troubleshooting.md',
+    'zh-CN/09-host-agent.md',
+    'zh-CN/10-host-management-jumpserver.md',
+    'zh-CN/11-database-sql.md'
+  ]
+
+  const fileSha256 = async (absPath: string) => createHash('sha256').update(await readFile(absPath)).digest('hex')
+
+  const readBundledDocsManifest = async (): Promise<BundledDocsManifest | null> => {
+    try {
+      const value = JSON.parse(await readFile(getBundledDocsManifestPath(), 'utf-8')) as Partial<BundledDocsManifest>
+      if (value.version !== 1 || !value.files || typeof value.files !== 'object') return null
+      return { version: 1, files: value.files }
+    } catch {
+      return null
+    }
+  }
+
   const listBundledDocFiles = async (rootAbs: string, relDir = ''): Promise<string[]> => {
     const entries = await readdir(join(rootAbs, relDir), { withFileTypes: true })
     const files: string[] = []
@@ -428,6 +469,12 @@ export const createKnowledgeBaseRuntime = (options: KnowledgeBaseRuntimeOptions)
     return files
   }
 
+  const bundledDocsManifestMatches = (left: BundledDocsManifest, right: BundledDocsManifest) => {
+    const leftEntries = Object.entries(left.files).sort(([a], [b]) => a.localeCompare(b))
+    const rightEntries = Object.entries(right.files).sort(([a], [b]) => a.localeCompare(b))
+    return JSON.stringify(leftEntries) === JSON.stringify(rightEntries)
+  }
+
   const syncBundledDocsIntoKnowledgeBase = async () => {
     if (bundledDocsSyncChecked) return
     bundledDocsSyncChecked = true
@@ -436,15 +483,38 @@ export const createKnowledgeBaseRuntime = (options: KnowledgeBaseRuntimeOptions)
     const syncVersion = options.bundledDocsVersion?.() || 'unversioned'
     try {
       const marker = await readFile(getBundledDocsSyncMarkerPath(), 'utf-8').catch(() => '')
-      if (marker.trim() === syncVersion) return
+      const previousManifest = await readBundledDocsManifest()
       const bundledFiles = await listBundledDocFiles(bundledRoot)
+      const nextManifest: BundledDocsManifest = { version: 1, files: {} }
       for (const fileRel of bundledFiles) {
+        nextManifest.files[fileRel] = await fileSha256(join(bundledRoot, ...fileRel.split('/')))
+      }
+      if (marker.trim() === syncVersion && previousManifest && bundledDocsManifestMatches(previousManifest, nextManifest)) return
+      const migratePreReleaseDocs = Boolean(marker.trim()) && !previousManifest
+      for (const fileRel of bundledFiles) {
+        const sourceAbs = join(bundledRoot, ...fileRel.split('/'))
         const targetRel = posix.join(BUNDLED_DOCS_TARGET_DIR, fileRel)
         const { absPath: targetAbs } = resolveKnowledgePath(targetRel)
-        if (await pathExists(targetAbs)) continue
+        const targetExists = await pathExists(targetAbs)
+        const previousHash = previousManifest?.files[fileRel]
+        const targetUnchanged = targetExists && previousHash && (await fileSha256(targetAbs)) === previousHash
+        if (targetExists && !migratePreReleaseDocs && !targetUnchanged) continue
         await mkdir(dirname(targetAbs), { recursive: true })
-        await copyFile(join(bundledRoot, ...fileRel.split('/')), targetAbs)
+        await copyFile(sourceAbs, targetAbs)
       }
+      if (previousManifest) {
+        for (const [fileRel, previousHash] of Object.entries(previousManifest.files)) {
+          if (nextManifest.files[fileRel]) continue
+          const { absPath: targetAbs } = resolveKnowledgePath(posix.join(BUNDLED_DOCS_TARGET_DIR, fileRel))
+          if ((await pathExists(targetAbs)) && (await fileSha256(targetAbs)) === previousHash) await unlink(targetAbs)
+        }
+      } else if (migratePreReleaseDocs) {
+        for (const fileRel of retiredPreReleaseBundledDocs) {
+          const { absPath: targetAbs } = resolveKnowledgePath(posix.join(BUNDLED_DOCS_TARGET_DIR, fileRel))
+          if (await pathExists(targetAbs)) await unlink(targetAbs)
+        }
+      }
+      await writeFile(getBundledDocsManifestPath(), `${JSON.stringify(nextManifest, null, 2)}\n`, 'utf-8')
       await writeFile(getBundledDocsSyncMarkerPath(), `${syncVersion}\n`, 'utf-8')
     } catch {
       // Bundled docs are best-effort: a failed sync retries on the next app start instead of breaking knowledge APIs.

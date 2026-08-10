@@ -116,6 +116,26 @@ For runtime or user-visible behavior changes, add focused tests at the changed b
 npm run test:e2e
 ```
 
+## Built-In Guide Maintenance
+
+The product guide shipped into the Knowledge Base lives under `docs/usage/best-practices/`. Keep the `zh-CN` and `en-US` trees aligned at 15 numbered articles. Every detailed article starts with `从哪里打开` / `Where To Open It` and names the actual rail icon, button, menu, shortcut, or settings page that reveals the feature before explaining the resulting surface.
+
+Capture screenshots from the real seeded application and generate numbered callouts with:
+
+```bash
+npm run build
+node scripts/docs-screenshots/capture.js
+python3 scripts/docs-screenshots/annotate.py
+```
+
+Run the guide audit after editing prose, links, filenames, or images:
+
+```bash
+npm run audit:best-practices-docs
+```
+
+The audit verifies the bilingual article set, entry-path sections, screenshots, index membership, and every bundled local link. It runs automatically before `npm test` and `npm run build`. Bundled guide updates use a SHA-256 manifest: unchanged product files update with the app, user-edited files remain untouched, and retired unmodified files are removed.
+
 ## Local JumpServer Integration Lab
 
 The current development workstation has an isolated JumpServer v4.10.17 lab for
@@ -202,6 +222,8 @@ Package and release work should also use the package audits documented in the us
 
 ### Native Module ABI During Tests
 
+Vitest runs in jsdom but may be launched by a newer workstation Node than the supported package-build toolchain. Node 25 exposes an incomplete global `localStorage` when no storage file is configured, and its native `fetch` rejects jsdom `AbortSignal` instances. `tests/setup.ts` therefore installs a deterministic in-memory Storage and bridges only fetch-bound abort signals to Node's native implementation. Keep jsdom's own Abort types for DOM `addEventListener({ signal })`; replacing them globally breaks renderer tests.
+
 `better-sqlite3` and `node-pty` are native Node addons. Electron 31 uses module ABI 125, while the repository's Node 22 test runtime uses ABI 127. A single `better_sqlite3.node` cannot serve both processes. A development installation therefore keeps two physical SQLite bindings below `better-sqlite3/lib/binding/node-v<abi>-<platform>-<arch>/`. This is still one npm package, one application database, and one business implementation; only the approximately 2 MiB ABI-specific machine-code binding is duplicated. The existing `bindings` loader selects the matching file from `process.versions.modules`, so Vitest and Electron do not overwrite each other's SQLite binary.
 
 `npm test` prepares and verifies only the Node/Vitest binding. This path does not resolve, launch, rebuild, or otherwise require the Electron runtime, so Node-only CI can run with just its own installed binding. To prepare or verify it explicitly:
@@ -233,6 +255,19 @@ node scripts/generate-backgrounds.mjs --preview-dir test-results/background-prev
 This script writes `src/renderer/src/assets/backgrounds/<id>.webp`. Keep `src/renderer/src/config/settings.ts` in sync with the generated preset ids.
 
 ## Terminal Performance Verification
+
+### Crash And Renderer Diagnostics
+
+Installed-user troubleshooting belongs in the best-practices guide. Maintainers can enable deeper local diagnostics with `AIOPSTERM_CRASH_DIAGNOSTICS=1`; `npm run build:start` enables it for the development launch. Crash dumps remain local under `<userData>/crashes/`. Inspect `electron.render-process-gone`, `electron.child-process-gone`, `process.uncaught-exception`, and `crash-diagnostics.ready` in the runtime log.
+
+After an abnormal exit, the next launch uses one-shot crash safe mode: threaded terminal rendering is disabled, worker 2D is forced, and hardware acceleration is disabled until a clean exit. Set `AIOPSTERM_CRASH_SAFE_MODE=0` only for a controlled comparison. To isolate threaded rendering, use `AIOPSTERM_THREADED_TERMINAL=0`. To inspect the terminal GPU backend, run:
+
+```bash
+npm run build
+npm run probe:terminal-gpu
+```
+
+These flags and probes are maintainer diagnostics and must not be added to the packaged-user troubleshooting guide.
 
 The tracked `test-data/terminal-100000-lines.txt` and `test-data/single-long-line.txt` files are synthetic UTF-8 terminal fixtures for manual large-output and long-line checks. They contain generated host names and paths rather than production data; automated tests do not load them by default.
 
@@ -280,6 +315,7 @@ npm run build:linux:one-click
 npm run build:mac
 npm run build:mac:dir
 npm run build:mac:one-click -- --china-mirror
+npm run build:mac:one-click -- --china-mirror --release
 npm run build:win
 npm run build:win:dir
 ```
@@ -311,7 +347,11 @@ npm run package:verify -- windows
 
 The Linux one-click wrapper (`npm run build:linux:one-click`) is the maintainer entrypoint for a complete native Linux package pass. Linux release artifacts are built on the Ubuntu 20.04/glibc 2.31 baseline; packaged-app verification inspects Electron, sidecar, shared-library, and native-addon ELF requirements and rejects a newer glibc dependency. The wrapper checks or installs missing toolchain commands with the host package manager, runs `npm ci` by default, builds AppImage and deb packages, and verifies both targets. `scripts/build-linux.sh` supports `--skip-setup`, `--skip-dependencies`, `--run-tests`, `--run-e2e`, `--china-mirror`, `--npm-registry <URL>`, `--appimage-only`, `--deb-only`, and `--setup-only`; mirror variables are scoped to child processes and low-memory hosts default Cargo to two build jobs. An explicit npm registry takes precedence over both the default registry and the npm registry selected by `--china-mirror` without changing the Electron or Rust mirror selection. China-mirror mode uses Gitee and npmmirror for the NVM/Node bootstrap, npmmirror for npm and Electron binaries, rsproxy for the rustup bootstrap, Rust, and Cargo, and a GitHub proxy for release/git inputs; Electron headers stay on the dedicated Electron CDN because npmmirror does not carry the archives consumed by `node-gyp`. AppImage packaging uses electron-builder's static `1.0.3` toolset with zstd compression, so the launcher does not require `libfuse.so.2`; the package audit rejects a launcher with a remaining FUSE 2 dependency.
 
-The macOS one-click wrapper (`npm run build:mac:one-click`) performs the equivalent native macOS package pass. It checks Xcode Command Line Tools and the standard packaging commands, installs a pinned Node.js LTS toolchain in the user cache when the active Node release is unsupported, installs missing Python through Homebrew and rustup through the selected endpoint, runs `npm ci`, builds the dmg and zip through `package:build -- macos`, and finishes with `package:verify -- macos`. `scripts/build-macos.sh` supports `--skip-setup`, `--skip-dependencies`, `--run-tests`, `--run-e2e`, `--setup-only`, `--china-mirror`, `--npm-registry <URL>`, and `--codex-package-dir <DIR>` for the existing complete-package cache override. The China option uses process-local npmmirror, rsproxy, Tsinghua Homebrew settings, and the checksum-verified Codex V8 GitHub mirror prefetcher without changing persistent user configuration; if every GitHub mirror is unavailable, the source builder retains its normal direct-download fallback. Electron runtime headers remain on the official artifacts endpoint because npmmirror's Electron release checksum list does not include the mirrored header archive required by node-gyp verification. On machines without an Apple signing identity, afterPack applies a local ad-hoc signature so the locally generated DMG is not treated as a damaged app; this does not replace Developer ID signing or notarization for distribution. Set `AIOPSTERM_MAC_ADHOC_SIGN=0` to disable that fallback.
+The macOS one-click wrapper (`npm run build:mac:one-click`) performs the equivalent native macOS package pass. It checks Xcode Command Line Tools and the standard packaging commands, installs a pinned Node.js LTS toolchain in the user cache when the active Node release is unsupported, installs missing Python through Homebrew and rustup through the selected endpoint, runs `npm ci`, builds the dmg and zip through `package:build -- macos`, and finishes with `package:verify -- macos`. `scripts/build-macos.sh` supports `--skip-setup`, `--skip-dependencies`, `--run-tests`, `--run-e2e`, `--setup-only`, `--china-mirror`, `--npm-registry <URL>`, and `--codex-package-dir <DIR>` for the existing complete-package cache override. After dependency installation, the wrapper restores an incomplete build-time `Electron.app` when needed, removes its download quarantine, applies a local ad-hoc signature, and performs a launch probe before any native ABI rebuild. This prevents macOS from moving the temporary build runtime to Trash; release signing of the packaged application remains a separate later step. The China option uses process-local npmmirror, rsproxy, Tsinghua Homebrew settings, and the checksum-verified Codex V8 GitHub mirror prefetcher without changing persistent user configuration; if every GitHub mirror is unavailable, the source builder retains its normal direct-download fallback. Electron runtime headers remain on the official artifacts endpoint because npmmirror's Electron release checksum list does not include the mirrored header archive required by node-gyp verification. The default daily-build mode explicitly disables Developer ID discovery and Apple credentials, applies a local ad-hoc signature, and skips notarization even when release credentials exist on the machine. Pass `--release` only for distributable packages; it requires Developer ID signing and notarization and validates the stapled ticket and Gatekeeper result. Set `AIOPSTERM_MAC_ADHOC_SIGN=0` to disable the ad-hoc fallback outside the wrapper.
+
+The shared packaged-app smoke test also opens General Settings in the installed renderer, reads the localized help page from the packaged `Resources/docs` tree, decodes a bundled background preset, and requires its computed preview style to remain centered with `background-size: cover`. This check runs through `package:verify` on every native target and prints the repository revision used for the verification run, so a platform-specific package cannot silently ship missing documentation or incorrectly scaled background assets.
+
+Renderer navigation keeps two independent state axes. `activeModule` owns the left-hand source context, while `activeCenterSurface` owns the central surface. Terminals, knowledge documents, project files, quick commands, and AI-created work panels all use `main-workspace` without rewriting `activeModule`; module rail actions select both the source and that module's default central surface. Assets is the deliberate exception: it is a full central workspace and never a narrow left panel, while starting an asset SSH connection immediately selects Workspace on both axes regardless of the eventual connection result. Global panel navigation may reveal `main-workspace`, but ordinary tab activation is layout-neutral. Control session snapshots persist both fields and intentionally reject snapshots that predate this state model.
 
 `build:codex` is a Node dispatcher. Linux and macOS continue through the shell-based Codex package builder. Windows stays in the Node entrypoint and invokes Codex's Python package builder against the Windows MSVC target, so the default Windows flow builds `codex.exe`, `rg.exe`, `codex-command-runner.exe`, and `codex-windows-sandbox-setup.exe` from the local `codex/` source package inputs. `AIOPSTERM_CODEX_PACKAGE_DIR` and `AIOPSTERM_CODEX_BIN` remain cache/custom-package overrides; individual Windows helper overrides are `AIOPSTERM_CODEX_RG_BIN`, `AIOPSTERM_CODEX_COMMAND_RUNNER_BIN`, and `AIOPSTERM_CODEX_WINDOWS_SANDBOX_SETUP_BIN`.
 

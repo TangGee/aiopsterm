@@ -44,7 +44,7 @@ import {
   type TerminalPanel,
   type TerminalSessionAsset
 } from '@/services/terminal/terminalPanelRuntime'
-import { isTerminalWorkspaceModule, type ModuleKey } from '@/config/navigation'
+import type { CenterSurface, ModuleKey } from '@/config/navigation'
 import { flushProjectFileEditor } from '@/services/files/projectFileEditorSaveRegistry'
 import type { ExtensionSettings, KeywordHighlightSettings, TerminalSettings } from '@/services/settings/workspaceConfigRuntime'
 import type { TerminalProgress } from '@/services/terminal/terminalOscRuntime'
@@ -84,6 +84,7 @@ type WorkspacePanelMutationOptions = {
 type WorkspaceTerminalPanelsControllerState = {
   mode: Ref<'terminal' | 'agents'>
   activeModule: Ref<ModuleKey>
+  activeCenterSurface: Ref<CenterSurface>
   activePanelId: Ref<string>
   panels: Ref<TerminalPanel[]>
   config: Ref<UserConfig>
@@ -105,7 +106,7 @@ type WorkspaceTerminalPanelsControllerDeps = {
   applyManagedAiTerminalExit: (panel: Pick<TerminalPanel, 'id'> | null, event: TerminalExitEvent) => void
   applyManagedAiTerminalPanelClosed: (closedPanels: Array<Pick<TerminalPanel, 'id' | 'sessionId'>>) => void
   selectPanelForLifecycle: (panelId: string) => boolean
-  activatePanelSurface: (panelId: string, options?: { modulePolicy?: 'workspace' | 'preserve'; focusPolicy?: 'target-primary' | 'preserve' }) => boolean
+  activatePanelSurface: (panelId: string, options?: { focusPolicy?: 'target-primary' | 'preserve' }) => boolean
 }
 
 export const createInitialWorkspaceTerminalPanels = () => [
@@ -119,6 +120,7 @@ export const createWorkspaceTerminalPanelsController = (
   const {
     mode,
     activeModule,
+    activeCenterSurface,
     activePanelId,
     panels,
     config,
@@ -435,7 +437,10 @@ export const createWorkspaceTerminalPanelsController = (
     return panel
   }
 
-  const openTerminalForAiHostContext = async (host: AiContextOption, options: { cwd?: string; silent?: boolean } = {}) => {
+  const openTerminalForAiHostContext = async (
+    host: AiContextOption,
+    options: { cwd?: string; silent?: boolean } = {}
+  ) => {
     const previousActivePanelId = activePanelId.value
     const panel = createPanel()
     const panelId = panel.id
@@ -519,7 +524,7 @@ export const createWorkspaceTerminalPanelsController = (
     }
   }
 
-  const openLocalTerminalPanel = async (options: { title?: string; cwd?: string; preserveActiveModule?: boolean } = {}) => {
+  const openLocalTerminalPanel = async (options: { title?: string; cwd?: string } = {}) => {
     const previousActivePanelId = activePanelId.value
     const panel = createPanel()
     const panelId = panel.id
@@ -551,9 +556,7 @@ export const createWorkspaceTerminalPanelsController = (
         return null
       }
       renamePanel(panelId, label, 'auto')
-      activatePanelSurface(panelId, {
-        modulePolicy: options.preserveActiveModule ? 'preserve' : 'workspace'
-      })
+      activatePanelSurface(panelId)
       return connected
     } catch (error) {
       discardPendingPanel()
@@ -568,22 +571,23 @@ export const createWorkspaceTerminalPanelsController = (
 
   const revealManagedAiSessionContentPanel = () => {
     mode.value = 'terminal'
-    if (!isTerminalWorkspaceModule(activeModule.value)) activeModule.value = 'workspace'
+    activeCenterSurface.value = 'main-workspace'
   }
 
-  const createKnowledgeJumpState = (range?: { startLine?: number; endLine?: number }) => {
-    if (!range?.startLine) return {}
+  const createKnowledgeJumpState = (range?: { startLine?: number; endLine?: number; anchor?: string }) => {
+    if (!range?.startLine && !range?.anchor) return {}
     knowledgeJumpTokenSeed += 1
     return {
       startLine: range.startLine,
       ...(range.endLine ? { endLine: range.endLine } : {}),
+      ...(range.anchor ? { anchor: range.anchor } : {}),
       jumpToken: knowledgeJumpTokenSeed
     }
   }
 
   const openKnowledgeFile = (
     relPath: string,
-    range?: { startLine?: number; endLine?: number },
+    range?: { startLine?: number; endLine?: number; anchor?: string },
     options: WorkspacePanelMutationOptions = {}
   ) => {
     const node = findKnowledgeNode(relPath)
@@ -631,7 +635,7 @@ export const createWorkspaceTerminalPanelsController = (
     )
     if (existing) {
       revealManagedAiSessionContentPanel()
-      activatePanelSurface(existing.id, { modulePolicy: 'preserve' })
+      activatePanelSurface(existing.id)
       return existing
     }
     const session = managedAiSessions.value.find((item) => item.source === source && item.id === normalizedSessionId)
@@ -652,7 +656,7 @@ export const createWorkspaceTerminalPanelsController = (
     }
     panels.value.push(panel)
     revealManagedAiSessionContentPanel()
-    activatePanelSurface(panel.id, { modulePolicy: 'preserve' })
+    activatePanelSurface(panel.id)
     return panel
   }
 

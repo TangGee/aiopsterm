@@ -2,6 +2,7 @@ import { defaultMcpServers, defaultMcpToolStates } from '@shared/mcpSeed'
 import { defaultKnowledgeBaseConfig } from '@shared/knowledgeBaseSeed'
 import { defaultModelSettingsConfig } from '@shared/modelSettingsSeed'
 import { defaultSettingsRulesConfig } from '@shared/settingsPreferencesSeed'
+import { defaultSettingsShortcuts } from '@shared/settingsShortcutDefaults'
 import { defaultSkillsConfig } from '@shared/skillsSeed'
 import { defaultWorkspacePreferencesConfig } from '@shared/workspacePreferencesSeed'
 import { normalizeConfigModelName, normalizeConfigModelProvider } from './backend/app/configBoundary'
@@ -69,7 +70,7 @@ const defaultWorkspacePreferencesUserConfig: WorkspaceUserConfig = defaultWorksp
 const defaultModelSettingsUserConfig: ModelSettingsUserConfig = defaultModelSettingsConfig()
 
 export const defaultConfig: UserConfig = {
-  language: 'zh-CN',
+  language: 'system',
   theme: 'dark',
   defaultMode: 'terminal',
   leftPanelOpen: true,
@@ -163,18 +164,7 @@ export const defaultConfig: UserConfig = {
     allowDatabaseRead: false
   },
   modelSettings: defaultModelSettingsUserConfig,
-  shortcuts: [
-    { id: 'newTerminal', action: '新建终端', shortcut: 'Ctrl+Shift+T' },
-    { id: 'toggleAi', action: '显示/隐藏 AI 侧边栏', shortcut: 'Ctrl+Shift+A' },
-    { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
-    { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' },
-    { id: 'closeCurrentPanel', action: '关闭当前面板', shortcut: 'Ctrl+Shift+W' },
-    { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+Tab' },
-    { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
-    { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' },
-    { id: 'navigatePanelByOrderBack', action: '按标签栏顺序切换到左侧面板', shortcut: 'Ctrl+Shift+Left' },
-    { id: 'navigatePanelByOrderForward', action: '按标签栏顺序切换到右侧面板', shortcut: 'Ctrl+Shift+Right' }
-  ],
+  shortcuts: defaultSettingsShortcuts(process.platform),
   rules: defaultSettingsRulesUserConfig,
   skills: defaultSkillsUserConfig,
   mcpServers: defaultMcpServers(),

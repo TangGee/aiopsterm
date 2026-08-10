@@ -1,6 +1,22 @@
-# Operate Remote Hosts With AI
+# Host Agent: Operate Local And Remote Hosts With AI
 
 Use this guide when a host is already saved and connected in aiopsterm and you want AI-assisted diagnostics or controlled operations without losing target identity and approval boundaries.
+
+## Where To Open It And Required Setup
+
+A Host Agent requires a working model. An SSH connection alone cannot send AI requests.
+
+![Model settings](../images/settings-models.png)
+
+1. Open **Settings -> Models -> Add Model**.
+2. For embedded Codex, select **OpenAI Compatible**, enter Base URL, API Key, and Model, and set **API Format** to **Responses**. Codex does not use Chat Completions from this Provider.
+3. Click **Check** against the Responses endpoint, then **Save**, and confirm the model appears. Ollama, LM Studio with OpenAI Compatible Server enabled, and explicitly supported Bedrock OpenAI models use dedicated adapters.
+4. Classic may use its supported Chat Completions, Responses, Anthropic, and other Providers; Check and Save first.
+5. Open **Workspace**, double-click a local or SSH host, and wait for readiness.
+6. Select **Codex CLI** or **Classic** at the top of the right AI panel. Restore the panel through the layout control if hidden.
+7. Bind Codex to the current terminal, or add a host through Classic's `@` control.
+
+The remote host does not need Codex or Classic installed. The local agent operates through the connected terminal and its proxy/jump path.
 
 ![Host AI panel](../images/ai-panel.png)
 
@@ -60,7 +76,11 @@ The model's `requiresApproval: false` declaration is not final authority. Main-p
 - Use embedded Codex for a terminal-style coding agent, remote file reads, and persistent sessions.
 - Use Classic for structured command cards, explicit Chat/Command/Agent modes, and multi-host context.
 - Use Classic Command or the terminal AI Command action for one command.
-- Restore long-lived Codex, Classic, and DB AI sessions from Agents mode.
+- Restore long-lived Codex or Classic work from [Agents Product Sessions](04-agents-product-sessions.md).
+
+## Add Third-party Tools To Classic
+
+For CMDB, monitoring, or internal-platform tools, open **Settings -> Host Agent -> MCP** and add a third-party MCP Server. This imports tools into embedded Classic; it does not export aiopsterm to external Codex. See [Third-party MCP Servers](09-third-party-mcp.md).
 
 ## Common Failures
 
@@ -69,3 +89,5 @@ The model's `requiresApproval: false` declaration is not final authority. Main-p
 - A read-only command still asks: Main security overrode the model declaration.
 - Codex only advises: the target may be unbound, disconnected, or restoring.
 - A long command times out: adjust Shell Integration Timeout or use a long-running execution mode.
+
+Previous: [Terminal And Main Workspace](02-terminal-workspace.md) · Next: [Agents Product Sessions](04-agents-product-sessions.md) · [Back to index](../index.md)

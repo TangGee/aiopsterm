@@ -99,4 +99,4 @@ Private Token 通过后端凭据存储加密后写入 SQLite 或备用存储。�
 7. 使用错误 Token 测试，确认已有目录不被清空。
 8. 分别测试堡垒机 SSH、目标二次 SSH、OTP 和 SFTP 能力边界。
 
-用户操作见[主机、跳板机与 JumpServer](../../usage/best-practices/zh-CN/10-host-management-jumpserver.md)，实现说明见[资产与工作区资源](../../usage/assets-workspace.md)和[SSH 终端运行时](../../technical/ssh-terminal.md)。
+用户操作见[资产管理](../../usage/best-practices/zh-CN/11-assets.md)，实现说明见[资产与工作区资源](../../usage/assets-workspace.md)和[SSH 终端运行时](../../technical/ssh-terminal.md)。

@@ -5,7 +5,7 @@ import {
   matchesWorkspacePanelQuery
 } from '@/services/workspace/workspacePanelNavigationRuntime'
 import { createEmptyTerminalPanel, type TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
-import type { ModuleKey } from '@/config/navigation'
+import type { CenterSurface, ModuleKey } from '@/config/navigation'
 
 const terminalPanel = (id: string, title = id): TerminalPanel => ({
   ...createEmptyTerminalPanel(id, title),
@@ -17,6 +17,7 @@ const createHarness = () => {
   const state = {
     mode: ref<'terminal' | 'agents'>('terminal'),
     activeModule: ref<ModuleKey>('workspace'),
+    activeCenterSurface: ref<CenterSurface>('main-workspace'),
     activePanelId: ref('panel-main'),
     panels: ref<TerminalPanel[]>([createEmptyTerminalPanel('panel-main', '欢迎')])
   }
@@ -75,6 +76,35 @@ describe('workspacePanelNavigationRuntime', () => {
     expect(runtime.navigatePanelByOrderBack()).toBe(true)
     expect(state.activePanelId.value).toBe('c')
     expect(runtime.panelNavigationHistory.value).toEqual(['b', 'c', 'a', 'c'])
+    scope.stop()
+  })
+
+  it('activates a terminal panel without changing its source module or center surface', () => {
+    const { scope, state, runtime } = createHarness()
+    state.mode.value = 'agents'
+    state.activeModule.value = 'knowledge'
+    state.activeCenterSurface.value = 'settings'
+    state.panels.value = [terminalPanel('a'), terminalPanel('b')]
+    state.activePanelId.value = 'a'
+
+    expect(runtime.activatePanelSurface('b')).toBe(true)
+    expect(state.activePanelId.value).toBe('b')
+    expect(state.mode.value).toBe('agents')
+    expect(state.activeModule.value).toBe('knowledge')
+    expect(state.activeCenterSurface.value).toBe('settings')
+    scope.stop()
+  })
+
+  it('reveals the shared main workspace without changing its source module', () => {
+    const { scope, state, runtime } = createHarness()
+    state.activeModule.value = 'settings'
+    state.activeCenterSurface.value = 'settings'
+    state.panels.value = [terminalPanel('a'), terminalPanel('b')]
+
+    expect(runtime.revealPanelSurface('b')).toBe(true)
+    expect(state.activePanelId.value).toBe('b')
+    expect(state.activeModule.value).toBe('settings')
+    expect(state.activeCenterSurface.value).toBe('main-workspace')
     scope.stop()
   })
 

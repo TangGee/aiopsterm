@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { defaultSettingsShortcuts, SETTINGS_SHORTCUT_DEFAULTS_VERSION } from '../src/shared/settingsShortcutDefaults'
 
 const { storeState } = vi.hoisted(() => ({
   storeState: new Map<string, Record<string, unknown>>()
@@ -77,19 +78,59 @@ describe('settings preferences backend boundary', () => {
 
     expect(result.ok).toBe(true)
     if (!result.data) throw new Error('settings preferences snapshot missing')
-    expect(result.data.shortcuts).toEqual([
-      { id: 'newTerminal', action: '新建终端', shortcut: 'Ctrl+Shift+T' },
-      { id: 'toggleAi', action: '显示/隐藏 AI 侧边栏', shortcut: 'Ctrl+Shift+A' },
-      { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
-      { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' },
-      { id: 'closeCurrentPanel', action: '关闭当前面板', shortcut: 'Ctrl+Shift+W' },
-      { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+Tab' },
-      { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
-      { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' },
-      { id: 'navigatePanelByOrderBack', action: '按标签栏顺序切换到左侧面板', shortcut: 'Ctrl+Shift+Left' },
-      { id: 'navigatePanelByOrderForward', action: '按标签栏顺序切换到右侧面板', shortcut: 'Ctrl+Shift+Right' }
-    ])
+    expect(result.data.shortcuts).toEqual(defaultSettingsShortcuts(process.platform))
+    expect(result.data.shortcutDefaultsVersion).toBe(SETTINGS_SHORTCUT_DEFAULTS_VERSION)
     expect(result.data.rules).toEqual([])
+  })
+
+  it('uses platform-specific history shortcuts without changing recent or ordered navigation', () => {
+    const mac = defaultSettingsShortcuts('darwin')
+    const windows = defaultSettingsShortcuts('win32')
+    const linux = defaultSettingsShortcuts('linux')
+    const shortcut = (items: typeof mac, id: string) => items.find((item) => item.id === id)?.shortcut
+
+    expect(shortcut(mac, 'navigatePanelBack')).toBe('Cmd+[')
+    expect(shortcut(mac, 'navigatePanelForward')).toBe('Cmd+]')
+    expect(shortcut(windows, 'navigatePanelBack')).toBe('Ctrl+Left')
+    expect(shortcut(windows, 'navigatePanelForward')).toBe('Ctrl+Right')
+    expect(shortcut(linux, 'navigatePanelBack')).toBe('Ctrl+Left')
+    expect(shortcut(linux, 'navigatePanelForward')).toBe('Ctrl+Right')
+
+    for (const items of [mac, windows, linux]) {
+      expect(shortcut(items, 'recentPanels')).toBe('Ctrl+Tab')
+      expect(shortcut(items, 'navigatePanelByOrderBack')).toBe('Ctrl+Shift+Left')
+      expect(shortcut(items, 'navigatePanelByOrderForward')).toBe('Ctrl+Shift+Right')
+    }
+  })
+
+  it('migrates legacy macOS history defaults once and preserves later custom shortcuts', async () => {
+    const backend = await loadBackend()
+    const legacy = [
+      { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
+      { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' }
+    ]
+    const migrated = backend.normalizeSettingsShortcuts(legacy, { platform: 'darwin', migrateLegacyDefaults: true })
+    const preserved = backend.normalizeSettingsShortcuts(legacy, { platform: 'darwin', migrateLegacyDefaults: false })
+
+    expect(migrated.find((item: { id: string }) => item.id === 'navigatePanelBack')?.shortcut).toBe('Cmd+[')
+    expect(migrated.find((item: { id: string }) => item.id === 'navigatePanelForward')?.shortcut).toBe('Cmd+]')
+    expect(preserved.find((item: { id: string }) => item.id === 'navigatePanelBack')?.shortcut).toBe('Ctrl+Left')
+    expect(preserved.find((item: { id: string }) => item.id === 'navigatePanelForward')?.shortcut).toBe('Ctrl+Right')
+  })
+
+  it('never migrates Windows or Linux history defaults', async () => {
+    const backend = await loadBackend()
+    for (const platform of ['win32', 'linux']) {
+      const normalized = backend.normalizeSettingsShortcuts(
+        [
+          { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
+          { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' }
+        ],
+        { platform, migrateLegacyDefaults: true }
+      )
+      expect(normalized.find((item: { id: string }) => item.id === 'navigatePanelBack')?.shortcut).toBe('Ctrl+Left')
+      expect(normalized.find((item: { id: string }) => item.id === 'navigatePanelForward')?.shortcut).toBe('Ctrl+Right')
+    }
   })
 
   it('does not infer settings preference seed rules from NODE_ENV test', async () => {
@@ -124,18 +165,7 @@ describe('settings preferences backend boundary', () => {
     const result = backend.getSettingsPreferences()
 
     expect(result.ok).toBe(true)
-    expect(result.data?.shortcuts).toEqual([
-      { id: 'newTerminal', action: '新建终端', shortcut: 'Ctrl+Shift+T' },
-      { id: 'toggleAi', action: '显示/隐藏 AI 侧边栏', shortcut: 'Ctrl+Shift+A' },
-      { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
-      { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' },
-      { id: 'closeCurrentPanel', action: '关闭当前面板', shortcut: 'Ctrl+Shift+W' },
-      { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+Tab' },
-      { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
-      { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' },
-      { id: 'navigatePanelByOrderBack', action: '按标签栏顺序切换到左侧面板', shortcut: 'Ctrl+Shift+Left' },
-      { id: 'navigatePanelByOrderForward', action: '按标签栏顺序切换到右侧面板', shortcut: 'Ctrl+Shift+Right' }
-    ])
+    expect(result.data?.shortcuts).toEqual(defaultSettingsShortcuts(process.platform))
     expect(result.data?.rules).toEqual([])
   })
 
@@ -228,18 +258,11 @@ describe('settings preferences backend boundary', () => {
 
     expect(result.ok).toBe(true)
     if (!result.data) throw new Error('settings preferences snapshot missing')
-    expect(result.data.shortcuts).toEqual([
-      { id: 'newTerminal', action: '新建终端', shortcut: 'Ctrl+Alt+T' },
-      { id: 'toggleAi', action: '显示/隐藏 AI 侧边栏', shortcut: 'Ctrl+Alt+A' },
-      { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
-      { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' },
-      { id: 'closeCurrentPanel', action: '关闭当前面板', shortcut: 'Ctrl+Shift+W' },
-      { id: 'recentPanels', action: '打开最近面板', shortcut: 'Ctrl+Tab' },
-      { id: 'navigatePanelBack', action: '导航到上一个面板', shortcut: 'Ctrl+Left' },
-      { id: 'navigatePanelForward', action: '导航到下一个面板', shortcut: 'Ctrl+Right' },
-      { id: 'navigatePanelByOrderBack', action: '按标签栏顺序切换到左侧面板', shortcut: 'Ctrl+Shift+Left' },
-      { id: 'navigatePanelByOrderForward', action: '按标签栏顺序切换到右侧面板', shortcut: 'Ctrl+Shift+Right' }
-    ])
+    expect(result.data.shortcuts).toEqual(defaultSettingsShortcuts(process.platform).map((shortcut) => {
+      if (shortcut.id === 'newTerminal') return { ...shortcut, shortcut: 'Ctrl+Alt+T' }
+      if (shortcut.id === 'toggleAi') return { ...shortcut, shortcut: 'Ctrl+Alt+A' }
+      return shortcut
+    }))
     expect(result.data.rules).toEqual([
       { id: 'rule-custom-instructions', content: 'legacy global instruction', enabled: true },
       { id: 'rule-a', content: 'release must include rollback', enabled: false },

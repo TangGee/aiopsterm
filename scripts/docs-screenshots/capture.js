@@ -17,11 +17,12 @@ const { _electron } = require(path.join(REPO, 'node_modules', 'playwright-core')
 
 const log = (m) => console.log(`[capture] ${m}`)
 
-const seedEnv = (userDataDir) => ({
+const seedEnv = (userDataDir, codexHome) => ({
   ...process.env,
   SHELL: process.env.SHELL || '/bin/bash',
   NODE_ENV: 'test',
   AIOPSTERM_USER_DATA_DIR: userDataDir,
+  CODEX_HOME: codexHome,
   AIOPSTERM_CHAT_HISTORY_ENABLE_SEED: '1',
   AIOPSTERM_QUICK_COMMANDS_ENABLE_SEED: '1',
   AIOPSTERM_ASSETS_ENABLE_SEED: '1',
@@ -84,14 +85,24 @@ async function scene(name, fn) {
   fs.mkdirSync(OUT, { recursive: true })
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiopsterm-docs-shots-'))
   const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aiopsterm-docs-project-'))
+  const codexHome = path.join(userDataDir, 'codex')
+  const codexSessionDir = path.join(codexHome, 'sessions', '2026', '08', '09')
+  const codexTranscriptPath = path.join(codexSessionDir, 'docs-project-session.jsonl')
   fs.mkdirSync(path.join(projectRoot, 'src'), { recursive: true })
+  fs.mkdirSync(codexSessionDir, { recursive: true })
   fs.writeFileSync(path.join(projectRoot, 'README.md'), '# Service API\n\nDocumentation screenshot project.\n')
   fs.writeFileSync(path.join(projectRoot, 'src', 'server.ts'), 'export const status = "ready"\n')
+  fs.writeFileSync(codexTranscriptPath, [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'docs-project-session', cwd: projectRoot, model: 'gpt-5.6-codex' } }),
+    JSON.stringify({ type: 'response_item', payload: { role: 'user', content: [{ type: 'input_text', text: '检查 API 服务状态并说明准备修改哪些文件。' }] } }),
+    JSON.stringify({ type: 'response_item', payload: { role: 'assistant', content: [{ type: 'output_text', text: '我会先查看 README.md 和 src/server.ts，再更新服务状态并运行验证。' }] } }),
+    JSON.stringify({ type: 'response_item', payload: { role: 'assistant', content: [{ type: 'output_text', text: '修改已完成：服务状态保持 ready，项目文件可以在右侧直接查看。' }] } })
+  ].join('\n') + '\n')
   log('launching built app...')
   const app = await _electron.launch({
     args: ['.', '--no-sandbox'],
     cwd: REPO,
-    env: seedEnv(userDataDir),
+    env: seedEnv(userDataDir, codexHome),
     timeout: 90000
   })
   const page = await app.firstWindow({ timeout: 90000 })
@@ -190,7 +201,7 @@ async function scene(name, fn) {
     const activeTab = page.locator('.terminal-tab.active').first()
     const terminalSessionId = await activeTab.getAttribute('data-terminal-session-id')
     const panelId = await activeTab.getAttribute('data-panel-id')
-    await page.evaluate(async ({ cwd, terminalSessionId, panelId }) => {
+    await page.evaluate(async ({ cwd, terminalSessionId, panelId, transcriptPath }) => {
       await window.aiops.publishAiAgentSessionEvent({
         source: 'codex',
         sessionId: 'docs-project-session',
@@ -198,10 +209,11 @@ async function scene(name, fn) {
         title: 'Service API changes',
         summary: 'Updating server status',
         cwd,
+        transcriptPath,
         terminalSessionId,
         panelId
       })
-    }, { cwd: projectRoot, terminalSessionId, panelId })
+    }, { cwd: projectRoot, terminalSessionId, panelId, transcriptPath: codexTranscriptPath })
     await page.waitForTimeout(1800)
     await page.evaluate(async () => {
       await window.aiops.mutateProjectEntry({
@@ -270,6 +282,21 @@ async function scene(name, fn) {
     await snap(page, '08-ai-sessions', [['row', '.ai-session-row']])
   })
 
+  await scene('08b-ai-session-content', async () => {
+    const sessionRow = page.locator('.ai-session-row').filter({ hasText: 'Service API changes' }).first()
+    await sessionRow.click({ button: 'right', timeout: 8000 })
+    await page.locator('.ai-session-context-menu button').filter({ hasText: '打开会话内容' }).click()
+    await page.locator('.managed-ai-session-content').waitFor({ state: 'visible', timeout: 15000 })
+    await page.waitForTimeout(2500)
+    await snap(page, '08b-ai-session-content', [
+      ['workspace', '.managed-ai-session-content'],
+      ['toolbar', '.managed-ai-session-content-toolbar'],
+      ['record', '.managed-ai-session-record-card >> nth=1'],
+      ['actions', '.managed-ai-session-record-actions >> nth=1'],
+      ['status', '.managed-ai-session-content-status']
+    ])
+  })
+
   await scene('09-quick-commands', async () => {
     await rail('快捷命令').click()
     await page.waitForTimeout(2200)
@@ -279,6 +306,19 @@ async function scene(name, fn) {
       ['toolbarRight', '.snippets-toolbar-right'],
       ['list', '.snippets-list'],
       ['item', '.snippet-item']
+    ])
+  })
+
+  await scene('09b-files-workspace', async () => {
+    await rail('文件').click()
+    await page.locator('.files-workspace').waitFor({ state: 'visible', timeout: 10000 })
+    await page.waitForTimeout(2500)
+    await snap(page, '09b-files-workspace', [
+      ['workspace', '.files-workspace'],
+      ['modeSwitch', '.files-mode-switch'],
+      ['leftSide', '.files-transfer-side >> nth=0'],
+      ['rightSide', '.files-transfer-side >> nth=1'],
+      ['progress', '.transfer-fab']
     ])
   })
 
@@ -322,6 +362,19 @@ async function scene(name, fn) {
     ])
   })
 
+  await scene('11a-extensions-workspace', async () => {
+    await rail('扩展').click()
+    await page.locator('.extensions-workspace').waitFor({ state: 'visible', timeout: 10000 })
+    await page.waitForTimeout(2500)
+    await snap(page, '11a-extensions-workspace', [
+      ['list', '.extension_list_container'],
+      ['search', '.extension_search_box'],
+      ['item', '.extension_item >> nth=0'],
+      ['detail', '.extensions-workspace'],
+      ['dragTarget', '.extension_drag_placeholder']
+    ])
+  })
+
   await scene('11b-database-workspace', async () => {
     await rail('数据库').click()
     await page.locator('.database-workspace').waitFor({ state: 'visible', timeout: 10000 })
@@ -336,6 +389,23 @@ async function scene(name, fn) {
     ])
   })
 
+  await scene('11b2-database-ai-workflow', async () => {
+    await page.locator('.db-workspace-add-tab').click()
+    await page.locator('.db-sql-editor').waitFor({ state: 'visible', timeout: 10000 })
+    await page.locator('.db-ai-pane-toggle').click()
+    await page.locator('.db-ai-pane').waitFor({ state: 'visible', timeout: 10000 })
+    await page.locator('.db-ai-pane-quick-actions button').filter({ hasText: '生成 SELECT' }).click()
+    await page.locator('.db-ai-pane-message.assistant').last().waitFor({ state: 'visible', timeout: 25000 })
+    await page.waitForTimeout(1600)
+    await snap(page, '11b2-database-ai-workflow', [
+      ['context', '.db-ai-pane-context-card'],
+      ['composer', '.db-ai-pane-composer'],
+      ['quickActions', '.db-ai-pane-quick-actions'],
+      ['sqlResult', '.db-ai-pane-sql-result'],
+      ['sqlActions', '.db-ai-pane-sql-result header']
+    ])
+  })
+
   await scene('11c-kubernetes-workspace', async () => {
     await rail('Kubernetes').click()
     await page.locator('.k8s-workspace').waitFor({ state: 'visible', timeout: 10000 })
@@ -346,6 +416,27 @@ async function scene(name, fn) {
       ['terminal', '.k8s-terminal-surface'],
       ['clusterConfig', '.k8s-cluster-config-container'],
       ['resources', '.k8s-resource-workspace']
+    ])
+  })
+
+  await scene('11d-kubernetes-ai-workflow', async () => {
+    const prodCluster = page.locator('.k8s-cluster-item').filter({ hasText: 'prod-cluster' }).first()
+    if (await prodCluster.count()) await prodCluster.click()
+    await page.locator('.k8s-resource-workspace').waitFor({ state: 'visible', timeout: 10000 })
+    const namespace = page.locator('.k8s-resource-filter select').first()
+    if (await namespace.count()) await namespace.selectOption('ops')
+    const search = page.locator('.k8s-resource-search input').first()
+    if (await search.count()) await search.fill('billing')
+    const resourceRow = page.locator('.k8s-resource-table tbody tr').filter({ hasText: 'billing-worker' }).first()
+    await resourceRow.getByTitle('Logs').click()
+    await page.locator('.k8s-resource-output').waitFor({ state: 'visible', timeout: 10000 })
+    await page.waitForTimeout(1200)
+    await snap(page, '11d-kubernetes-ai-workflow', [
+      ['agentBar', '.k8s-agent-bar'],
+      ['agentCommand', '.k8s-agent-command'],
+      ['resource', '.k8s-resource-workspace'],
+      ['output', '.k8s-resource-output'],
+      ['sendAi', '.k8s-resource-output [title="发送输出到 AI"]']
     ])
   })
 

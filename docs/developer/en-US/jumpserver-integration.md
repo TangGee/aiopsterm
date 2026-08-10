@@ -99,4 +99,4 @@ Synchronized assets can be mapped into the Kubernetes catalog, but JumpServer Ku
 7. Test with a bad token and confirm the existing catalog remains intact.
 8. Test bastion SSH, secondary SSH, OTP, and the SFTP boundary separately.
 
-See [Hosts, Jump Hosts, And JumpServer](../../usage/best-practices/en-US/10-host-management-jumpserver.md), [Assets And Workspace Resources](../../usage/assets-workspace.md), and [SSH Terminal Runtime](../../technical/ssh-terminal.md).
+See [Asset Management](../../usage/best-practices/en-US/11-assets.md), [Assets And Workspace Resources](../../usage/assets-workspace.md), and [SSH Terminal Runtime](../../technical/ssh-terminal.md).

@@ -167,7 +167,7 @@ export const createTerminalControlSurfaceOperationHandlers = ({
       if (title) workspace.renamePanel(created.id, title)
       const cwd = controlText(params.cwd || params.workingDirectory || params.working_directory) || panel.cwd
       if (cwd) created.cwd = cwd
-      if (focus) workspace.activatePanelSurface(created.id, { cause: 'external' })
+      if (focus) workspace.revealPanelSurface(created.id, { cause: 'external' })
       await nextTick()
       return surfaceOperationPayload(panel, 'surface.action', {
         action,
@@ -385,7 +385,7 @@ export const createTerminalControlSurfaceOperationHandlers = ({
       const panel = resolveControlSourceSurfacePanel(params)
       if (!panel) return controlFail('SURFACE_NOT_FOUND', 'Surface not found.')
       triggerControlFlash(panel)
-      workspace.activatePanelSurface(panel.id, {
+      workspace.revealPanelSurface(panel.id, {
         cause: 'external',
         focusPolicy: controlBool(params.focus, false) ? 'target-primary' : 'preserve'
       })
@@ -416,7 +416,7 @@ export const createTerminalControlSurfaceOperationHandlers = ({
         toIndex = moved.toIndex
       }
       if (controlBool(params.focus, false)) {
-        workspace.activatePanelSurface(panel.id, { cause: 'external' })
+        workspace.revealPanelSurface(panel.id, { cause: 'external' })
       }
       await nextTick()
       if (controlBool(params.focus, false) && isTerminalWorkspacePanel(panel)) requestExternalTerminalFocus(panel.id)
@@ -438,7 +438,7 @@ export const createTerminalControlSurfaceOperationHandlers = ({
       if (!panel) return controlFail('SURFACE_NOT_FOUND', 'Surface not found.')
       const changed = workspace.unsplitPanel(panel.id, { activation: 'preserve' })
       if (controlBool(params.focus, false)) {
-        workspace.activatePanelSurface(panel.id, { cause: 'external' })
+        workspace.revealPanelSurface(panel.id, { cause: 'external' })
       }
       await nextTick()
       if (controlBool(params.focus, false) && isTerminalWorkspacePanel(panel)) requestExternalTerminalFocus(panel.id)

@@ -5,7 +5,6 @@
       'module-panel-native':
         workspace.activeModule === 'workspace' ||
         workspace.activeModule === 'aiSessions' ||
-        workspace.activeModule === 'assets' ||
         workspace.activeModule === 'files' ||
         workspace.activeModule === 'knowledge' ||
         workspace.activeModule === 'extensions' ||
@@ -17,15 +16,8 @@
     <KeepAlive>
       <AiSessionsPanel v-if="workspace.activeModule === 'aiSessions'" />
     </KeepAlive>
-    <AssetsPanel
-      v-if="workspace.activeModule === 'assets'"
-      :query="query"
-    />
     <FilesPanel v-if="workspace.activeModule === 'files'" />
-    <KnowledgePanel
-      v-if="workspace.activeModule === 'knowledge'"
-      :query="query"
-    />
+    <KnowledgePanel v-if="workspace.activeModule === 'knowledge'" />
     <ExtensionsPanel v-if="workspace.activeModule === 'extensions'" />
     <KubernetesPanel v-if="workspace.activeModule === 'kubernetes'" />
     <SettingsPanel v-if="workspace.activeModule === 'settings'" />
@@ -60,7 +52,6 @@ import { useI18n } from '@/i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 import WorkspacePanel from '@/components/panels/WorkspacePanel.vue'
 import AiSessionsPanel from '@/components/panels/AiSessionsPanel.vue'
-import AssetsPanel from '@/components/panels/AssetsPanel.vue'
 import FilesPanel from '@/components/panels/FilesPanel.vue'
 import SnippetsPanel from '@/components/panels/SnippetsPanel.vue'
 import KnowledgePanel from '@/components/panels/KnowledgePanel.vue'
@@ -74,6 +65,6 @@ const { t } = useI18n()
 const query = ref('')
 const activeMeta = computed(() => menuItems.find((item) => item.key === workspace.activeModule))
 const title = computed(() => (activeMeta.value ? t(activeMeta.value.labelKey) : t('module.workspace')))
-const nativePanelModules = new Set(['workspace', 'aiSessions', 'assets', 'files', 'knowledge', 'extensions', 'kubernetes', 'settings'])
+const nativePanelModules = new Set(['workspace', 'aiSessions', 'files', 'knowledge', 'extensions', 'kubernetes', 'settings'])
 const fallbackPanelVisible = computed(() => !nativePanelModules.has(workspace.activeModule))
 </script>

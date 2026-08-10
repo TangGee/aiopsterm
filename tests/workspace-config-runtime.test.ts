@@ -69,6 +69,10 @@ import {
 import type { PrivacyRuntimeSnapshot } from '@shared/contracts/appRuntime'
 
 describe('workspaceConfigRuntime', () => {
+  it('follows the system locale for new renderer configurations', () => {
+    expect(defaultConfig.language).toBe('system')
+  })
+
   it('normalizes workspace idle cleanup settings', () => {
     expect(defaultConfig.workspaceIdleCleanup).toEqual({ enabled: false, timeoutMinutes: 20 })
     expect(normalizeWorkspaceIdleCleanupConfig({ enabled: true, timeoutMinutes: 0 })).toEqual({

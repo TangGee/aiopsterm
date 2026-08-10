@@ -4,7 +4,7 @@
       <input
         :value="searchQuery"
         placeholder="搜索"
-        @input="emit('update:searchQuery', ($event.target as HTMLInputElement).value)"
+        @input="emit('update:search-query', ($event.target as HTMLInputElement).value)"
       />
       <Search />
     </label>
@@ -51,7 +51,7 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'update:searchQuery': [value: string]
+  'update:search-query': [value: string]
   'update:addMenuOpen': [value: boolean]
   upload: []
   'create-file': []

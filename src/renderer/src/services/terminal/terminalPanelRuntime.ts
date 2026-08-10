@@ -56,6 +56,7 @@ export type TerminalPanel = {
     startLine?: number
     endLine?: number
     jumpToken?: number
+    anchor?: string
   }
   managedAiSession?: {
     source: AiAgentSessionSource

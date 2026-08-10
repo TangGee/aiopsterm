@@ -17,6 +17,11 @@ export type KnowledgeMarkdownRenderResult = {
   hasMermaid: boolean
 }
 
+export type KnowledgeMarkdownDocumentLink = {
+  relPath: string
+  anchor: string
+}
+
 const allowedTableAlignments = new Set(['left', 'center', 'right', 'justify'])
 const allowedMarkdownTags = new Set([
   'a',
@@ -54,6 +59,12 @@ const markdownTagAttributes: Record<string, Set<string>> = {
   a: new Set(['href', 'rel', 'target', 'title']),
   code: new Set(['class']),
   div: new Set(['class']),
+  h1: new Set(['id']),
+  h2: new Set(['id']),
+  h3: new Set(['id']),
+  h4: new Set(['id']),
+  h5: new Set(['id']),
+  h6: new Set(['id']),
   img: new Set(['alt', 'src', 'title']),
   input: new Set(['checked', 'disabled', 'type']),
   span: new Set(['class']),
@@ -64,6 +75,38 @@ const markdownClassPattern = /^(hljs|hljs-[\w-]+|language-[\w-]+|mermaid|contain
 
 export const isLocalKnowledgeMarkdownResource = (src: string) => Boolean(src) && !/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(src)
 
+export const isInternalKnowledgeMarkdownHref = (href: string) => {
+  const value = href.trim()
+  if (!value || /^(?:[a-z][a-z\d+.-]*:|\/\/|\/)/i.test(value)) return false
+  const path = value.split(/[?#]/, 1)[0] || ''
+  return /\.(?:md|markdown)$/i.test(path)
+}
+
+export const resolveKnowledgeMarkdownDocumentLink = (href: string, relPath: string): KnowledgeMarkdownDocumentLink | null => {
+  if (!isInternalKnowledgeMarkdownHref(href)) return null
+  const [pathAndQuery, rawAnchor = ''] = href.split('#', 2)
+  const rawPath = (pathAndQuery || '').split('?', 1)[0] || ''
+  const stack = getKnowledgeEditorParentRelDir(relPath).split('/').filter(Boolean)
+  for (const part of rawPath.replace(/\\/g, '/').split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') {
+      if (!stack.length) return null
+      stack.pop()
+      continue
+    }
+    stack.push(part)
+  }
+  const target = normalizeKnowledgeEditorRelPath(stack.join('/'))
+  if (!target || !/\.(?:md|markdown)$/i.test(target)) return null
+  let anchor = ''
+  try {
+    anchor = decodeURIComponent(rawAnchor)
+  } catch {
+    anchor = rawAnchor
+  }
+  return { relPath: target, anchor }
+}
+
 export const resolveKnowledgeMarkdownResource = (src: string, relPath: string) => {
   const cleanSrc = src.split(/[?#]/, 1)[0] || ''
   if (cleanSrc.startsWith('/')) return normalizeKnowledgeEditorRelPath(cleanSrc.replace(/^\/+/, ''))
@@ -73,7 +116,7 @@ export const resolveKnowledgeMarkdownResource = (src: string, relPath: string) =
 const isSafeMarkdownUrl = (value: string, kind: 'href' | 'src') => {
   const url = value.trim()
   if (!url) return false
-  if (kind === 'href') return /^(https?:|mailto:|#)/i.test(url)
+  if (kind === 'href') return /^(https?:|mailto:|#)/i.test(url) || isInternalKnowledgeMarkdownHref(url)
   return /^(https?:|blob:|data:image\/)/i.test(url)
 }
 
@@ -117,8 +160,14 @@ const sanitizeMarkdownElement = (element: Element) => {
     }
     if (name === 'href') {
       if (isSafeMarkdownUrl(value, 'href')) {
-        element.setAttribute('target', '_blank')
-        element.setAttribute('rel', 'noreferrer')
+        if (isInternalKnowledgeMarkdownHref(value) || value.startsWith('#')) {
+          element.setAttribute('data-knowledge-doc-link', value)
+          element.removeAttribute('target')
+          element.removeAttribute('rel')
+        } else {
+          element.setAttribute('target', '_blank')
+          element.setAttribute('rel', 'noreferrer')
+        }
       } else {
         element.removeAttribute(attr.name)
       }
@@ -132,6 +181,10 @@ const sanitizeMarkdownElement = (element: Element) => {
       const cleanClass = sanitizeClassValue(value)
       if (cleanClass) element.setAttribute('class', cleanClass)
       else element.removeAttribute(attr.name)
+    } else if (name === 'id') {
+      const cleanId = value.trim().replace(/[^\p{L}\p{N}_-]/gu, '')
+      if (cleanId) element.setAttribute('id', cleanId)
+      else element.removeAttribute(attr.name)
     } else if (tag === 'input') {
       if (name === 'type' && value !== 'checkbox') element.removeAttribute(attr.name)
       if (name === 'checked') element.setAttribute('checked', '')
@@ -142,8 +195,14 @@ const sanitizeMarkdownElement = (element: Element) => {
   if (tag === 'a') {
     const href = element.getAttribute('href')
     if (href && isSafeMarkdownUrl(href, 'href')) {
-      element.setAttribute('target', '_blank')
-      element.setAttribute('rel', 'noreferrer')
+      if (isInternalKnowledgeMarkdownHref(href) || href.startsWith('#')) {
+        element.setAttribute('data-knowledge-doc-link', href)
+        element.removeAttribute('target')
+        element.removeAttribute('rel')
+      } else {
+        element.setAttribute('target', '_blank')
+        element.setAttribute('rel', 'noreferrer')
+      }
     }
   }
   if (tag === 'input') {
@@ -177,6 +236,21 @@ const normalizeTableAlignments = (doc: Document) => {
     const align = (cell.getAttribute('align') || '').toLowerCase()
     cell.removeAttribute('align')
     if (allowedTableAlignments.has(align)) cell.setAttribute('style', `text-align: ${align}`)
+  }
+}
+
+const addHeadingAnchors = (doc: Document) => {
+  const counts = new Map<string, number>()
+  for (const heading of Array.from(doc.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6'))) {
+    const base = (heading.textContent || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+      .replace(/[\s_]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'section'
+    const count = counts.get(base) || 0
+    counts.set(base, count + 1)
+    heading.id = count ? `${base}-${count}` : base
   }
 }
 
@@ -215,6 +289,7 @@ export const renderKnowledgeMarkdownPreview = async (options: KnowledgeMarkdownR
   const doc = parser.parseFromString(String(rawHtml), 'text/html')
   await replaceLocalMarkdownImages(doc, options)
   normalizeTableAlignments(doc)
+  addHeadingAnchors(doc)
   const hasMermaid = highlightCodeBlocks(doc)
   return {
     html: sanitizeKnowledgeMarkdownHtml(doc.body.innerHTML),

@@ -236,8 +236,7 @@ export const useAiSessionsPanelRuntime = (options: AiSessionsPanelRuntimeOptions
       createDirectory.value = directory
       const panel = await workspace.openLocalTerminalPanel({
         title: `${agent.label} - ${projectDirectoryName(directory)}`,
-        cwd: directory,
-        preserveActiveModule: true
+        cwd: directory
       })
       if (!panel) {
         createError.value = t('aiSessions.createTerminalFailed')
@@ -469,8 +468,7 @@ export const useAiSessionsPanelRuntime = (options: AiSessionsPanelRuntimeOptions
       samePanel
     })) return false
     workspace.activatePanelSurface(linkedPanel.id, {
-      cause: focusCauseForTerminalSwitch(trigger),
-      modulePolicy: 'preserve'
+      cause: focusCauseForTerminalSwitch(trigger)
     })
     workspace.setSelectedManagedAiSession(sessionKey(session))
     if (!terminalSwitchTelemetry.panelActivated(trace, {
@@ -571,8 +569,7 @@ export const useAiSessionsPanelRuntime = (options: AiSessionsPanelRuntimeOptions
           const linkedPanel = liveLinkedPanelForSession(session)
           if (resumed && linkedPanel) {
             workspace.activatePanelSurface(linkedPanel.id, {
-              cause: focusCauseForTerminalSwitch(trigger),
-              modulePolicy: 'preserve'
+              cause: focusCauseForTerminalSwitch(trigger)
             })
           }
           terminalSwitchTelemetry.resumeFinished(trace, {

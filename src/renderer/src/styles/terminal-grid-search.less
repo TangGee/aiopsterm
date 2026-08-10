@@ -43,6 +43,37 @@
   font-size: 15px;
 }
 
+.terminal-dashboard-language {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  gap: 12px;
+  align-items: center;
+  min-height: 30px;
+  padding: 2px 6px;
+}
+
+.terminal-dashboard-language label {
+  min-width: 0;
+}
+
+.terminal-dashboard-language select {
+  width: 150px;
+  min-width: 0;
+  height: 28px;
+  padding: 2px 24px 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--theme-module-active-text-muted) 45%, transparent);
+  border-radius: 5px;
+  background: var(--theme-module-active-readable-bg);
+  color: var(--theme-module-active-text);
+  font: inherit;
+}
+
+.terminal-dashboard-language select:focus-visible {
+  border-color: var(--theme-module-active-accent);
+  outline: 1px solid var(--theme-module-active-accent);
+  outline-offset: 1px;
+}
+
 .app-shell.has-app-background .terminal-dashboard {
   opacity: 1;
 }

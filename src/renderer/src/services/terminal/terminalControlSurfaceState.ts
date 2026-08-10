@@ -423,6 +423,7 @@ export const createTerminalControlSurfaceState = ({
       generatedAt: Date.now(),
       mode: workspace.mode,
       activeModule: workspace.activeModule,
+      activeCenterSurface: workspace.activeCenterSurface,
       activePanelId: workspace.activePanelId,
       workspaces: [
         {
@@ -435,6 +436,7 @@ export const createTerminalControlSurfaceState = ({
           active: true,
           mode: workspace.mode,
           activeModule: workspace.activeModule,
+          activeCenterSurface: workspace.activeCenterSurface,
           activePanelId: workspace.activePanelId,
           remoteDisplayTarget: remote?.remoteDisplayTarget || null,
           remote_display_target: remote?.remote_display_target || null,

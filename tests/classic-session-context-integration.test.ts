@@ -229,6 +229,8 @@ describe('Classic session context integration', () => {
       }
     })
     const store = useWorkspaceStore()
+    store.mode = 'agents'
+    store.activeModule = 'knowledge'
     store.activePanel.sessionId = 'terminal-existing'
     const originalPanelId = store.activePanel.id
     vi.mocked(window.aiops.createTerminal).mockClear()
@@ -236,6 +238,8 @@ describe('Classic session context integration', () => {
     await expect(store.restoreConversation('conv-2')).resolves.toBe(true)
 
     expect(vi.mocked(window.aiops.createTerminal).mock.calls.map(([input]) => input?.assetId)).toEqual(['asset-1', 'asset-2'])
+    expect(store.mode).toBe('agents')
+    expect(store.activeModule).toBe('knowledge')
     expect(store.activePanel.id).toBe(originalPanelId)
     expect(store.selectedContexts).toEqual([
       expect.objectContaining({ assetId: 'asset-1', terminalSessionId: 'test-session-asset-1' }),

@@ -573,7 +573,7 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
   const activateTerminalPanelForManagedAiSession = (panelIdOrSessionId: string) => {
     const target = panels.value.find((panel) => panel.id === panelIdOrSessionId || panel.sessionId === panelIdOrSessionId)
     if (!target || !isTerminalWorkspacePanel(target)) return null
-    activatePanelSurface(target.id, { cause: 'external', modulePolicy: 'preserve' })
+    activatePanelSurface(target.id, { cause: 'external' })
     return target
   }
 

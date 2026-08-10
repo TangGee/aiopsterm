@@ -2,6 +2,10 @@
 
 aiopsterm offers several command paths, from one command to multi-host operations. Quick Commands keep reusable scripts in the main-process backend, macro recording turns real terminal input into a replayable script, and AI Command or Agent handles one-off generation and multi-step diagnosis.
 
+## Where To Open It
+
+Click **Quick Commands** on the module rail. Use the left toolbar controls for groups and the right **New** control for the editor. Open the target terminal before pressing a row's run action. Type `/` in the AI composer and click a popup command to reference it. Start macro recording from the toolbar recording control, then return to the terminal and perform the sequence.
+
 ## Choose The Right Command Path
 
 | Need | Recommended entry | Execution model |
@@ -53,4 +57,6 @@ Type `/` in the AI composer to insert a quick command as a mention, letting the 
 
 - **Global Execution** in the terminal context menu works well for the same read-only check across comparable hosts. Open or split the intended terminals, select the exact scope, then send.
 - Classic Command creates one proposal. Switch to Agent when the next step depends on observed output instead of compressing a multi-step workflow into one opaque shell command.
-- External scripts can use the `aio` CLI to inspect surfaces, write terminal commands, and send notifications. See the [Control CLI Tutorial](../../control-cli-tutorial.md) for parameters and safety boundaries.
+- External scripts can use the `aio` CLI to inspect UI state, write terminal commands, and send notifications. Run `aio --help` for the subcommands supported by the installed build. Resolve the terminal ID with a read-only query first and pass that target explicitly instead of relying on UI focus.
+
+Previous: [AI Session Management](05-ai-sessions.md) · Next: [Keyboard Shortcuts](07-shortcuts.md) · [Back to index](../index.md)

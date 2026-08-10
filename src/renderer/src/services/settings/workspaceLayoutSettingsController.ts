@@ -10,13 +10,14 @@ import {
   normalizeLayoutPreferencesPatch,
   type LayoutPreferencesPatch
 } from '@/services/settings/workspaceConfigRuntime'
-import type { ModuleKey } from '@/config/navigation'
+import type { CenterSurface, ModuleKey } from '@/config/navigation'
 import type { SettingSectionKey } from '@/config/settings'
 import type { UserConfig } from '@shared/contracts/userConfig'
 
 type WorkspaceLayoutSettingsControllerState = {
   mode: Ref<'terminal' | 'agents'>
   activeModule: Ref<ModuleKey>
+  activeCenterSurface: Ref<CenterSurface>
   leftPanelOpen: Ref<boolean>
   rightPanelOpen: Ref<boolean>
   agentsLeftOpen: Ref<boolean>
@@ -44,6 +45,7 @@ export const createWorkspaceLayoutSettingsController = (
   const {
     mode,
     activeModule,
+    activeCenterSurface,
     leftPanelOpen,
     rightPanelOpen,
     agentsLeftOpen,
@@ -114,7 +116,7 @@ export const createWorkspaceLayoutSettingsController = (
       ...(nextMode === 'agents' ? { agentsLeftOpen: true } : {})
     })
     if (!saved) return false
-    if (nextMode === 'terminal' && (activeModule.value === 'database' || activeModule.value === 'user')) {
+    if (nextMode === 'terminal' && (activeCenterSurface.value === 'database' || activeCenterSurface.value === 'user')) {
       rightPanelOpen.value = false
     }
     setTopNotice(`已切换到 ${mode.value === 'agents' ? 'Agents' : 'Terminal'} 模式`)
@@ -135,7 +137,7 @@ export const createWorkspaceLayoutSettingsController = (
   }
 
   const toggleRight = async () => {
-    if (mode.value !== 'terminal' || activeModule.value === 'database' || activeModule.value === 'user') return false
+    if (mode.value !== 'terminal' || activeCenterSurface.value === 'database' || activeCenterSurface.value === 'user') return false
     const nextOpen = !rightPanelOpen.value
     const saved = await persistLayoutPreferences({ rightPanelOpen: nextOpen })
     if (saved) setTopNotice(`AI 侧栏已${rightPanelOpen.value ? '打开' : '关闭'}`)
@@ -160,7 +162,7 @@ export const createWorkspaceLayoutSettingsController = (
   }
 
   const resizeRightPanel = async (width: number) => {
-    if (mode.value === 'terminal' && (activeModule.value === 'database' || activeModule.value === 'user')) return false
+    if (mode.value === 'terminal' && (activeCenterSurface.value === 'database' || activeCenterSurface.value === 'user')) return false
     const previousWidth = rightPanelWidth.value
     const normalizedWidth = Math.round(numberInRange(width, previousWidth, layoutWidthLimits.min, layoutWidthLimits.max))
     rightPanelWidth.value = normalizedWidth
@@ -181,7 +183,7 @@ export const createWorkspaceLayoutSettingsController = (
   }
 
   const quickCloseRightPanel = async () => {
-    if (mode.value !== 'terminal' || activeModule.value === 'database' || activeModule.value === 'user') return false
+    if (mode.value !== 'terminal' || activeCenterSurface.value === 'database' || activeCenterSurface.value === 'user') return false
     const saved = await persistLayoutPreferences({ rightPanelOpen: false })
     if (saved) setTopNotice('AI 侧栏已关闭')
     return saved
