@@ -36,6 +36,8 @@ files:
   - '!node_modules/node-bin-darwin-*/**'
   - '!node_modules/node-win-*/**'
 extraResources:
+  - from: resources/product-telemetry-worker.js
+    to: product-telemetry-worker.js
   - from: resources/icons
     to: icons
   - from: resources/codex-aiopsterm-mcp.js
@@ -56,7 +58,7 @@ asar: true
 npmRebuild: false
 afterPack: scripts/prune-packaged-native-modules.mjs
 linux:
-  maintainer: dev@aiopsterm.local
+  maintainer: support@aiopsterm.com
   icon: icons
   target:
     - AppImage

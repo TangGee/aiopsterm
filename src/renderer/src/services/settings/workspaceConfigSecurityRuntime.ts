@@ -15,6 +15,7 @@ import {
   keywordHighlightScopes,
   privacyRuntimeValues,
   privacyStatusValues,
+  telemetryStatusValues,
   privacySyncStatusValues,
   privacySyncedScopeValues,
   type KeywordHighlightSettings,
@@ -217,19 +218,31 @@ export const keywordHighlightSettingsSnapshotsMatch = (left: KeywordHighlightSet
 export const securitySettingsSnapshotsMatch = (left: SecuritySettings, right: SecuritySettings) =>
   JSON.stringify(normalizeSecurityConfig(left).normalized) === JSON.stringify(normalizeSecurityConfig(right).normalized)
 
-const privacyStatusFromOptions = (value: unknown, fallback: PrivacyUserConfig['telemetry']) =>
+const privacyStatusFromOptions = (value: unknown, fallback: 'enabled' | 'disabled') =>
   stringFromOptions(value, privacyStatusValues, fallback)
+
+const telemetryStatusFromOptions = (value: unknown, fallback: PrivacyUserConfig['telemetry']) =>
+  stringFromOptions(value, telemetryStatusValues, fallback)
 
 export const normalizePrivacyConfig = (source?: Partial<PrivacyUserConfig>) => {
   const incoming = isRecord(source) ? source : {}
+  const legacyTelemetry = telemetryStatusFromOptions(incoming.telemetry, defaultPrivacySettings.telemetry)
+  const telemetryConsentVersion = incoming.telemetryConsentVersion === 1 ? 1 : 0
   const normalized: PrivacyUserConfig = {
-    telemetry: privacyStatusFromOptions(incoming.telemetry, defaultPrivacySettings.telemetry),
+    telemetry: telemetryConsentVersion === 1 || legacyTelemetry === 'disabled' ? legacyTelemetry : 'undecided',
+    telemetryConsentVersion: legacyTelemetry === 'disabled' || telemetryConsentVersion === 1 ? 1 : 0,
     secretRedaction: privacyStatusFromOptions(incoming.secretRedaction, defaultPrivacySettings.secretRedaction),
     dataSync: privacyStatusFromOptions(incoming.dataSync, defaultPrivacySettings.dataSync)
   }
+  const legacyEnabledWithoutConsent = incoming.telemetry === 'enabled' && incoming.telemetryConsentVersion !== 1
+  const telemetryChanged = incoming.telemetry !== normalized.telemetry && !legacyEnabledWithoutConsent
+  const consentChanged = incoming.telemetryConsentVersion !== undefined && incoming.telemetryConsentVersion !== normalized.telemetryConsentVersion
   const changed =
     !isRecord(source) ||
-    (Object.keys(normalized) as Array<keyof PrivacyUserConfig>).some((key) => incoming[key] !== normalized[key])
+    telemetryChanged ||
+    consentChanged ||
+    incoming.secretRedaction !== normalized.secretRedaction ||
+    incoming.dataSync !== normalized.dataSync
 
   return {
     normalized,

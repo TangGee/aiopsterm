@@ -8,6 +8,7 @@ import { writeRuntimeLog } from '../backend/app/runtimeLog'
 import { openSettingsDocumentation, submitSettingsFeedbackReport } from '../backend/settings/settingsExternalActions'
 import type {
   KnowledgeSearchRuntimeApplyInput,
+  OfficialExternalLink,
   OpenSettingsDocumentationInput,
   PrivacyRuntimeApplyInput,
   SettingsDocumentationPage
@@ -53,6 +54,21 @@ const settingsDocumentationPages = new Set<SettingsDocumentationPage>([
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 
+const officialExternalLinks: Record<OfficialExternalLink, string> = {
+  website: 'https://aiopsterm.com',
+  documentation: 'https://aiopsterm.com/docs',
+  issues: 'https://github.com/tanggee/aiopsterm/issues/new/choose',
+  discussions: 'https://github.com/tanggee/aiopsterm/discussions',
+  discord: 'https://aiopsterm.com/community#discord',
+  wechat: 'https://aiopsterm.com/zh-cn/community#wechat',
+  supportEmail: 'mailto:support@aiopsterm.com',
+  securityEmail: 'mailto:security@aiopsterm.com',
+  privacyPolicy: 'https://aiopsterm.com/privacy'
+}
+
+const isOfficialExternalLink = (value: unknown): value is OfficialExternalLink =>
+  typeof value === 'string' && Object.prototype.hasOwnProperty.call(officialExternalLinks, value)
+
 const normalizeSettingsDocumentationInput = (source: unknown): OpenSettingsDocumentationInput => {
   if (!isRecord(source)) return {}
   const page = typeof source.page === 'string' && settingsDocumentationPages.has(source.page as SettingsDocumentationPage) ? (source.page as SettingsDocumentationPage) : undefined
@@ -75,6 +91,10 @@ export const registerAppRuntimeIpc = (ipcMain: IpcMain, input: RegisterAppRuntim
       throw new Error('Only http and https URLs can be opened')
     }
     await input.openExternal(normalized.url)
+  })
+  ipcMain.handle('app:open-official-link', async (_event, link: unknown) => {
+    if (!isOfficialExternalLink(link)) throw new Error('Unknown official link')
+    await input.openExternal(officialExternalLinks[link])
   })
   ipcMain.handle('settings:open-documentation', async (_event, documentationInput: unknown) =>
     openSettingsDocumentation(input.createSettingsExternalActionRuntime(), normalizeSettingsDocumentationInput(documentationInput))

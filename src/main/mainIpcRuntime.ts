@@ -137,6 +137,7 @@ type MainIpcRuntimeInput = {
   normalizeMcpConfigFile: (source?: unknown) => McpConfigFile
   broadcastAiAgentSessionEvent: (event: AiAgentSessionEvent) => void
   broadcastManagedAiSessionFocusRequest: (request: ManagedAiSessionFocusRequest) => void
+  onConfigSaved?: (config: UserConfig) => void
 }
 
 export const registerMainIpcRuntime = (input: MainIpcRuntimeInput) => {
@@ -144,6 +145,7 @@ export const registerMainIpcRuntime = (input: MainIpcRuntimeInput) => {
   const saveConfigPatch = (patch: Partial<UserConfig>) => {
     const next = input.mergeConfig(input.getConfig(), patch)
     input.store.set('config', next)
+    input.onConfigSaved?.(next)
     return next
   }
 

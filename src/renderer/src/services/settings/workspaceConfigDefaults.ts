@@ -183,7 +183,8 @@ export const defaultConfig: UserConfig = {
     }
   },
   privacy: {
-    telemetry: 'enabled',
+    telemetry: 'undecided',
+    telemetryConsentVersion: 0,
     secretRedaction: 'disabled',
     dataSync: 'disabled'
   },
@@ -395,6 +396,7 @@ export const keywordHighlightMatchTypes: KeywordHighlightRuleConfig['matchType']
 export const keywordHighlightFontStyles: KeywordHighlightRuleConfig['style']['fontStyle'][] = ['bold', 'normal']
 export const keywordHighlightHexColorPattern = /^#(?:[0-9a-fA-F]{6})$/
 export const privacyStatusValues = ['enabled', 'disabled'] as const
+export const telemetryStatusValues = ['undecided', 'enabled', 'disabled'] as const
 export const privacyRuntimeValues = ['disabled', 'service', 'backend-double', 'local-file'] as const
 export const privacySyncStatusValues = ['disabled', 'idle', 'syncing', 'synced', 'error'] as const
 export const privacySyncedScopeValues = ['config', 'knowledge', 'chat', 'assets', 'skills'] as const

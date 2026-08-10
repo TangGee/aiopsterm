@@ -5,10 +5,10 @@
   "main": "./out/main/index.js",
   "desktopName": "aiopsterm.desktop",
   "author": {
-    "name": "aiopsterm",
-    "email": "dev@aiopsterm.local"
+    "name": "TangGee",
+    "email": "support@aiopsterm.com"
   },
-  "homepage": "https://aiopsterm.local",
+  "homepage": "https://aiopsterm.com",
   "license": "UNLICENSED",
   "private": true,
   "scripts": {

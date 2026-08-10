@@ -21,6 +21,7 @@ type AppRuntimeBridge = Pick<
   | 'onAppUpdateProgress'
   | 'consumeDeepLinks'
   | 'onDeepLink'
+  | 'onProductTelemetryConsent'
   | 'openLogDir'
   | 'writeRuntimeLog'
   | 'openSettingsDocumentation'
@@ -50,6 +51,7 @@ export const appRuntimeClient = {
   onAppUpdateProgress: () => bridgeMethod('onAppUpdateProgress'),
   consumeDeepLinks: () => bridgeMethod('consumeDeepLinks'),
   onDeepLink: () => bridgeMethod('onDeepLink'),
+  onProductTelemetryConsent: () => bridgeMethod('onProductTelemetryConsent'),
   openLogDir: () => bridgeMethod('openLogDir'),
   writeRuntimeLog: () => bridgeMethod('writeRuntimeLog'),
   openSettingsDocumentation: () => bridgeMethod('openSettingsDocumentation'),

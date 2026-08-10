@@ -95,6 +95,7 @@ const requiredFiles = [
   appExecutable,
   join(resourcesDir, 'app.asar'),
   join(resourcesDir, 'app.asar.unpacked'),
+  join(resourcesDir, 'product-telemetry-worker.js'),
   join(codexPackage, 'codex-package.json'),
   codexBinary,
   join(codexPackage, 'codex-path', platform === 'win32' ? 'rg.exe' : 'rg'),
