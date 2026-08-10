@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { randomUUID, createHash } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import {
   closeSync,
   copyFileSync,
@@ -28,6 +28,7 @@ import {
   shouldRebuildPty,
   shouldRecoverLock
 } from './native-runtime-helpers.mjs'
+import { nativeBinarySha256 } from './native-binary-integrity.mjs'
 
 const require = createRequire(import.meta.url)
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -132,8 +133,6 @@ process.stdout.write(JSON.stringify({ modules: process.versions.modules, node: p
 const probe = (runtime, nativeBinding, includePty = true) => runRuntime(runtime, probeSource(nativeBinding, includePty))
 const probeFailure = (result) =>
   [result.error?.message, result.stderr, result.stdout].filter(Boolean).join('\n').trim() || `probe exited with status ${result.status}`
-const sha256 = (path) => createHash('sha256').update(readFileSync(path)).digest('hex')
-
 const readManifest = () => {
   try {
     return parseNativeManifest(readFileSync(manifestPath, 'utf8'))
@@ -153,7 +152,7 @@ const manifestRecordIntegrityValid = (_runtime, record) => {
   const bindingPath = bindingPathForInfo(record)
   if (record.bindingPath !== relative(sqliteRoot, bindingPath) || !existsSync(bindingPath)) return false
   try {
-    return record.sha256 === sha256(bindingPath)
+    return record.sha256 === nativeBinarySha256(bindingPath)
   } catch {
     return false
   }
@@ -328,7 +327,7 @@ const copyBindingSafely = (source, destination) => {
   const temporary = `${destination}.tmp-${process.pid}-${Date.now()}`
   copyFileSync(source, temporary)
   try {
-    if (existsSync(destination) && sha256(destination) === sha256(temporary)) {
+    if (existsSync(destination) && nativeBinarySha256(destination) === nativeBinarySha256(temporary)) {
       rmSync(temporary, { force: true })
       return
     }
@@ -374,7 +373,7 @@ const removeShadowBindings = () => {
 const nativeRecord = (runtime) => ({
   ...runtimes[runtime],
   bindingPath: relative(sqliteRoot, bindingPathFor(runtime)),
-  sha256: sha256(bindingPathFor(runtime))
+  sha256: nativeBinarySha256(bindingPathFor(runtime))
 })
 
 const writeManifest = (currentManifest) => {

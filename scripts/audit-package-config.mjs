@@ -170,6 +170,7 @@ const codexBuildScript = readFileSync(resolve('scripts/build-codex-cli.sh'), 'ut
 const codexDevBuildScript = readFileSync(resolve('scripts/build-codex-dev-package.sh'), 'utf8')
 const buildAndStartScript = readFileSync(resolve('scripts/build-and-start.sh'), 'utf8')
 const nativeRuntimeScript = readFileSync(resolve('scripts/ensure-native-runtime.mjs'), 'utf8')
+const nativeBinaryIntegrityScript = readFileSync(resolve('scripts/native-binary-integrity.mjs'), 'utf8')
 const nativeRuntimeHelpersScript = readFileSync(resolve('scripts/native-runtime-helpers.mjs'), 'utf8')
 const afterPackScript = readFileSync(resolve('scripts/prune-packaged-native-modules.mjs'), 'utf8')
 const packageTargetsScript = readFileSync(resolve('scripts/package-targets.mjs'), 'utf8')
@@ -224,6 +225,9 @@ const codexPackagingRequirements = [
   { label: 'native ABI complete bindings shadow list', source: nativeRuntimeHelpersScript, text: "resolve(sqliteRoot, 'addon-build', 'default', 'install-root', bindingName)" },
   { label: 'native ABI malformed manifest recovery', source: nativeRuntimeHelpersScript, text: 'parseNativeManifest' },
   { label: 'native ABI preserved secondary runtime record', source: nativeRuntimeHelpersScript, text: 'mergeNativeManifest' },
+  { label: 'native binary Mach-O signature normalization', source: nativeBinaryIntegrityScript, text: 'LC_CODE_SIGNATURE' },
+  { label: 'native binary Mach-O linkedit normalization', source: nativeBinaryIntegrityScript, text: "segmentName === '__LINKEDIT'" },
+  { label: 'native ABI signature-stable hash', source: nativeRuntimeScript, text: 'nativeBinarySha256(bindingPathFor(runtime))' },
   { label: 'packaged SQLite pruning gate', source: afterPackScript, text: 'prunePackagedSqlite(context)' },
   { label: 'packaged SQLite Node ABI removal', source: afterPackScript, text: 'delete packagedManifest.node' },
   { label: 'packaged native build-noise pruning', source: afterPackScript, text: 'prunePackagedNativeBuildNoise(context)' },

@@ -1,5 +1,4 @@
 import { execFileSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
 import { chmodSync, cpSync, existsSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import {
@@ -10,14 +9,13 @@ import {
   packagedCodexBinaryPath,
   packagedCodexPackageDir
 } from './codex-runtime-paths.mjs'
+import { nativeBinarySha256 } from './native-binary-integrity.mjs'
 
 const removeIfExists = (target) => {
   if (existsSync(target)) {
     rmSync(target, { recursive: true, force: true })
   }
 }
-
-const sha256 = (target) => createHash('sha256').update(readFileSync(target)).digest('hex')
 
 const readJson = (target, label) => {
   try {
@@ -173,7 +171,7 @@ const prunePackagedSqlite = (context) => {
     !existsSync(targetBindingPath) ||
     !statSync(targetBindingPath).isFile() ||
     !/^[a-f0-9]{64}$/i.test(electron.sha256 || '') ||
-    sha256(targetBindingPath) !== electron.sha256
+    nativeBinarySha256(targetBindingPath) !== electron.sha256
   ) {
     throw new Error(
       `The packaged better-sqlite3 Electron binding is missing or does not match ${platform}/${arch}: ${targetBindingPath}`

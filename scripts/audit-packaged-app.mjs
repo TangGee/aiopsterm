@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { basename, join, relative, resolve } from 'node:path'
 import { codexBinaryName, codexTargetTriple } from './codex-runtime-paths.mjs'
+import { nativeBinarySha256 } from './native-binary-integrity.mjs'
 
 const require = createRequire(import.meta.url)
 const { listPackage } = require('@electron/asar')
@@ -190,7 +191,7 @@ if (!existsSync(sqliteBindingPath) || !statSync(sqliteBindingPath).isFile()) {
 }
 
 const packagedSha256 = (path) => createHash('sha256').update(readFileSync(path)).digest('hex')
-if (packagedSha256(sqliteBindingPath) !== sqliteElectron.sha256) {
+if (nativeBinarySha256(sqliteBindingPath) !== sqliteElectron.sha256) {
   throw new Error('Packaged better-sqlite3 Electron binding does not match its manifest hash.')
 }
 
@@ -349,7 +350,7 @@ if (
   throw new Error(`Packaged Cline sidecar manifest is invalid: ${JSON.stringify(clineManifest)}`)
 }
 if (
-  packagedSha256(clineNode) !== clineManifest.runtimeSha256 ||
+  nativeBinarySha256(clineNode) !== clineManifest.runtimeSha256 ||
   packagedSha256(join(clineSidecar, 'cline-agent-sidecar.cjs')) !== clineManifest.bundleSha256
 ) {
   throw new Error('Packaged Cline sidecar hashes do not match its manifest.')

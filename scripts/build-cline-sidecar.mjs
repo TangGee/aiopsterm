@@ -14,6 +14,7 @@ import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { nativeBinarySha256 } from './native-binary-integrity.mjs'
 
 const NODE_VERSION = '22.20.0'
 const NODE_LICENSE_SHA256 = 'e991d81497a85bb24fc6bffae0a3637a6accd6c6bc5ce1f2c5698bd555cf9d49'
@@ -385,7 +386,7 @@ writeFileSync(noticesPath, createThirdPartyNotices(components), 'utf8')
 
 const builtAt = new Date().toISOString()
 const bundleHash = fileSha256(bundlePath)
-const nodeHash = fileSha256(nodePath)
+const nodeHash = nativeBinarySha256(nodePath)
 const sbom = createSbom({ components, builtAt, bundleHash, nodeHash })
 writeFileSync(sbomPath, `${JSON.stringify(sbom, null, 2)}\n`, 'utf8')
 

@@ -3,6 +3,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { accessSync, constants, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { nativeBinarySha256 } from './native-binary-integrity.mjs'
 
 const NODE_VERSION = '22.20.0'
 const REFERENCE_TREE_PREFIX = ['external-reference', ''].join('/')
@@ -68,7 +69,7 @@ if (
 ) {
   throw new Error(`Unexpected Cline sidecar manifest: ${JSON.stringify(manifest)}`)
 }
-if (manifest.bundleSha256 !== sha256(bundlePath) || manifest.runtimeSha256 !== sha256(runtimePath)) {
+if (manifest.bundleSha256 !== sha256(bundlePath) || manifest.runtimeSha256 !== nativeBinarySha256(runtimePath)) {
   throw new Error('Cline sidecar artifact hashes do not match the manifest.')
 }
 
