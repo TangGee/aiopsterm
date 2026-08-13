@@ -154,6 +154,10 @@ There is no general free public-trust certificate for direct distribution of thi
 
 See the [Microsoft Store account flow](https://learn.microsoft.com/en-us/windows/apps/publish/partner-center/open-a-developer-account) and [SignPath Foundation conditions](https://signpath.org/terms.html) before selecting either conditional free route.
 
+Before activating a certificate purchased through a reseller, confirm in writing that the order is a Standard, Individual Validation, or Organization Validation public-trust Authenticode product rather than an Open Source Code Signing product. Confirm the certificate issuer, subscriber identity shown as the Windows publisher, supported executable formats, cloud or hardware key custody, signing quota, RFC 3161 timestamp service, renewal and reissue terms, and the reseller's current authorization with the issuing CA. This repository must not use an open-source-only certificate while it remains private and unlicensed.
+
+Activation must finish in the issuing CA's official account and official signing application. The project owner retains the account, multi-factor authentication, hardware token PIN, cloud-signing approval, and any private-key material. A reseller may assist with validation but must not retain credentials, one-time codes, private keys, remote-control access, or standing authority to sign future builds. Sign a disposable test executable first and verify its certificate chain, publisher identity, timestamp, and revocation status before connecting the credential to the production release process.
+
 Verify both the installer and unpacked executable on the native Windows runner:
 
 ```powershell
