@@ -642,7 +642,7 @@ const loadContentPage = async (page: number, reason: ContentLoadReason) => {
     page: targetPage,
     offset,
     limit,
-    query: appliedQuery.value
+    queryActive: Boolean(appliedQuery.value)
   }
   loading.value = true
   closeRecordModal()

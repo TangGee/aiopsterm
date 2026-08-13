@@ -44,12 +44,12 @@ For lag when switching from an AI session row to its linked terminal, double-cli
 
 For lag after choosing `打开会话内容` or switching between content workspaces, collect both backend and renderer content-load entries from the runtime log:
 
-- `managed_ai.content.list` / `managed_ai.content.list.failed`: backend transcript lookup and parse time for the requested page. Check `durationMs`, `format`, `records`, `total`, `offset`, `limit`, `existedBeforeImport`, and `importAttempted`; successful entries use `executionThread: "worker"` for Codex/Claude JSONL and `executionThread: "main"` for other adapters.
+- `managed_ai.content.list` / `managed_ai.content.list.failed`: backend transcript lookup and parse time for the requested page. Check `durationMs`, `format`, `records`, `total`, `matchTotal`, `offset`, `limit`, `existedBeforeImport`, and `importAttempted`; successful entries use `executionThread: "worker"` for Codex/Claude JSONL and `executionThread: "main"` for other adapters.
 - `managed_ai.content.get-record` / `managed_ai.content.get-record.failed`: full-record lazy load time after expanding a truncated card, with the same `executionThread` field on successful entries.
 - `managed_ai.content.delete-record` / `managed_ai.content.delete-record.failed`: transcript record deletion time and whether a backup was created. Check `recordId`, `durationMs`, `backedUp`, `existedBeforeImport`, and `importAttempted`.
-- `renderer.managed-ai-content.load` / `renderer.managed-ai-content.load.failed`: renderer-side page wait plus Vue update timing. Check `apiDurationMs`, `durationMs`, `renderSettleMs`, `reason`, `offset`, `limit`, `records`, `loadedRecords`, `total`, and `hasMore`.
+- `renderer.managed-ai-content.load` / `renderer.managed-ai-content.load.failed`: renderer-side page wait plus Vue update timing. Check `apiDurationMs`, `durationMs`, `renderSettleMs`, `reason`, `page`, `offset`, `limit`, `records`, `total`, `matchTotal`, and `queryActive`. The log records only whether search is active, not the search text.
 
-For an existing session, content loading should not emit a new `managed_ai.sessions.imported` event and should not depend on git metadata refresh. The renderer loads transcript records in small pages and appends more on scroll, viewport fill, or search prefetch. If backend `managed_ai.content.list.durationMs` is low but renderer `renderSettleMs` or total `durationMs` is high, the remaining bottleneck is likely the currently rendered card batch rather than transcript IO.
+For an existing session, content loading should not emit a new `managed_ai.sessions.imported` event and should not depend on git metadata refresh. The renderer loads 20 records per requested page and does not request more records on scroll, viewport fill, polling, or transcript changes. If backend `managed_ai.content.list.durationMs` is low but renderer `renderSettleMs` or total `durationMs` is high, the remaining bottleneck is likely the currently rendered card batch rather than transcript IO.
 
 ## Native Crashes
 
