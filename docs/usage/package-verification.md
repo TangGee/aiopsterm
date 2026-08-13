@@ -130,3 +130,28 @@ npm run build:win:dir
 Run those commands on Windows so the native Windows Codex package, native modules, and NSIS target are built on the correct platform. Linux development machines can audit the Windows target configuration with `npm run audit:package-config`, but they should not be treated as successful Windows packaging runners.
 
 On a Windows machine without remote CI, `scripts/build-windows.ps1` is the supported local orchestration entrypoint. It uses official sources by default, accepts `-ChinaMirror` as a process-local opt-in, and finishes with the same `package:build -- windows` and `package:verify -- windows` gates documented above.
+
+## Windows Release Signing
+
+Windows does not use the Apple notarization workflow. Local development and controlled internal testing can use unsigned artifacts, but public distribution should Authenticode-sign the NSIS installer, the packaged `aiopsterm.exe`, and every bundled executable launched at runtime. A trusted signature identifies the publisher and lets Microsoft Defender SmartScreen accumulate publisher reputation across releases. It does not guarantee that a new publisher or binary will immediately avoid the SmartScreen unrecognized-app warning.
+
+The current Electron Builder configuration does not require a signing identity. Without signing credentials it can complete successfully and produce unsigned Windows artifacts. A release runner using an exportable code-signing certificate can provide credentials without storing them in the repository:
+
+```powershell
+$env:WIN_CSC_LINK = 'C:\secure\aiopsterm-signing.pfx'
+$env:WIN_CSC_KEY_PASSWORD = '<secret-from-secure-storage>'
+npm run build:windows:one-click
+```
+
+Use an RFC 3161 timestamp through the selected signing provider so an already signed release remains verifiable after the certificate expires. Keep the certificate and password in the Windows certificate store or CI secret storage, never in source control. Production release configuration should enable Electron Builder's `forceCodeSigning` only after a signing identity is provisioned; that converts missing or invalid credentials into a build failure instead of silently publishing unsigned output. Microsoft Artifact Signing can replace an exportable certificate when the publisher and build environment satisfy its availability and identity-verification requirements.
+
+Verify both the installer and unpacked executable on the native Windows runner:
+
+```powershell
+Get-AuthenticodeSignature .\dist\aiopsterm-<version>-setup-<arch>.exe
+Get-AuthenticodeSignature .\dist\win-unpacked\aiopsterm.exe
+signtool verify /pa /all /v .\dist\aiopsterm-<version>-setup-<arch>.exe
+signtool verify /pa /all /v .\dist\win-unpacked\aiopsterm.exe
+```
+
+`Status` must be `Valid`, SignTool must succeed, the displayed publisher must match the intended release identity, and timestamp verification must succeed. Also enumerate packaged `.exe` helpers and verify their signatures before external release. See Microsoft's [SmartScreen reputation guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation), [SignTool reference](https://learn.microsoft.com/en-us/windows/win32/seccrypto/signtool), and Electron Builder's [code-signing configuration](https://www.electron.build/docs/features/code-signing/).
