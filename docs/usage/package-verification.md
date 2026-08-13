@@ -145,6 +145,15 @@ npm run build:windows:one-click
 
 Use an RFC 3161 timestamp through the selected signing provider so an already signed release remains verifiable after the certificate expires. Keep the certificate and password in the Windows certificate store or CI secret storage, never in source control. Production release configuration should enable Electron Builder's `forceCodeSigning` only after a signing identity is provisioned; that converts missing or invalid credentials into a build failure instead of silently publishing unsigned output. Microsoft Artifact Signing can replace an exportable certificate when the publisher and build environment satisfy its availability and identity-verification requirements.
 
+There is no general free public-trust certificate for direct distribution of this repository's NSIS installer. The available no-certificate-cost paths have different boundaries:
+
+- Microsoft Store registration and Store signing can be free through Microsoft's current onboarding flow. The Store signs and distributes the submitted Store package; it does not sign an NSIS installer separately hosted on the project website or source repository. Using this route requires a Store-compatible package and submission workflow in addition to the current NSIS target.
+- SignPath Foundation offers free signing to approved open-source projects whose complete maintained release and build inputs meet its license, provenance, review, and signing-policy requirements. This repository currently declares `private: true` and `license: UNLICENSED`, so it is not eligible without an intentional project-wide open-source licensing and release-policy change.
+- A self-signed certificate is free and useful only for local testing or managed organizations that deploy the corresponding trust root to every target machine. Microsoft SmartScreen treats a self-signed public download like an unsigned file, so it is not a substitute for public Authenticode trust.
+- Microsoft Artifact Signing requires a paid Azure subscription and paid service plan. It is a managed alternative to certificate-file or hardware-token handling, not a free certificate program.
+
+See the [Microsoft Store account flow](https://learn.microsoft.com/en-us/windows/apps/publish/partner-center/open-a-developer-account) and [SignPath Foundation conditions](https://signpath.org/terms.html) before selecting either conditional free route.
+
 Verify both the installer and unpacked executable on the native Windows runner:
 
 ```powershell
