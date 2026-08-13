@@ -838,7 +838,8 @@ describe('workspace store', () => {
         kind: 'managed-ai-session',
         managedAiSession: {
           source: 'claude-code',
-          sessionId: 'claude-history-1'
+          sessionId: 'claude-history-1',
+          contentView: expect.objectContaining({ page: 1, query: '', snapshot: null })
         }
       })
     )

@@ -49,6 +49,7 @@ describe('agentSessionContentWorkerRuntime', () => {
       expect(result.workerIsMainThread).toBe(false)
       expect(result.workerThreadId).not.toBe(threadId)
       expect(result.total).toBe(3)
+      expect(result.matchTotal).toBe(3)
       expect(result.records).toEqual([
         expect.objectContaining({
           ordinal: 2,
@@ -56,6 +57,16 @@ describe('agentSessionContentWorkerRuntime', () => {
           messageType: 'tool result: exec_command',
           locationLabel: 'line 3 /payload/output'
         })
+      ])
+
+      const searched = await listJsonlSessionContentInWorker({
+        ...pageInput(path, 'session-1', 0, 1),
+        query: 'tool'
+      })
+      expect(searched.total).toBe(3)
+      expect(searched.matchTotal).toBe(2)
+      expect(searched.records).toEqual([
+        expect.objectContaining({ ordinal: 1, messageType: 'tool call: exec_command' })
       ])
     } finally {
       await rm(root, { recursive: true, force: true })

@@ -73,8 +73,15 @@ describe('agentSessionContentRuntime', () => {
 
       const listed = await runtime.list({ source: 'codex', sessionId: session.id })
       expect(listed.ok).toBe(true)
+      expect(listed.data).toEqual(expect.objectContaining({ total: 2, matchTotal: 2 }))
       const userRecord = listed.data?.records.find((record: ManagedAiSessionContentRecord) => record.content === 'fix the api')
       expect(userRecord).toEqual(expect.objectContaining({ role: 'user', editable: true }))
+
+      const searched = await runtime.list({ source: 'codex', sessionId: session.id, query: 'api', offset: 0, limit: 1 })
+      expect(searched.data).toEqual(expect.objectContaining({ total: 2, matchTotal: 1, offset: 0, limit: 1 }))
+      expect(searched.data?.records).toEqual([
+        expect.objectContaining({ content: 'fix the api', ordinal: 0 })
+      ])
 
       const updated = await runtime.updateRecord({
         source: 'codex',

@@ -75,6 +75,13 @@
   padding: 0;
 }
 
+.managed-ai-session-content-actions .managed-ai-session-content-refresh {
+  width: auto;
+  gap: 6px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
 .managed-ai-session-record-actions button.primary {
   border-color: color-mix(in srgb, var(--theme-module-active-accent) 62%, var(--theme-module-active-border));
   background: color-mix(in srgb, var(--theme-module-active-accent) 18%, var(--theme-module-active-card-bg));
@@ -508,12 +515,12 @@
 }
 
 .managed-ai-session-content-status {
-  min-height: 34px;
+  min-height: 42px;
   flex: 0 0 auto;
   border-top: 1px solid var(--theme-module-active-border);
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(80px, 1fr) auto minmax(80px, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   padding: 0 14px;
   color: var(--theme-module-active-text-muted);
@@ -528,7 +535,42 @@
 }
 
 .managed-ai-session-content-status .notice {
+  justify-self: end;
   color: var(--theme-core-success);
+}
+
+.managed-ai-session-content-pagination {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.managed-ai-session-content-pagination button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
+.managed-ai-session-content-pagination input {
+  width: 48px;
+  height: 28px;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 6px;
+  outline: 0;
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
+  padding: 0 5px;
+  text-align: center;
+  font-size: 11px;
+}
+
+.managed-ai-session-content-pagination input:focus {
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 62%, var(--theme-module-active-border));
+}
+
+.managed-ai-session-content-page-count {
+  min-width: 34px;
 }
 
 @media (max-width: 820px) {
@@ -554,6 +596,21 @@
 
   .managed-ai-session-record-actions {
     align-self: flex-end;
+  }
+
+  .managed-ai-session-content-status {
+    grid-template-columns: 1fr auto;
+    min-height: 48px;
+    padding: 5px 10px;
+  }
+
+  .managed-ai-session-content-pagination {
+    justify-self: end;
+  }
+
+  .managed-ai-session-content-status .notice {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 
   .managed-ai-session-record-modal-backdrop {

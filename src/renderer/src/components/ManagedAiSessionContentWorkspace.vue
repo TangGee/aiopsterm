@@ -12,11 +12,13 @@
       <div class="managed-ai-session-content-actions">
         <button
           type="button"
+          class="managed-ai-session-content-refresh"
           :title="t('common.refresh')"
           :disabled="loading"
           @click="refreshContent"
         >
           <RefreshCw />
+          <span>{{ t('common.refresh') }}</span>
         </button>
       </div>
     </header>
@@ -46,10 +48,9 @@
       <div
         ref="recordListRef"
         class="managed-ai-session-record-list"
-        @scroll.passive="handleRecordListScroll"
       >
         <article
-          v-for="record in filteredRecords"
+          v-for="record in records"
           :key="record.recordId"
           class="managed-ai-session-record-card"
           :class="recordClass(record)"
@@ -144,13 +145,13 @@
         </article>
 
         <div
-          v-if="!loading && !loadingMore && filteredRecords.length === 0"
+          v-if="!loading && records.length === 0"
           class="managed-ai-session-content-empty"
         >
           {{ t('aiSessions.content.empty') }}
         </div>
         <div
-          v-if="loading || loadingMore"
+          v-if="loading"
           class="managed-ai-session-content-empty"
         >
           {{ t('common.refreshing') }}
@@ -159,7 +160,54 @@
     </main>
 
     <footer class="managed-ai-session-content-status">
-      <span>{{ loadedRecordSummary }}</span>
+      <span class="managed-ai-session-content-range">{{ loadedRecordSummary }}</span>
+      <nav
+        class="managed-ai-session-content-pagination"
+        :aria-label="t('aiSessions.content.allRecords')"
+      >
+        <button
+          type="button"
+          :title="t('database.grid.toolbar.firstPage')"
+          :disabled="loading || currentPage <= 1"
+          @click="goToPage(1)"
+        >
+          <ChevronsLeft />
+        </button>
+        <button
+          type="button"
+          :title="t('database.grid.toolbar.previousPage')"
+          :disabled="loading || currentPage <= 1"
+          @click="goToPage(currentPage - 1)"
+        >
+          <ChevronLeft />
+        </button>
+        <input
+          v-model="pageInput"
+          type="number"
+          min="1"
+          :max="pageCount"
+          :disabled="loading"
+          @keydown.enter.prevent="commitPageInput"
+          @blur="commitPageInput"
+        />
+        <span class="managed-ai-session-content-page-count">/ {{ pageCount }}</span>
+        <button
+          type="button"
+          :title="t('database.grid.toolbar.nextPage')"
+          :disabled="loading || currentPage >= pageCount"
+          @click="goToPage(currentPage + 1)"
+        >
+          <ChevronRight />
+        </button>
+        <button
+          type="button"
+          :title="t('database.grid.toolbar.lastPage')"
+          :disabled="loading || currentPage >= pageCount"
+          @click="goToPage(pageCount)"
+        >
+          <ChevronsRight />
+        </button>
+      </nav>
       <span
         v-if="saveNotice"
         class="notice"
@@ -263,7 +311,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { ChevronDown, ChevronRight, Maximize2, RefreshCw, RotateCcw, Save, Search, Trash2, X } from 'lucide-vue-next'
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Maximize2, RefreshCw, RotateCcw, Save, Search, Trash2, X } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 import { managedAiClient } from '@/services/ai/managedAiClient'
 import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
@@ -275,53 +323,51 @@ import {
 import { managedAiSourceLabel } from '@/services/ai/aiSessionsPanelViewRuntime'
 import type { ManagedAiSessionContentRecord, ManagedAiSessionContentSnapshot } from '@shared/contracts/managedAiSessionContent'
 import type { AiAgentSessionSource } from '@shared/contracts/managedAiSessions'
+import type { ManagedAiSessionContentViewState } from '@/services/terminal/terminalPanelRuntime'
 import type { Ref } from 'vue'
 
 type RecordDisplayRole = 'user' | 'assistant' | 'system' | 'developer' | 'tool' | 'metadata' | 'event' | 'reasoning' | 'file' | 'record'
-type ContentLoadReason = 'initial' | 'refresh' | 'scroll' | 'fill' | 'search'
-type IdleWindow = Window & {
-  requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number
-  cancelIdleCallback?: (handle: number) => void
-}
+type ContentLoadReason = 'initial' | 'refresh' | 'page' | 'search' | 'save' | 'delete'
 
-const initialContentPageSize = 80
-const contentPageSize = 120
-const scrollLoadThresholdPx = 420
-const searchPrefetchTarget = 20
+const contentPageSize = 20
+const searchDebounceMs = 250
 
 const props = defineProps<{
   source: AiAgentSessionSource
   sessionId: string
   panelTitle?: string
+  viewState?: ManagedAiSessionContentViewState
 }>()
 
 const { t } = useI18n()
-const snapshot = ref<ManagedAiSessionContentSnapshot | null>(null)
-const contentRecords = ref<ManagedAiSessionContentRecord[]>([])
-const query = ref('')
+const snapshot = ref<ManagedAiSessionContentSnapshot | null>(props.viewState?.snapshot || null)
+const contentRecords = ref<ManagedAiSessionContentRecord[]>([...(props.viewState?.records || [])])
+const query = ref(props.viewState?.query || '')
+const appliedQuery = ref(props.viewState?.query || '')
+const currentPage = ref(Math.max(1, props.viewState?.page || 1))
+const pageInput = ref(String(currentPage.value))
 const loading = ref(false)
-const loadingMore = ref(false)
 const error = ref('')
 const saveNotice = ref('')
-const drafts = reactive<Record<string, string>>({})
-const originals = reactive<Record<string, string>>({})
-const fullRecords = reactive<Record<string, ManagedAiSessionContentRecord>>({})
-const expandedRecordIds = ref<Set<string>>(new Set())
+const drafts = reactive<Record<string, string>>({ ...(props.viewState?.drafts || {}) })
+const originals = reactive<Record<string, string>>({ ...(props.viewState?.originals || {}) })
+const fullRecords = reactive<Record<string, ManagedAiSessionContentRecord>>({ ...(props.viewState?.fullRecords || {}) })
+const expandedRecordIds = ref<Set<string>>(new Set(props.viewState?.expandedRecordIds || []))
 const loadingRecordIds = ref<Set<string>>(new Set())
 const savingRecordIds = ref<Set<string>>(new Set())
 const deletingRecordIds = ref<Set<string>>(new Set())
 const activeRecordId = ref('')
-const contentExhausted = ref(false)
 const recordListRef = ref<HTMLElement | null>(null)
 let contentLoadSeq = 0
-let idleLoadHandle: number | null = null
-let scrollFrameHandle: number | null = null
+let searchTimer: number | null = null
 
 const sourceLabel = computed(() => managedAiSourceLabel(props.source))
 const panelTitle = computed(() => props.panelTitle || `${sourceLabel.value} ${props.sessionId.slice(0, 8)}`)
 const records = computed(() => contentRecords.value)
-const recordsTotal = computed(() => snapshot.value?.total ?? records.value.length)
-const hasMoreRecords = computed(() => !contentExhausted.value && records.value.length < recordsTotal.value)
+const matchTotal = computed(() => snapshot.value?.matchTotal ?? records.value.length)
+const pageCount = computed(() => Math.max(1, Math.ceil(matchTotal.value / contentPageSize)))
+const rangeStart = computed(() => matchTotal.value ? (currentPage.value - 1) * contentPageSize + 1 : 0)
+const rangeEnd = computed(() => matchTotal.value ? Math.min(matchTotal.value, rangeStart.value + records.value.length - 1) : 0)
 const modalRecord = computed(() => records.value.find((record) => record.recordId === activeRecordId.value) || null)
 
 const normalizeRecordText = (record: ManagedAiSessionContentRecord) =>
@@ -337,23 +383,7 @@ const recordDisplayRole = (record: ManagedAiSessionContentRecord): RecordDisplay
   return 'record'
 }
 
-const filteredRecords = computed(() => {
-  const text = query.value.trim().toLowerCase()
-  return records.value.filter((record) => {
-    if (!text) return true
-    return [recordDisplayLabel(record), recordTypeLabel(record), record.messageType, record.locationLabel, recordContent(record)].some((value) =>
-      String(value || '').toLowerCase().includes(text)
-    )
-  })
-})
-
-const loadedRecordSummary = computed(() => {
-  const total = recordsTotal.value
-  const loaded = records.value.length
-  const visible = filteredRecords.value.length
-  if (query.value.trim()) return total > loaded ? `${visible} / ${loaded} / ${total}` : `${visible} / ${loaded}`
-  return total > loaded ? `${loaded} / ${total}` : String(total)
-})
+const loadedRecordSummary = computed(() => `${rangeStart.value}-${rangeEnd.value} / ${matchTotal.value}`)
 
 const toolRecordKind = (record: ManagedAiSessionContentRecord): 'call' | 'result' | '' => {
   const messageType = record.messageType.toLowerCase()
@@ -394,7 +424,7 @@ const recordTypeLabel = (record: ManagedAiSessionContentRecord) => {
 const recordFor = (record: ManagedAiSessionContentRecord) => fullRecords[record.recordId] || record
 const recordContent = (record: ManagedAiSessionContentRecord) => drafts[record.recordId] ?? recordFor(record).content
 const isRecordDirty = (record: ManagedAiSessionContentRecord) => (drafts[record.recordId] ?? '') !== (originals[record.recordId] ?? '')
-const hasUnsavedChanges = computed(() => records.value.some(isRecordDirty))
+const hasUnsavedChanges = computed(() => Object.keys(drafts).some((id) => drafts[id] !== originals[id]))
 const recordClass = (record: ManagedAiSessionContentRecord) => `role-${recordDisplayRole(record)}`
 
 const setSetMembership = (target: Ref<Set<string>>, id: string, enabled: boolean) => {
@@ -446,47 +476,35 @@ const formatCharCount = (count: number) => {
 const perfNow = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
 const roundedDuration = (startedAt: number) => Math.max(0, Math.round(perfNow() - startedAt))
 
-const scheduleIdleTask = (callback: () => void) => {
-  const idleWindow = window as IdleWindow
-  if (idleWindow.requestIdleCallback) return idleWindow.requestIdleCallback(callback, { timeout: 240 })
-  return window.setTimeout(callback, 32)
+const cancelSearchTimer = () => {
+  if (searchTimer === null) return
+  window.clearTimeout(searchTimer)
+  searchTimer = null
 }
 
-const cancelIdleLoad = () => {
-  if (idleLoadHandle === null) return
-  const idleWindow = window as IdleWindow
-  if (idleWindow.cancelIdleCallback) idleWindow.cancelIdleCallback(idleLoadHandle)
-  else window.clearTimeout(idleLoadHandle)
-  idleLoadHandle = null
+const copyRecordMap = (target: Record<string, ManagedAiSessionContentRecord>, source: Record<string, ManagedAiSessionContentRecord>) => {
+  Object.keys(target).forEach((id) => delete target[id])
+  Object.assign(target, source)
 }
 
-const cancelScrollFrame = () => {
-  if (scrollFrameHandle === null) return
-  window.cancelAnimationFrame(scrollFrameHandle)
-  scrollFrameHandle = null
+const copyTextMap = (target: Record<string, string>, source: Record<string, string>) => {
+  Object.keys(target).forEach((id) => delete target[id])
+  Object.assign(target, source)
 }
 
-const mergeContentRecords = (existing: ManagedAiSessionContentRecord[], incoming: ManagedAiSessionContentRecord[]) => {
-  const seen = new Set(existing.map((record) => record.recordId))
-  const uniqueIncoming = incoming.filter((record) => {
-    if (seen.has(record.recordId)) return false
-    seen.add(record.recordId)
-    return true
-  })
-  return [...existing, ...uniqueIncoming]
+const saveViewState = () => {
+  if (!props.viewState) return
+  props.viewState.page = currentPage.value
+  props.viewState.query = appliedQuery.value
+  props.viewState.snapshot = snapshot.value
+  props.viewState.records = [...contentRecords.value]
+  props.viewState.drafts = { ...drafts }
+  props.viewState.originals = { ...originals }
+  props.viewState.fullRecords = { ...fullRecords }
+  props.viewState.expandedRecordIds = [...expandedRecordIds.value]
 }
 
 const syncDraftsFromRecords = (nextRecords: ManagedAiSessionContentRecord[]) => {
-  const nextIds = new Set(nextRecords.map((record) => record.recordId))
-  Object.keys(drafts).forEach((id) => {
-    if (!nextIds.has(id)) delete drafts[id]
-  })
-  Object.keys(originals).forEach((id) => {
-    if (!nextIds.has(id)) delete originals[id]
-  })
-  Object.keys(fullRecords).forEach((id) => {
-    if (!nextIds.has(id)) delete fullRecords[id]
-  })
   nextRecords.forEach((record) => {
     const previousOriginal = originals[record.recordId]
     const loadedFullRecord = fullRecords[record.recordId]
@@ -503,19 +521,27 @@ const syncDraftsFromRecords = (nextRecords: ManagedAiSessionContentRecord[]) => 
 
 const clearRecordState = () => {
   contentLoadSeq += 1
-  cancelIdleLoad()
-  cancelScrollFrame()
+  cancelSearchTimer()
   saveNotice.value = ''
+  snapshot.value = null
   contentRecords.value = []
-  contentExhausted.value = false
-  Object.keys(drafts).forEach((id) => delete drafts[id])
-  Object.keys(originals).forEach((id) => delete originals[id])
-  Object.keys(fullRecords).forEach((id) => delete fullRecords[id])
+  copyTextMap(drafts, {})
+  copyTextMap(originals, {})
+  copyRecordMap(fullRecords, {})
   expandedRecordIds.value = new Set()
   loadingRecordIds.value = new Set()
   savingRecordIds.value = new Set()
   deletingRecordIds.value = new Set()
   activeRecordId.value = ''
+}
+
+const discardDraftState = () => {
+  copyTextMap(drafts, {})
+  copyTextMap(originals, {})
+  copyRecordMap(fullRecords, {})
+  expandedRecordIds.value = new Set()
+  activeRecordId.value = ''
+  syncDraftsFromRecords(contentRecords.value)
 }
 
 const confirmDiscardChanges = () => !hasUnsavedChanges.value || window.confirm(t('aiSessions.content.discardChanges'))
@@ -584,77 +610,42 @@ const removeRecordFromLocalState = (recordId: string) => {
   snapshot.value = {
     ...snapshot.value,
     total: Math.max(0, snapshot.value.total - 1),
+    matchTotal: Math.max(0, snapshot.value.matchTotal - 1),
     limit: contentRecords.value.length,
     records: contentRecords.value
   }
 }
 
-const shouldLoadMoreForViewport = () => {
-  const element = recordListRef.value
-  if (!element) return false
-  return element.scrollHeight - element.scrollTop - element.clientHeight <= scrollLoadThresholdPx
+const scrollRecordsToTop = () => {
+  if (recordListRef.value) recordListRef.value.scrollTop = 0
 }
 
-const maybeScheduleMoreRecords = (reason: ContentLoadReason) => {
-  if (!hasMoreRecords.value || loading.value || loadingMore.value) return
-  cancelIdleLoad()
-  idleLoadHandle = scheduleIdleTask(() => {
-    idleLoadHandle = null
-    if (!hasMoreRecords.value || loading.value || loadingMore.value) return
-    if (reason === 'fill' && !shouldLoadMoreForViewport()) return
-    if (reason === 'search' && (!query.value.trim() || filteredRecords.value.length >= searchPrefetchTarget)) return
-    void loadContentPage(reason)
-  })
-}
-
-const afterContentPageRendered = () => {
-  if (query.value.trim()) {
-    if (filteredRecords.value.length < searchPrefetchTarget) maybeScheduleMoreRecords('search')
-    return
-  }
-  maybeScheduleMoreRecords('fill')
-}
-
-const handleRecordListScroll = () => {
-  if (scrollFrameHandle !== null) return
-  scrollFrameHandle = window.requestAnimationFrame(() => {
-    scrollFrameHandle = null
-    if (shouldLoadMoreForViewport()) void loadContentPage('scroll')
-  })
-}
-
-const loadContentPage = async (reason: ContentLoadReason, reset = false) => {
+const loadContentPage = async (page: number, reason: ContentLoadReason) => {
   const listContent = managedAiClient.listManagedAiSessionContent()
   if (!listContent) {
     error.value = t('aiSessions.notice.serviceUnavailable')
     return false
   }
-  if (!reset && (loading.value || loadingMore.value)) return false
-  const seq = reset ? ++contentLoadSeq : contentLoadSeq
+  const targetPage = Math.max(1, Math.floor(page))
+  const seq = ++contentLoadSeq
   const startedAt = perfNow()
   let apiDurationMs = 0
   let logLevel: 'info' | 'warn' = 'info'
   let logEvent = 'renderer.managed-ai-content.load'
   let shouldLog = true
-  const offset = reset ? 0 : records.value.length
-  const limit = reset ? initialContentPageSize : contentPageSize
+  const offset = (targetPage - 1) * contentPageSize
+  const limit = contentPageSize
   const logFields: Record<string, unknown> = {
     source: props.source,
     sessionId: props.sessionId,
     reason,
+    page: targetPage,
     offset,
-    limit
+    limit,
+    query: appliedQuery.value
   }
-  if (reset) {
-    cancelIdleLoad()
-    snapshot.value = null
-    contentRecords.value = []
-    contentExhausted.value = false
-    loading.value = true
-    loadingMore.value = false
-  } else {
-    loadingMore.value = true
-  }
+  loading.value = true
+  closeRecordModal()
   error.value = ''
   try {
     const result = await listContent({
@@ -662,6 +653,7 @@ const loadContentPage = async (reason: ContentLoadReason, reset = false) => {
       sessionId: props.sessionId,
       offset,
       limit,
+      ...(appliedQuery.value ? { query: appliedQuery.value } : {}),
       maxContentChars: 1600
     })
     apiDurationMs = roundedDuration(startedAt)
@@ -677,24 +669,20 @@ const loadContentPage = async (reason: ContentLoadReason, reset = false) => {
       error.value = result?.errorMessage || t('aiSessions.content.loadFailed')
       return false
     }
-    const nextRecords = reset
-      ? result.data.records
-      : mergeContentRecords(contentRecords.value, result.data.records)
-    contentRecords.value = nextRecords
-    contentExhausted.value = result.data.records.length === 0 || nextRecords.length >= result.data.total
-    snapshot.value = {
-      ...result.data,
-      offset: 0,
-      limit: nextRecords.length,
-      records: nextRecords
-    }
-    syncDraftsFromRecords(nextRecords)
+    const nextPageCount = Math.max(1, Math.ceil(result.data.matchTotal / contentPageSize))
+    if (targetPage > nextPageCount) return loadContentPage(nextPageCount, reason)
+    contentRecords.value = result.data.records
+    snapshot.value = result.data
+    currentPage.value = targetPage
+    pageInput.value = String(targetPage)
+    syncDraftsFromRecords(result.data.records)
     logFields.format = result.data.format
     logFields.records = result.data.records.length
     logFields.total = result.data.total
-    logFields.loadedRecords = nextRecords.length
-    logFields.hasMore = !contentExhausted.value
-    void nextTick().then(afterContentPageRendered)
+    logFields.matchTotal = result.data.matchTotal
+    await nextTick()
+    scrollRecordsToTop()
+    saveViewState()
     return true
   } catch (err) {
     if (seq !== contentLoadSeq) {
@@ -708,37 +696,40 @@ const loadContentPage = async (reason: ContentLoadReason, reset = false) => {
     error.value = err instanceof Error ? err.message : t('aiSessions.content.loadFailed')
     return false
   } finally {
-    if (seq === contentLoadSeq) {
-      if (reset) loading.value = false
-      else loadingMore.value = false
-    }
-    if (!shouldLog || seq !== contentLoadSeq) return
-    const renderTickStartedAt = perfNow()
-    void nextTick().then(() => {
-      writeRendererRuntimeLog(logLevel, logEvent, {
-        ...logFields,
-        apiDurationMs,
-        durationMs: roundedDuration(startedAt),
-        renderSettleMs: roundedDuration(renderTickStartedAt)
+    if (seq === contentLoadSeq) loading.value = false
+    if (shouldLog && seq === contentLoadSeq) {
+      const renderTickStartedAt = perfNow()
+      void nextTick().then(() => {
+        writeRendererRuntimeLog(logLevel, logEvent, {
+          ...logFields,
+          apiDurationMs,
+          durationMs: roundedDuration(startedAt),
+          renderSettleMs: roundedDuration(renderTickStartedAt)
+        })
       })
-    })
+    }
   }
 }
 
-const loadContent = (reason: ContentLoadReason = 'initial') => loadContentPage(reason, true)
+const loadContent = (reason: ContentLoadReason = 'initial') => loadContentPage(currentPage.value, reason)
 
-const reloadContentThroughRecordCount = async (minimumRecords: number, reason: ContentLoadReason) => {
-  const reloaded = await loadContentPage(reason, true)
-  if (!reloaded) return false
-  while (hasMoreRecords.value && records.value.length < minimumRecords) {
-    const loadedMore = await loadContentPage('fill')
-    if (!loadedMore) return false
-  }
-  return true
+const goToPage = (page: number) => {
+  const targetPage = Math.min(pageCount.value, Math.max(1, Math.floor(page)))
+  pageInput.value = String(targetPage)
+  if (targetPage === currentPage.value || loading.value) return
+  void loadContentPage(targetPage, 'page')
+}
+
+const commitPageInput = () => {
+  const value = Number(pageInput.value)
+  goToPage(Number.isFinite(value) ? value : currentPage.value)
 }
 
 const refreshContent = () => {
   if (!confirmDiscardChanges()) return
+  discardDraftState()
+  saveNotice.value = ''
+  pageInput.value = String(currentPage.value)
   void loadContent('refresh')
 }
 
@@ -752,8 +743,6 @@ const saveRecord = async (record: ManagedAiSessionContentRecord) => {
     return
   }
   const savedRecordId = record.recordId
-  const minimumRecordsAfterSave = Math.max(records.value.length, initialContentPageSize)
-  const previousScrollTop = recordListRef.value?.scrollTop ?? 0
   setSetMembership(savingRecordIds, record.recordId, true)
   error.value = ''
   saveNotice.value = ''
@@ -776,18 +765,14 @@ const saveRecord = async (record: ManagedAiSessionContentRecord) => {
     drafts[savedRecordId] = savedRecord.content
     originals[savedRecordId] = savedRecord.content
     setSetMembership(expandedRecordIds, savedRecordId, true)
-    if (!(await reloadContentThroughRecordCount(minimumRecordsAfterSave, 'refresh'))) return
+    if (!(await loadContentPage(currentPage.value, 'save'))) return
     const refreshedRecord = records.value.find((item) => item.recordId === savedRecordId)
     if (!refreshedRecord || refreshedRecord.sourceRevision === savedRecord.sourceRevision) {
       fullRecords[savedRecordId] = savedRecord
       drafts[savedRecordId] = savedRecord.content
       originals[savedRecordId] = savedRecord.content
     }
-    await nextTick()
-    const recordList = recordListRef.value
-    if (recordList) {
-      recordList.scrollTop = Math.min(previousScrollTop, Math.max(0, recordList.scrollHeight - recordList.clientHeight))
-    }
+    saveViewState()
   } catch (err) {
     error.value = err instanceof Error ? err.message : t('aiSessions.content.saveFailed')
   } finally {
@@ -806,8 +791,6 @@ const deleteRecord = async (record: ManagedAiSessionContentRecord) => {
     return
   }
   const deletedRecordId = record.recordId
-  const minimumRecordsAfterDelete = Math.max(records.value.length - 1, initialContentPageSize)
-  const previousScrollTop = recordListRef.value?.scrollTop ?? 0
   setSetMembership(deletingRecordIds, deletedRecordId, true)
   error.value = ''
   saveNotice.value = ''
@@ -825,12 +808,8 @@ const deleteRecord = async (record: ManagedAiSessionContentRecord) => {
     }
     mutationSucceeded = true
     removeRecordFromLocalState(deletedRecordId)
-    if (!(await reloadContentThroughRecordCount(minimumRecordsAfterDelete, 'refresh'))) return
-    await nextTick()
-    const recordList = recordListRef.value
-    if (recordList) {
-      recordList.scrollTop = Math.min(previousScrollTop, Math.max(0, recordList.scrollHeight - recordList.clientHeight))
-    }
+    const targetPage = Math.min(currentPage.value, pageCount.value)
+    if (!(await loadContentPage(targetPage, 'delete'))) return
   } catch (err) {
     error.value = err instanceof Error ? err.message : t('aiSessions.content.deleteFailed')
   } finally {
@@ -842,26 +821,35 @@ const deleteRecord = async (record: ManagedAiSessionContentRecord) => {
 watch(
   () => `${props.source}:${props.sessionId}`,
   () => {
-    snapshot.value = null
     clearRecordState()
-    void loadContent()
+    query.value = ''
+    appliedQuery.value = ''
+    currentPage.value = 1
+    pageInput.value = '1'
+    void loadContent('initial')
   }
 )
 
 watch(query, () => {
-  cancelIdleLoad()
-  if (query.value.trim() && hasMoreRecords.value && filteredRecords.value.length < searchPrefetchTarget) {
-    maybeScheduleMoreRecords('search')
-  }
+  cancelSearchTimer()
+  searchTimer = window.setTimeout(() => {
+    searchTimer = null
+    const nextQuery = query.value.trim()
+    if (nextQuery === appliedQuery.value) return
+    appliedQuery.value = nextQuery
+    currentPage.value = 1
+    pageInput.value = '1'
+    void loadContentPage(1, 'search')
+  }, searchDebounceMs)
 })
 
 onMounted(() => {
-  void loadContent()
+  if (!snapshot.value) void loadContent('initial')
 })
 
 onBeforeUnmount(() => {
   contentLoadSeq += 1
-  cancelIdleLoad()
-  cancelScrollFrame()
+  cancelSearchTimer()
+  saveViewState()
 })
 </script>

@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ManagedAiSessionContentWorkspace from '@/components/ManagedAiSessionContentWorkspace.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { createManagedAiSessionContentViewState } from '@/services/terminal/terminalPanelRuntime'
 import type { ManagedAiSessionContentRecord, ManagedAiSessionContentSnapshot } from '@shared/contracts/managedAiSessionContent'
 
 const originalAiops = window.aiops
@@ -26,7 +27,8 @@ const makeRecord = (content: string, sourceRevision: string, ordinal = 0): Manag
 const makeSnapshot = (
   records: ManagedAiSessionContentRecord[],
   sourceRevision: string,
-  total = records.length
+  total = records.length,
+  input: { offset?: number; matchTotal?: number } = {}
 ): ManagedAiSessionContentSnapshot => ({
   source: 'codex',
   sessionId: 'codex-active-1',
@@ -34,18 +36,20 @@ const makeSnapshot = (
   format: 'jsonl',
   sourceRevision,
   total,
-  offset: 0,
-  limit: 80,
+  matchTotal: input.matchTotal ?? total,
+  offset: input.offset ?? 0,
+  limit: 20,
   editable: true,
   sessionState: 'working',
   storagePath: '/tmp/codex-active-1.jsonl',
   records
 })
 
-const mountWorkspace = () => mount(ManagedAiSessionContentWorkspace, {
+const mountWorkspace = (viewState = createManagedAiSessionContentViewState()) => mount(ManagedAiSessionContentWorkspace, {
   props: {
     source: 'codex',
-    sessionId: 'codex-active-1'
+    sessionId: 'codex-active-1',
+    viewState
   },
   global: {
     stubs: {
@@ -54,8 +58,8 @@ const mountWorkspace = () => mount(ManagedAiSessionContentWorkspace, {
   }
 })
 
-const makeRecordPage = (count: number, sourceRevision: string, prefix = 'record') =>
-  Array.from({ length: count }, (_, ordinal) => makeRecord(`${prefix} ${ordinal + 1}`, sourceRevision, ordinal))
+const makeRecordPage = (start: number, count: number, sourceRevision: string, prefix = 'record') =>
+  Array.from({ length: count }, (_, index) => makeRecord(`${prefix} ${start + index + 1}`, sourceRevision, start + index))
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -71,7 +75,112 @@ afterEach(() => {
 })
 
 describe('ManagedAiSessionContentWorkspace', () => {
-  it('shows the restart notice in the large editor and keeps it through a manual reload', async () => {
+  it('loads 20 records once and changes pages only from pagination controls', async () => {
+    const firstPage = makeRecordPage(0, 20, 'revision-1')
+    const secondPage = makeRecordPage(20, 5, 'revision-1')
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, data: makeSnapshot(firstPage, 'revision-1', 25) })
+      .mockResolvedValueOnce({ ok: true, data: makeSnapshot(secondPage, 'revision-1', 25, { offset: 20 }) })
+    window.aiops = { ...originalAiops, listManagedAiSessionContent: list }
+    const wrapper = mountWorkspace()
+    await flushPromises()
+
+    expect(list).toHaveBeenCalledTimes(1)
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 0, limit: 20 }))
+    expect(wrapper.findAll('.managed-ai-session-record-card')).toHaveLength(20)
+
+    await wrapper.findAll('.managed-ai-session-content-pagination button')[2].trigger('click')
+    await flushPromises()
+
+    expect(list).toHaveBeenCalledTimes(2)
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 20, limit: 20 }))
+    expect((wrapper.find('.managed-ai-session-record-card textarea').element as HTMLTextAreaElement).value).toBe('record 21')
+
+    await wrapper.find('.managed-ai-session-record-list').trigger('scroll')
+    await flushPromises()
+    expect(list).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('searches the full conversation through the backend and paginates matches', async () => {
+    vi.useFakeTimers()
+    const firstResultPage = makeRecordPage(40, 20, 'revision-1', 'needle')
+    const secondResultPage = makeRecordPage(60, 3, 'revision-1', 'needle')
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, data: makeSnapshot(makeRecordPage(0, 20, 'revision-1'), 'revision-1', 100) })
+      .mockResolvedValueOnce({ ok: true, data: makeSnapshot(firstResultPage, 'revision-1', 100, { matchTotal: 23 }) })
+      .mockResolvedValueOnce({ ok: true, data: makeSnapshot(secondResultPage, 'revision-1', 100, { offset: 20, matchTotal: 23 }) })
+    window.aiops = { ...originalAiops, listManagedAiSessionContent: list }
+    const wrapper = mountWorkspace()
+    await flushPromises()
+
+    await wrapper.find('.managed-ai-session-record-search input').setValue(' needle ')
+    await vi.advanceTimersByTimeAsync(250)
+    await flushPromises()
+
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ query: 'needle', offset: 0, limit: 20 }))
+    expect(wrapper.find('.managed-ai-session-content-page-count').text()).toContain('2')
+
+    await wrapper.findAll('.managed-ai-session-content-pagination button')[2].trigger('click')
+    await flushPromises()
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ query: 'needle', offset: 20, limit: 20 }))
+    wrapper.unmount()
+  })
+
+  it('restores the cached page, search and drafts without loading again after a tab switch', async () => {
+    const viewState = createManagedAiSessionContentViewState()
+    const page = makeRecordPage(20, 5, 'revision-1')
+    const list = vi.fn(async () => ({
+      ok: true,
+      data: makeSnapshot(page, 'revision-1', 25, { offset: 20 })
+    }))
+    window.aiops = { ...originalAiops, listManagedAiSessionContent: list }
+    viewState.page = 2
+    viewState.query = 'record'
+    const firstWrapper = mountWorkspace(viewState)
+    await flushPromises()
+    await firstWrapper.find('textarea').setValue('draft kept across tabs')
+    firstWrapper.unmount()
+
+    const secondWrapper = mountWorkspace(viewState)
+    await flushPromises()
+
+    expect(list).toHaveBeenCalledTimes(1)
+    expect((secondWrapper.find('.managed-ai-session-record-search input').element as HTMLInputElement).value).toBe('record')
+    expect((secondWrapper.find('.managed-ai-session-content-pagination input').element as HTMLInputElement).value).toBe('2')
+    expect((secondWrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('draft kept across tabs')
+    secondWrapper.unmount()
+  })
+
+  it('asks before manual refresh with a draft and clears all drafts after confirmation', async () => {
+    const initialRecord = makeRecord('before', 'revision-1')
+    const refreshedRecord = makeRecord('from disk', 'revision-2')
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, data: makeSnapshot([initialRecord], 'revision-1') })
+      .mockResolvedValueOnce({ ok: true, data: makeSnapshot([refreshedRecord], 'revision-2') })
+    window.aiops = { ...originalAiops, listManagedAiSessionContent: list }
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+    const wrapper = mountWorkspace()
+    await flushPromises()
+    await wrapper.find('textarea').setValue('local draft')
+
+    await wrapper.find('.managed-ai-session-content-refresh').trigger('click')
+    await flushPromises()
+    expect(list).toHaveBeenCalledTimes(1)
+    expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('local draft')
+
+    await wrapper.find('.managed-ai-session-content-refresh').trigger('click')
+    await flushPromises()
+    expect(confirm).toHaveBeenCalledTimes(2)
+    expect(list).toHaveBeenCalledTimes(2)
+    expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('from disk')
+    wrapper.unmount()
+  })
+
+  it('reloads the current page after saving and shows the restart notice', async () => {
     const initialRecord = makeRecord('before', 'revision-1')
     const savedRecord = makeRecord('after', 'revision-2')
     window.aiops = {
@@ -79,7 +188,6 @@ describe('ManagedAiSessionContentWorkspace', () => {
       listManagedAiSessionContent: vi
         .fn()
         .mockResolvedValueOnce({ ok: true, data: makeSnapshot([initialRecord], 'revision-1') })
-        .mockResolvedValueOnce({ ok: true, data: makeSnapshot([savedRecord], 'revision-2') })
         .mockResolvedValueOnce({ ok: true, data: makeSnapshot([savedRecord], 'revision-2') }),
       updateManagedAiSessionContentRecord: vi.fn(async () => ({
         ok: true,
@@ -88,161 +196,47 @@ describe('ManagedAiSessionContentWorkspace', () => {
     }
     const wrapper = mountWorkspace()
     await flushPromises()
-
-    await wrapper.find('.managed-ai-session-record-actions button').trigger('click')
-    await flushPromises()
-    await wrapper.find('.managed-ai-session-record-modal-editor').setValue('after')
-    await wrapper.find('.managed-ai-session-record-modal-footer-actions .primary').trigger('click')
+    await wrapper.find('textarea').setValue('after')
+    await wrapper.find('.managed-ai-session-record-actions .primary').trigger('click')
     await flushPromises()
 
     expect(window.aiops.updateManagedAiSessionContentRecord).toHaveBeenCalledWith(
       expect.objectContaining({ content: 'after', sourceRevision: 'revision-1' })
     )
+    expect(window.aiops.listManagedAiSessionContent).toHaveBeenCalledTimes(2)
     expect(wrapper.find('.managed-ai-session-content-status .notice').text()).toContain('重启该 AI 对话后修改才会生效')
-    expect(wrapper.find('.managed-ai-session-record-modal-status .notice').text()).toContain('重启该 AI 对话后修改才会生效')
-
-    await wrapper.find('.managed-ai-session-content-actions button').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.find('.managed-ai-session-content-status .notice').text()).toContain('重启该 AI 对话后修改才会生效')
-    expect(wrapper.find('.managed-ai-session-record-modal-status .notice').text()).toContain('重启该 AI 对话后修改才会生效')
     wrapper.unmount()
   })
 
-  it('prompts for an AI conversation restart after deleting content', async () => {
-    const initialRecord = makeRecord('remove me', 'revision-1')
+  it('clamps to the last valid page after deleting the only record on the current page', async () => {
+    const lastRecord = makeRecord('last', 'revision-1', 20)
+    const previousPage = makeRecordPage(0, 20, 'revision-2')
+    const viewState = createManagedAiSessionContentViewState()
+    viewState.page = 2
     window.aiops = {
       ...originalAiops,
       listManagedAiSessionContent: vi
         .fn()
-        .mockResolvedValueOnce({ ok: true, data: makeSnapshot([initialRecord], 'revision-1') })
-        .mockResolvedValueOnce({ ok: true, data: makeSnapshot([], 'revision-2') }),
+        .mockResolvedValueOnce({ ok: true, data: makeSnapshot([lastRecord], 'revision-1', 21, { offset: 20 }) })
+        .mockResolvedValueOnce({ ok: true, data: makeSnapshot(previousPage, 'revision-2', 20) }),
       deleteManagedAiSessionContentRecord: vi.fn(async () => ({
         ok: true,
-        data: { recordId: initialRecord.recordId, sourceRevision: 'revision-2', backupPath: '/tmp/backup.jsonl' }
+        data: { recordId: lastRecord.recordId, sourceRevision: 'revision-2', backupPath: '/tmp/backup.jsonl' }
       }))
     }
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const wrapper = mountWorkspace()
+    const wrapper = mountWorkspace(viewState)
     await flushPromises()
-
     await wrapper.find('.managed-ai-session-record-actions .danger').trigger('click')
     await flushPromises()
 
-    expect(window.aiops.deleteManagedAiSessionContentRecord).toHaveBeenCalledWith(
-      expect.objectContaining({ recordId: initialRecord.recordId, sourceRevision: 'revision-1' })
-    )
+    expect(window.aiops.listManagedAiSessionContent).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 0, limit: 20 }))
+    expect((wrapper.find('.managed-ai-session-content-pagination input').element as HTMLInputElement).value).toBe('1')
     expect(wrapper.find('.managed-ai-session-content-status .notice').text()).toContain('重启该 AI 对话后修改才会生效')
     wrapper.unmount()
   })
 
-  it('keeps the restart notice while an automatic fill page loads', async () => {
-    vi.useFakeTimers()
-    const initialRecords = makeRecordPage(80, 'revision-1', 'before')
-    const savedRecords = initialRecords.map((record, ordinal) =>
-      ordinal === 0 ? makeRecord('after', 'revision-2', ordinal) : { ...record, sourceRevision: 'revision-2' }
-    )
-    const appendedRecord = makeRecord('appended', 'revision-2', 80)
-    window.aiops = {
-      ...originalAiops,
-      listManagedAiSessionContent: vi
-        .fn()
-        .mockResolvedValueOnce({ ok: true, data: makeSnapshot(initialRecords, 'revision-1') })
-        .mockResolvedValueOnce({ ok: true, data: makeSnapshot(savedRecords, 'revision-2', 81) })
-        .mockResolvedValueOnce({ ok: true, data: makeSnapshot([appendedRecord], 'revision-2', 81) }),
-      updateManagedAiSessionContentRecord: vi.fn(async () => ({
-        ok: true,
-        data: { record: savedRecords[0], sourceRevision: 'revision-2' }
-      }))
-    }
-    const wrapper = mountWorkspace()
-    await flushPromises()
-    await wrapper.find('textarea').setValue('after')
-    await wrapper.find('.managed-ai-session-record-actions .primary').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.find('.managed-ai-session-content-status .notice').exists()).toBe(true)
-    await vi.runOnlyPendingTimersAsync()
-    await flushPromises()
-
-    expect(window.aiops.listManagedAiSessionContent).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 80 }))
-    expect(wrapper.find('.managed-ai-session-content-status .notice').text()).toContain('重启该 AI 对话后修改才会生效')
-    wrapper.unmount()
-  })
-
-  it('keeps the restart notice while a search-prefetch page loads', async () => {
-    vi.useFakeTimers()
-    const initialRecords = makeRecordPage(80, 'revision-1', 'before')
-    const savedRecords = initialRecords.map((record, ordinal) =>
-      ordinal === 0 ? makeRecord('after', 'revision-2', ordinal) : { ...record, sourceRevision: 'revision-2' }
-    )
-    const searchRecord = makeRecord('needle result', 'revision-2', 80)
-    window.aiops = {
-      ...originalAiops,
-      listManagedAiSessionContent: vi
-        .fn()
-        .mockResolvedValueOnce({ ok: true, data: makeSnapshot(initialRecords, 'revision-1') })
-        .mockResolvedValueOnce({ ok: true, data: makeSnapshot(savedRecords, 'revision-2', 81) })
-        .mockResolvedValueOnce({ ok: true, data: makeSnapshot([searchRecord], 'revision-2', 81) }),
-      updateManagedAiSessionContentRecord: vi.fn(async () => ({
-        ok: true,
-        data: { record: savedRecords[0], sourceRevision: 'revision-2' }
-      }))
-    }
-    const wrapper = mountWorkspace()
-    await flushPromises()
-    await wrapper.find('textarea').setValue('after')
-    await wrapper.find('.managed-ai-session-record-actions .primary').trigger('click')
-    await flushPromises()
-
-    await wrapper.find('.managed-ai-session-record-search input').setValue('needle')
-    await flushPromises()
-    await vi.runOnlyPendingTimersAsync()
-    await flushPromises()
-
-    expect(window.aiops.listManagedAiSessionContent).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 80 }))
-    expect(wrapper.find('.managed-ai-session-content-status .notice').text()).toContain('重启该 AI 对话后修改才会生效')
-    wrapper.unmount()
-  })
-
-  it('keeps the restart notice while a scroll page loads', async () => {
-    vi.useFakeTimers()
-    const initialRecords = makeRecordPage(80, 'revision-1', 'before')
-    const savedRecords = initialRecords.map((record, ordinal) =>
-      ordinal === 0 ? makeRecord('after', 'revision-2', ordinal) : { ...record, sourceRevision: 'revision-2' }
-    )
-    const appendedRecord = makeRecord('appended', 'revision-2', 80)
-    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
-      callback(0)
-      return 1
-    })
-    window.aiops = {
-      ...originalAiops,
-      listManagedAiSessionContent: vi
-        .fn()
-        .mockResolvedValueOnce({ ok: true, data: makeSnapshot(initialRecords, 'revision-1') })
-        .mockResolvedValueOnce({ ok: true, data: makeSnapshot(savedRecords, 'revision-2', 81) })
-        .mockResolvedValueOnce({ ok: true, data: makeSnapshot([appendedRecord], 'revision-2', 81) }),
-      updateManagedAiSessionContentRecord: vi.fn(async () => ({
-        ok: true,
-        data: { record: savedRecords[0], sourceRevision: 'revision-2' }
-      }))
-    }
-    const wrapper = mountWorkspace()
-    await flushPromises()
-    await wrapper.find('textarea').setValue('after')
-    await wrapper.find('.managed-ai-session-record-actions .primary').trigger('click')
-    await flushPromises()
-
-    await wrapper.find('.managed-ai-session-record-list').trigger('scroll')
-    await flushPromises()
-
-    expect(window.aiops.listManagedAiSessionContent).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 80 }))
-    expect(wrapper.find('.managed-ai-session-content-status .notice').text()).toContain('重启该 AI 对话后修改才会生效')
-    wrapper.unmount()
-  })
-
-  it('does not show a restart notice when saving fails', async () => {
+  it('keeps revision conflict errors and does not show a restart notice', async () => {
     const initialRecord = makeRecord('before', 'revision-1')
     window.aiops = {
       ...originalAiops,
@@ -257,28 +251,6 @@ describe('ManagedAiSessionContentWorkspace', () => {
     await flushPromises()
     await wrapper.find('textarea').setValue('after')
     await wrapper.find('.managed-ai-session-record-actions .primary').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.find('.managed-ai-session-content-error').text()).toBe('reload first')
-    expect(wrapper.find('.managed-ai-session-content-status .notice').exists()).toBe(false)
-    wrapper.unmount()
-  })
-
-  it('does not show a restart notice when deleting fails', async () => {
-    const initialRecord = makeRecord('before', 'revision-1')
-    window.aiops = {
-      ...originalAiops,
-      listManagedAiSessionContent: vi.fn(async () => ({ ok: true, data: makeSnapshot([initialRecord], 'revision-1') })),
-      deleteManagedAiSessionContentRecord: vi.fn(async () => ({
-        ok: false,
-        errorCode: 'MANAGED_AI_CONTENT_REVISION_CONFLICT',
-        errorMessage: 'reload first'
-      }))
-    }
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const wrapper = mountWorkspace()
-    await flushPromises()
-    await wrapper.find('.managed-ai-session-record-actions .danger').trigger('click')
     await flushPromises()
 
     expect(wrapper.find('.managed-ai-session-content-error').text()).toBe('reload first')

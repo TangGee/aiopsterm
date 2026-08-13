@@ -79,6 +79,7 @@ type ReadSessionContentResult = {
 
 type ReadSessionContentPageResult = ReadSessionContentResult & {
   total: number
+  matchTotal: number
 }
 
 type OpenCodePartRow = {
@@ -467,6 +468,19 @@ const buildEventRecords = (input: {
 
 const paginateRecords = <T>(records: T[], offset: number, limit: number) => records.slice(offset, offset + limit)
 
+const recordMatchesQuery = (record: ManagedAiSessionContentRecord, query: string) => {
+  if (!query) return true
+  return [record.role, record.messageType, record.locationLabel, record.content].some((value) =>
+    String(value || '').toLowerCase().includes(query)
+  )
+}
+
+const truncateRecordContent = (record: ManagedAiSessionContentRecord, maxContentChars: number): ManagedAiSessionContentRecord => ({
+  ...record,
+  ...truncateContent(record.content, maxContentChars),
+  fullLength: record.fullLength
+})
+
 const resolveSession = async (config: AgentSessionContentRuntimeConfig, sourceValue: unknown, sessionIdValue: unknown): Promise<ContentSessionResolve> => {
   await config.loadStoreIfNeeded()
   const source = normalizeSource(sourceValue)
@@ -483,6 +497,7 @@ const snapshotFromRecords = (input: {
   format: ManagedAiSessionContentFormat
   sourceRevision: string
   total: number
+  matchTotal: number
   offset: number
   limit: number
   editable: boolean
@@ -497,6 +512,7 @@ const snapshotFromRecords = (input: {
   format: input.format,
   sourceRevision: input.sourceRevision,
   total: input.total,
+  matchTotal: input.matchTotal,
   offset: input.offset,
   limit: input.limit,
   editable: input.editable,
@@ -512,7 +528,8 @@ const readJsonlContentPage = async (
   session: ManagedAiSessionRecord,
   maxContentChars: number,
   offset: number,
-  limit: number
+  limit: number,
+  query: string
 ): Promise<ReadSessionContentPageResult | null> => {
   const path = findJsonlTranscriptPath(session, session.source, config)
   if (!path) return null
@@ -525,7 +542,8 @@ const readJsonlContentPage = async (
     ...(editState.reason ? { editBlockedReason: editState.reason } : {}),
     maxContentChars,
     offset,
-    limit
+    limit,
+    ...(query ? { query } : {})
   })
   return {
     format: 'jsonl' as const,
@@ -534,6 +552,7 @@ const readJsonlContentPage = async (
     editable: editState.editable,
     editBlockedReason: editState.reason,
     total: page.total,
+    matchTotal: page.matchTotal,
     records: page.records
   }
 }
@@ -623,17 +642,20 @@ const readContentPageForSession = async (
   session: ManagedAiSessionRecord,
   maxContentChars: number,
   offset: number,
-  limit: number
+  limit: number,
+  query: string
 ): Promise<ReadSessionContentPageResult> => {
   if (jsonlSources.has(session.source)) {
-    const jsonl = await readJsonlContentPage(config, session, maxContentChars, offset, limit)
+    const jsonl = await readJsonlContentPage(config, session, maxContentChars, offset, limit, query)
     if (jsonl) return jsonl
   }
-  const content = await readNonJsonlContentForSession(config, session, maxContentChars)
+  const content = await readNonJsonlContentForSession(config, session, maxContentCharsLimit)
+  const matchingRecords = content.records.filter((record) => recordMatchesQuery(record, query))
   return {
     ...content,
     total: content.records.length,
-    records: paginateRecords(content.records, offset, limit)
+    matchTotal: matchingRecords.length,
+    records: paginateRecords(matchingRecords, offset, limit).map((record) => truncateRecordContent(record, maxContentChars))
   }
 }
 
@@ -907,9 +929,10 @@ export const createAgentSessionContentRuntime = (config: AgentSessionContentRunt
     if ('error' in resolved) return resolved.error
     const limit = normalizePositiveInt(input?.limit, defaultLimit, maxLimit)
     const offset = normalizeOffset(input?.offset)
+    const query = cleanOptionalText(input?.query)?.toLowerCase() || ''
     const maxContentChars = normalizePositiveInt(input?.maxContentChars, defaultMaxContentChars, maxContentCharsLimit)
     try {
-      const content = await readContentPageForSession(config, resolved.session, maxContentChars, offset, limit)
+      const content = await readContentPageForSession(config, resolved.session, maxContentChars, offset, limit, query)
       return {
         ok: true,
         data: snapshotFromRecords({
@@ -917,6 +940,7 @@ export const createAgentSessionContentRuntime = (config: AgentSessionContentRunt
           format: content.format,
           sourceRevision: content.sourceRevision,
           total: content.total,
+          matchTotal: content.matchTotal,
           offset,
           limit,
           editable: content.editable,

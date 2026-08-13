@@ -1154,6 +1154,7 @@ export const listManagedAiSessionContent = async (input: ManagedAiSessionContent
             executionThread: result.data.format === 'jsonl' ? 'worker' : 'main',
             records: result.data.records.length,
             total: result.data.total,
+            matchTotal: result.data.matchTotal,
             offset: result.data.offset,
             limit: result.data.limit
           }
