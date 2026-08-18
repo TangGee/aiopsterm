@@ -54,7 +54,8 @@ describe('workspacePanelAssetInteractionRuntime', () => {
       applyLocalTerminalSession: vi.fn(),
       applySshTerminalSession: vi.fn(),
       registerSshSession: vi.fn(),
-      updateWorkspacePreferences: vi.fn(async () => true)
+      updateWorkspacePreferences: vi.fn(async () => true),
+      activatePanelSurface: vi.fn()
     } as any
     const openLocalTerminalLaunch = vi.fn(async () => ({ id: 'panel-2' }))
     const runtime = createWorkspacePanelAssetInteractionRuntime({
@@ -78,6 +79,7 @@ describe('workspacePanelAssetInteractionRuntime', () => {
     await runtime.connectAsset('opened-local')
 
     expect(openLocalTerminalLaunch).toHaveBeenCalled()
+    expect(workspace.activatePanelSurface).toHaveBeenCalledWith('panel-2', { cause: 'pointer' })
     expect(notice.value).toBe('ready')
     expect(workspace.selectedContexts).toEqual([{ id: 'opened-local', kind: 'hosts', label: '127.0.0.1', detail: '127.0.0.1' }])
     expect(workspace.updateWorkspacePreferences).not.toHaveBeenCalled()
@@ -111,7 +113,8 @@ describe('workspacePanelAssetInteractionRuntime', () => {
       applyLocalTerminalSession: vi.fn(),
       applySshTerminalSession: vi.fn(),
       registerSshSession: vi.fn(),
-      updateWorkspacePreferences: vi.fn(async () => true)
+      updateWorkspacePreferences: vi.fn(async () => true),
+      activatePanelSurface: vi.fn()
     } as any
     const openSshTerminalLaunch = vi.fn(async () => ({ id: 'panel-2' }))
     const runtime = createWorkspacePanelAssetInteractionRuntime({
@@ -141,6 +144,7 @@ describe('workspacePanelAssetInteractionRuntime', () => {
     await runtime.connectAsset('prod')
     expect(selectedAssetId.value).toBe('prod')
     expect(openSshTerminalLaunch).toHaveBeenCalled()
+    expect(workspace.activatePanelSurface).toHaveBeenCalledWith('panel-2', { cause: 'pointer' })
     expect(workspace.selectedContexts).toEqual([{
       id: 'prod',
       kind: 'hosts',
