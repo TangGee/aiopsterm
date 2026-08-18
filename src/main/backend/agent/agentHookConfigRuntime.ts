@@ -1,4 +1,5 @@
 import { createHash } from 'crypto'
+import { win32 as windowsPath } from 'path'
 import type { AgentHookInstallerSource } from '@shared/contracts/agentHooks'
 import { isWindowsPlatform, type PlatformRuntime } from '../app/platformRuntime'
 import { normalizeAgentIntegrationSource } from './agentIntegrationAdapters'
@@ -38,6 +39,8 @@ export class AgentHookInstallerError extends Error {
 }
 
 export const ownedMarker = 'aiopsterm-agent-hook-v1'
+export const windowsHookLauncherName = `${ownedMarker}.ps1`
+export const windowsHookCommandPrefix = 'powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand '
 const codexFeatureBegin = '# aiopsterm-codex-hooks-feature begin'
 const codexFeatureEnd = '# aiopsterm-codex-hooks-feature end'
 const codexFeaturePreviousPrefix = '# aiopsterm-codex-hooks-feature previous line: '
@@ -265,7 +268,7 @@ export const cleanText = (value: unknown) => (typeof value === 'string' ? value.
 const cleanOptionalString = (value: unknown) => cleanText(value) || undefined
 
 const shellSingleQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
-const windowsCommandDoubleQuote = (value: string) => `"${value.replace(/"/g, '\\"')}"`
+const powershellSingleQuote = (value: string) => `'${value.replace(/'/g, "''")}'`
 const defaultJsRuntimeExecutable = () => cleanText(process.env.APPIMAGE) || process.execPath
 
 export const normalizeSource = (value: unknown): AgentHookInstallerSource | null => {
@@ -289,16 +292,17 @@ export const agentHookCommandFor = (
   const normalizedSource = normalizeSource(source) || source
   const waitDecision = normalizedSource === 'claude-code' && (hookEvent === 'PermissionRequest' || hookEvent === 'AskUserQuestion')
   if (isWindowsPlatform(platform)) {
-    const dispatch = [
-      windowsCommandDoubleQuote(runtime),
-      windowsCommandDoubleQuote(script),
-      '--source',
-      windowsCommandDoubleQuote(normalizedSource),
-      '--event',
-      windowsCommandDoubleQuote(hookEvent),
-      ...(waitDecision ? ['--wait-decision', '--wait-timeout-ms', '120000'] : [])
+    const launcher = windowsPath.join(windowsPath.dirname(script), windowsHookLauncherName)
+    const invocation = [
+      `& ${powershellSingleQuote(launcher)}`,
+      `-Runtime ${powershellSingleQuote(runtime)}`,
+      `-Script ${powershellSingleQuote(script)}`,
+      `-Source ${powershellSingleQuote(normalizedSource)}`,
+      `-Event ${powershellSingleQuote(hookEvent)}`,
+      ...(waitDecision ? ['-WaitDecision'] : [])
     ].join(' ')
-    return `set ELECTRON_RUN_AS_NODE=1&& set AIOPSTERM_AGENT_HOOK_MARKER=${ownedMarker}&& ${dispatch} || echo {}`
+    const encoded = Buffer.from(`try {\n  ${invocation}\n} catch {\n  Write-Output '{}'\n}\nexit 0\n`, 'utf16le').toString('base64')
+    return `${windowsHookCommandPrefix}${encoded}`
   }
   const dispatch = [
     'ELECTRON_RUN_AS_NODE=1',
@@ -327,7 +331,17 @@ export const parseConfigJson = (raw: string, path: string): Record<string, unkno
 
 export const prettyJson = (value: Record<string, unknown>) => `${JSON.stringify(value, null, 2)}\n`
 
-export const isOwnedHookCommand = (command: unknown) => typeof command === 'string' && command.includes(ownedMarker)
+const decodedWindowsHookCommand = (command: string) => {
+  if (!command.startsWith(windowsHookCommandPrefix)) return ''
+  try {
+    return Buffer.from(command.slice(windowsHookCommandPrefix.length).trim(), 'base64').toString('utf16le')
+  } catch {
+    return ''
+  }
+}
+
+export const isOwnedHookCommand = (command: unknown) =>
+  typeof command === 'string' && (command.includes(ownedMarker) || decodedWindowsHookCommand(command).includes(ownedMarker))
 
 export const isOwnedFileHook = (content: unknown) => typeof content === 'string' && content.includes(fileHookMarker)
 

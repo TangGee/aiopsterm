@@ -25,7 +25,11 @@ export type CodexPtyProcess = {
 }
 
 export type CodexPtyRuntime = {
-  spawn(file: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: NodeJS.ProcessEnv }): CodexPtyProcess
+  spawn(
+    file: string,
+    args: string[],
+    options: { name: string; cols: number; rows: number; cwd: string; env: NodeJS.ProcessEnv; useConpty?: boolean }
+  ): CodexPtyProcess
 }
 
 export type CodexProcessRuntime = Pick<typeof import('child_process'), 'spawn'>
@@ -41,6 +45,7 @@ type CodexRuntimeConfig = {
   getResourcesPath?: () => string
   getConfig?: () => UserConfig
   getEnv?: () => NodeJS.ProcessEnv
+  getPlatform?: () => NodeJS.Platform
   loadPty?: () => CodexPtyRuntime | null
   processRuntime?: CodexProcessRuntime
   mkdir?: typeof mkdir
@@ -116,6 +121,7 @@ const getReadFile = () => runtimeConfig.readFile || readFile
 const getWriteFile = () => runtimeConfig.writeFile || writeFile
 const getPtyRuntime = () => (runtimeConfig.loadPty || defaultLoadPty)()
 const getProcessRuntime = () => runtimeConfig.processRuntime || { spawn }
+const getPlatform = () => runtimeConfig.getPlatform?.() || process.platform
 const execFileAsync = promisify(execFile)
 const getExecFile = (): CodexBinaryHealthCheckRunner => runtimeConfig.execFile || ((file, args, options) => execFileAsync(file, args, options))
 
@@ -137,6 +143,7 @@ export const configureCodexCliRuntime = (config: CodexRuntimeConfig = {}) => {
   runtimeConfig.getResourcesPath = config.getResourcesPath
   runtimeConfig.getConfig = config.getConfig
   runtimeConfig.getEnv = config.getEnv
+  runtimeConfig.getPlatform = config.getPlatform
   runtimeConfig.loadPty = config.loadPty
   runtimeConfig.processRuntime = config.processRuntime
   runtimeConfig.mkdir = config.mkdir
@@ -817,7 +824,8 @@ export const createCodexSession = async (
       cols,
       rows,
       cwd,
-      env
+      env,
+      ...(getPlatform() === 'win32' ? { useConpty: false } : {})
     })
     const record: CodexSessionRecord = {
       id,

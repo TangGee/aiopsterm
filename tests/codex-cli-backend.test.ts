@@ -200,6 +200,7 @@ describe('Codex CLI backend runtime', () => {
       getResourcesPath: () => '/resources',
       getConfig: () => createConfigWithModelProvider(),
       getEnv: () => ({ PATH: '/usr/bin', CODEX_HOME: '/should/not/reuse' }),
+      getPlatform: () => 'win32',
       getBridgeSocketPath: () => '/tmp/aiopsterm-user-data/codex-agent/bridge.sock',
       binaryPath: CODEX_PACKAGE_BINARY,
       binaryHealthCheck: false,
@@ -330,6 +331,7 @@ describe('Codex CLI backend runtime', () => {
           cwd: expectedCwd,
           cols: 120,
           rows: 40,
+          useConpty: false,
           env: expect.objectContaining({
             CODEX_HOME: join('/tmp/aiopsterm-user-data', 'codex-agent'),
             CODEX_MANAGED_PACKAGE_ROOT: CODEX_PACKAGE_ROOT,
@@ -540,6 +542,7 @@ describe('Codex CLI backend runtime', () => {
         COLORTERM: '',
         NO_COLOR: '1'
       }),
+      getPlatform: () => 'darwin',
       binaryPath: CODEX_PACKAGE_BINARY,
       binaryHealthCheck: false,
       existsSync: codexPackageExists,
@@ -566,6 +569,7 @@ describe('Codex CLI backend runtime', () => {
       })
     )
     expect((spawnCalls[0].options as { env: NodeJS.ProcessEnv }).env).not.toHaveProperty('NO_COLOR')
+    expect(spawnCalls[0].options).not.toHaveProperty('useConpty')
   })
 
   it('reports a nonzero Codex PTY exit as a structured lifecycle error', async () => {

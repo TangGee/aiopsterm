@@ -6,7 +6,7 @@ export type PlatformRuntime = NodeJS.Platform
 export const isWindowsPlatform = (platform: PlatformRuntime = process.platform) => platform === 'win32'
 
 export const defaultShellForPlatform = (env: NodeJS.ProcessEnv = process.env, platform: PlatformRuntime = process.platform) => {
-  if (isWindowsPlatform(platform)) return env.COMSPEC || 'powershell.exe'
+  if (isWindowsPlatform(platform)) return 'powershell.exe'
   if (platform === 'darwin') return env.SHELL || '/bin/zsh'
   return env.SHELL || '/bin/bash'
 }

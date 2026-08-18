@@ -75,7 +75,7 @@ const getConfig = (): UserConfig => mergeConfig(defaultConfig, store.get('config
 
 const getDefaultShell = () => {
   if (process.platform === 'win32') {
-    return process.env.COMSPEC || 'powershell.exe'
+    return 'powershell.exe'
   }
   return process.env.SHELL || '/bin/bash'
 }

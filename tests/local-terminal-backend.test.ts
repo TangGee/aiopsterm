@@ -32,7 +32,7 @@ type LocalTerminalBackend = {
     getJsRuntimeExecutable?: () => string
     getControlHelperScriptPath?: () => string
     getPlatform?: () => NodeJS.Platform
-    loadPty?: () => { spawn: (shell: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: NodeJS.ProcessEnv }) => MockPtyProcess } | null
+    loadPty?: () => { spawn: (shell: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: NodeJS.ProcessEnv; useConpty?: boolean }) => MockPtyProcess } | null
     processRuntime?: {
       spawn: (shell: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv; shell: false }) => MockChildProcess
     }
@@ -213,6 +213,7 @@ describe('local terminal backend runtime', () => {
         })
       })
     ])
+    expect(spawnCalls[0].options).not.toHaveProperty('useConpty')
     expect(pty.writes).toEqual(['uptime\n'])
     expect(pty.resizes).toEqual([{ cols: 132, rows: 44 }])
     expect(events.lifecycle.map((event) => event.stage)).toEqual(['starting', 'shell-ready', 'closed'])
@@ -527,6 +528,33 @@ describe('local terminal backend runtime', () => {
         shell: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
         args: [],
         options: expect.objectContaining({ cwd: 'C:\\Users\\ops', shell: false })
+      })
+    ])
+  })
+
+  it('uses WinPTY for Windows local terminals', async () => {
+    const backend = await loadBackend()
+    const pty = new MockPtyProcess()
+    const spawnCalls: Array<Record<string, unknown>> = []
+    backend.configureLocalTerminalBackendRuntime({
+      getDefaultShell: () => 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+      getDefaultCwd: () => 'C:\\Users\\ops',
+      getEnv: () => ({ PATH: 'C:\\Windows\\System32' }),
+      getPlatform: () => 'win32',
+      loadPty: () => ({
+        spawn: (shell, args, options) => {
+          spawnCalls.push({ shell, args, options })
+          return pty
+        }
+      })
+    })
+
+    backend.createLocalTerminalSession('local-winpty-1', { kind: 'local' }, createSink(createRecorder()))
+
+    expect(spawnCalls).toEqual([
+      expect.objectContaining({
+        args: [],
+        options: expect.objectContaining({ useConpty: false })
       })
     ])
   })

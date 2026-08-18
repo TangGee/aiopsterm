@@ -19,7 +19,11 @@ export type LocalPtyProcess = {
 }
 
 export type LocalPtyRuntime = {
-  spawn(shell: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: NodeJS.ProcessEnv }): LocalPtyProcess
+  spawn(
+    shell: string,
+    args: string[],
+    options: { name: string; cols: number; rows: number; cwd: string; env: NodeJS.ProcessEnv; useConpty?: boolean }
+  ): LocalPtyProcess
 }
 
 export type LocalProcessRuntime = Pick<typeof import('child_process'), 'spawn'>
@@ -438,7 +442,8 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
       cols: options.cols || 100,
       rows: options.rows || 30,
       cwd,
-      env
+      env,
+      ...(getPlatform() === 'win32' ? { useConpty: false } : {})
     })
     const processId = cleanProcessId(ptyProcess.pid)
     const session: LocalTerminalSession = {
