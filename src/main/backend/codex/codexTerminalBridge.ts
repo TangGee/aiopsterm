@@ -1,6 +1,6 @@
 import { createServer, type Server, type Socket } from 'net'
 import { existsSync, rmSync } from 'fs'
-import { dirname, join } from 'path'
+import { basename, dirname, join } from 'path'
 import { mkdir } from 'fs/promises'
 import type { BrowserWindow } from 'electron'
 import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
@@ -11,6 +11,7 @@ import type { TerminalBackgroundCommandOptions, TerminalBackgroundCommandResult 
 export type CodexTerminalBridgeSession = {
   id: string
   kind: 'local' | 'ssh'
+  shell?: string
   host?: string
   cwd?: string
   window: BrowserWindow
@@ -309,6 +310,10 @@ const lineText = (line: string) => stripTerminalControl(line).trim()
 
 const terminalLineText = (line: string) => stripTerminalControl(line).replace(/\n$/g, '')
 
+const wrappedCommandText = (pending: PendingCommand) => stripTerminalControl(pending.wrappedCommand).trim()
+
+const isShellContinuationLine = (line: string) => /^>\s*/.test(terminalLineText(line).trimStart())
+
 const isMarkerEndLine = (line: string, markerEndPrefix: string) => {
   const text = lineText(line)
   if (!text.startsWith(markerEndPrefix)) return false
@@ -324,6 +329,7 @@ const commandEchoFragments = (command: string) =>
 const hasShellPromptPrefix = (line: string) =>
   /(?:^|\s)[^\s@]+@[^:\s]+:.*(?:[$#%])\s+/.test(line) ||
   /^\[[^\]\r\n]+@[^\]\r\n]+\s+[^\]\r\n]*\][#$%]\s+/.test(line) ||
+  /^(?:PS\s+)?[a-zA-Z]:\\[^>\r\n]*>\s*/.test(line) ||
   /^>\s*/.test(line)
 
 const isReliableShellPromptBoundary = (line: string) => {
@@ -337,12 +343,22 @@ const isReliableShellPromptBoundary = (line: string) => {
 
 const isCodexBridgeWrapperLine = (line: string, pending: PendingCommand) => {
   const text = lineText(line)
-  return Boolean(text && (text.includes(pending.markerStart) || text.includes(pending.markerEnd) || text.includes('__aiopsterm_status')))
+  const wrapped = wrappedCommandText(pending)
+  return Boolean(text && (
+    text.includes(pending.markerStart) ||
+    text.includes(pending.markerEnd) ||
+    text.includes('__aiopsterm_status') ||
+    (wrapped && text.includes(wrapped))
+  ))
 }
 
 const codexBridgeInputEchoPromptPrefix = (line: string, pending: PendingCommand) => {
   const text = terminalLineText(line).trimEnd()
-  if (!text || !hasShellPromptPrefix(text)) return null
+  if (!text) return null
+  const wrapped = wrappedCommandText(pending)
+  const wrappedIndex = wrapped ? text.lastIndexOf(wrapped) : -1
+  if (wrappedIndex >= 0) return text.slice(0, wrappedIndex)
+  if (!hasShellPromptPrefix(text)) return null
   const markerIndex = text.indexOf(pending.markerStart)
   if (markerIndex >= 0) {
     const echoIndex = text.lastIndexOf('echo ', markerIndex)
@@ -392,7 +408,11 @@ export const filterCodexTerminalBridgeDisplayData = (sessionId: string, chunk: s
       if (lineText(next.line) === pending.markerStart) {
         pending.displayPhase = 'forward-until-end'
         if (pending.displayPromptPrefix) visible += showPendingCommandEcho(pending)
+        continue
       }
+      if (promptPrefix !== null || isCodexBridgeWrapperLine(next.line, pending) || isShellContinuationLine(next.line)) continue
+      visible += showPendingCommandEcho(pending)
+      visible += next.line
       continue
     }
     if (pending.displayPhase === 'forward-until-end') {
@@ -779,7 +799,7 @@ const parseGrepMatches = (output: string) =>
     })
     .filter((match): match is { path: string; line: number; text: string } => Boolean(match))
 
-const buildWrappedCommand = (command: string, markerStart: string, markerEnd: string) => {
+const buildPosixWrappedCommand = (command: string, markerStart: string, markerEnd: string) => {
   const isolatedCommand = `"\${SHELL:-sh}" -c ${shellQuote(command)}`
   return [
     'echo ',
@@ -791,6 +811,88 @@ const buildWrappedCommand = (command: string, markerStart: string, markerEnd: st
     ':$__aiopsterm_status',
     '\n'
   ].join('')
+}
+
+const powershellQuote = (value: string) => `'${value.replace(/'/g, "''")}'`
+
+const powershellEncodedCommand = (script: string) => Buffer.from(script, 'utf16le').toString('base64')
+
+const powershellChildScript = (command: string) => [
+  '$global:LASTEXITCODE = $null',
+  'try {',
+  '  & {',
+  command,
+  '  }',
+  '  $__aiopsterm_ok = $?',
+  '  $__aiopsterm_native = $global:LASTEXITCODE',
+  '  if ($null -ne $__aiopsterm_native) { exit [int]$__aiopsterm_native }',
+  '  if ($__aiopsterm_ok) { exit 0 }',
+  '  exit 1',
+  '} catch {',
+  '  Write-Error $_',
+  '  exit 1',
+  '}'
+].join('\r\n')
+
+const buildPowerShellWrappedCommand = (
+  shell: string,
+  command: string,
+  markerStart: string,
+  markerEnd: string
+) => {
+  const encoded = powershellEncodedCommand(powershellChildScript(command))
+  return [
+    'Write-Output ',
+    powershellQuote(markerStart),
+    '; & ',
+    powershellQuote(shell),
+    ' -NoLogo -NoProfile -NonInteractive -EncodedCommand ',
+    encoded,
+    '; $__aiopsterm_status=$LASTEXITCODE; Write-Output (',
+    powershellQuote(`${markerEnd}:`),
+    ' + $__aiopsterm_status)',
+    '\r'
+  ].join('')
+}
+
+const buildCmdWrappedCommand = (
+  shell: string,
+  command: string,
+  markerStart: string,
+  markerEnd: string
+) => {
+  const commandBase64 = Buffer.from(command, 'utf8').toString('base64')
+  const script = [
+    `Write-Output ${powershellQuote(markerStart)}`,
+    `$__aiopsterm_command=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(${powershellQuote(commandBase64)}))`,
+    `& ${powershellQuote(shell)} /d /s /c $__aiopsterm_command`,
+    '$__aiopsterm_status=$LASTEXITCODE',
+    'if ($null -eq $__aiopsterm_status) { $__aiopsterm_status=1 }',
+    `Write-Output (${powershellQuote(`${markerEnd}:`)} + $__aiopsterm_status)`,
+    'exit $__aiopsterm_status'
+  ].join('; ')
+  return `powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand ${powershellEncodedCommand(script)}\r`
+}
+
+const terminalShellName = (session: CodexTerminalBridgeSession) =>
+  basename(cleanText(session.shell).replace(/\\/g, '/')).toLowerCase()
+
+const buildWrappedCommand = (
+  session: CodexTerminalBridgeSession,
+  command: string,
+  markerStart: string,
+  markerEnd: string
+) => {
+  if (session.kind !== 'local') return buildPosixWrappedCommand(command, markerStart, markerEnd)
+  const shellName = terminalShellName(session)
+  const shell = cleanText(session.shell)
+  if (shellName.includes('powershell') || shellName === 'pwsh' || shellName === 'pwsh.exe') {
+    return buildPowerShellWrappedCommand(shell, command, markerStart, markerEnd)
+  }
+  if (shellName === 'cmd' || shellName === 'cmd.exe') {
+    return buildCmdWrappedCommand(shell, command, markerStart, markerEnd)
+  }
+  return buildPosixWrappedCommand(command, markerStart, markerEnd)
 }
 
 const commandMode = (value: unknown): 'wait' | 'return_immediately' | null => {
@@ -976,7 +1078,7 @@ const runTerminalCommand = async (params: Record<string, unknown>): Promise<Code
       }
     }
   }
-  const wrapped = buildWrappedCommand(command, markerStart, markerEnd)
+  const wrapped = buildWrappedCommand(session, command, markerStart, markerEnd)
 
   return new Promise<CodexBridgeResponse>((resolve, reject) => {
     if (pendingCommands.has(commandId)) {

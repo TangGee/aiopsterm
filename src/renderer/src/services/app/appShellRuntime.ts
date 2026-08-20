@@ -29,6 +29,7 @@ type AppShellWorkspace = Pick<
   | 'agentsLeftOpen'
   | 'agentsLeftWidth'
   | 'config'
+  | 'privacySettings'
   | 'handleDeepLink'
   | 'hydrateConfig'
   | 'installShortcutRuntime'
@@ -52,7 +53,7 @@ type AppShellWorkspace = Pick<
 type AppShellWindow = Pick<Window, 'addEventListener' | 'removeEventListener' | 'innerWidth'>
 
 type AppShellBridgeClients = {
-  appRuntime: Pick<typeof appRuntimeClient, 'consumeDeepLinks' | 'onDeepLink'>
+  appRuntime: Pick<typeof appRuntimeClient, 'consumeDeepLinks' | 'onDeepLink' | 'onProductTelemetryConsent'>
   terminal: Pick<
     typeof terminalClient,
     | 'cancelTerminalKeyboardInteractive'
@@ -92,6 +93,7 @@ export const createAppShellRuntime = (options: AppShellRuntimeOptions) => {
   let resizeStartWidth = 0
   let resizeQuickClosed = false
   let stopDeepLink: (() => void) | undefined
+  let stopProductTelemetryConsent: (() => void) | undefined
   let stopKeyboardInteractiveRequest: (() => void) | undefined
   let stopKeyboardInteractiveResult: (() => void) | undefined
   let stopAiAgentSessionEvent: (() => void) | undefined
@@ -326,6 +328,16 @@ export const createAppShellRuntime = (options: AppShellRuntimeOptions) => {
     stopDeepLink = options.clients.appRuntime.onDeepLink()?.((payload) => {
       applyDeepLinkPayload(payload)
     })
+    stopProductTelemetryConsent = options.clients.appRuntime.onProductTelemetryConsent()?.((telemetry) => {
+      if (telemetry !== 'enabled' && telemetry !== 'disabled') return
+      workspace.config.privacy = {
+        ...(workspace.config.privacy || { secretRedaction: 'disabled', dataSync: 'disabled' }),
+        telemetry,
+        telemetryConsentVersion: 1
+      }
+      workspace.privacySettings.telemetry = telemetry
+      workspace.privacySettings.telemetryConsentVersion = 1
+    })
     stopKeyboardInteractiveRequest = options.clients.terminal.onTerminalKeyboardInteractiveRequest()?.(handleTerminalMfaRequest)
     stopKeyboardInteractiveResult = options.clients.terminal.onTerminalKeyboardInteractiveResult()?.(handleTerminalMfaResult)
     stopAiAgentSessionEvent = options.clients.managedAi.onAiAgentSessionEvent()?.((event: AiAgentSessionEvent) => {
@@ -342,6 +354,7 @@ export const createAppShellRuntime = (options: AppShellRuntimeOptions) => {
 
   const dispose = () => {
     stopDeepLink?.()
+    stopProductTelemetryConsent?.()
     stopKeyboardInteractiveRequest?.()
     stopKeyboardInteractiveResult?.()
     stopAiAgentSessionEvent?.()

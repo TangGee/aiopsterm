@@ -113,10 +113,22 @@ export type SecurityConfigWriteResult = AiopsMutationResult<{
 }>
 
 export type PrivacyUserConfig = {
-  telemetry: 'enabled' | 'disabled'
+  telemetry: 'undecided' | 'enabled' | 'disabled'
+  telemetryConsentVersion?: 0 | 1
   secretRedaction: 'enabled' | 'disabled'
   dataSync: 'enabled' | 'disabled'
 }
+
+export type OfficialExternalLink =
+  | 'website'
+  | 'documentation'
+  | 'issues'
+  | 'discussions'
+  | 'discord'
+  | 'wechat'
+  | 'supportEmail'
+  | 'securityEmail'
+  | 'privacyPolicy'
 
 export type PrivacyRuntimeApplyInput = {
   previousPrivacy: PrivacyUserConfig

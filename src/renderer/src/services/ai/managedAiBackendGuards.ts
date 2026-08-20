@@ -258,6 +258,7 @@ export const isManagedAiSessionContentSnapshot = (value: unknown): value is Mana
   managedAiContentFormats.has(String(value.format)) &&
   isNonEmptyString(value.sourceRevision) &&
   typeof value.total === 'number' &&
+  typeof value.matchTotal === 'number' &&
   typeof value.offset === 'number' &&
   typeof value.limit === 'number' &&
   typeof value.editable === 'boolean' &&

@@ -126,6 +126,8 @@ const exactEnUS: Record<string, string> = {
   '企业': 'Enterprise',
   '反馈页面': 'Feedback',
   '日志目录': 'Log directory',
+  '尚未选择。明确启用前不会发送任何产品统计。': 'No choice has been made. No product statistics are sent until you explicitly enable them.',
+  '仅发送匿名安装和每日活跃信息，不包含终端内容、命令、路径或日志。': 'Only anonymous installation and daily activity information is sent. Terminal content, commands, paths, and logs are excluded.',
   '本地终端': 'Local terminal',
   '本地连接': 'Local connections',
   '新session': 'New session',

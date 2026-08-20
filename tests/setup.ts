@@ -6602,6 +6602,8 @@ Object.defineProperty(window, 'aiops', {
     consumeDeepLinks: vi.fn(async () => []),
     onDeepLink: vi.fn(() => () => undefined),
     openExternalUrl: vi.fn(async () => undefined),
+    openOfficialExternalLink: vi.fn(async () => undefined),
+    onProductTelemetryConsent: vi.fn(() => () => undefined),
     openSettingsDocumentation: vi.fn(async (input?: { page?: string; locale?: string }) => ({
       path: input && 'documentPath' in input ? `/tmp/aiopsterm/docs/${(input as { documentPath: string }).documentPath}` : `/tmp/aiopsterm/docs/${input?.locale || 'zh-CN'}/${input?.page || 'index'}.md`,
       title: input && 'documentPath' in input ? 'Usage Docs' : input?.page === 'general' ? (input.locale === 'en-US' ? 'General Settings' : '通用设置') : 'aiopsterm Docs',

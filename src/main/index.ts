@@ -1,4 +1,4 @@
-import { app, BrowserWindow, crashReporter, Notification, shell } from 'electron'
+import { app, BrowserWindow, crashReporter, dialog, Notification, shell, utilityProcess } from 'electron'
 import { join } from 'path'
 import Store from 'electron-store'
 import { refreshOrganizationAssets, saveAsset } from './backend/assets/assets'
@@ -16,6 +16,7 @@ import { shutdownExtensions } from './backend/extensions/extensions'
 import { createProductSessionRegistry } from './backend/agent/productSessionRegistry'
 import { configureRuntimeLog, logRuntimeEvent } from './backend/app/runtimeLog'
 import { configureCrashDiagnosticsRuntime, shouldEnableCrashDiagnostics } from './backend/app/crashDiagnosticsRuntime'
+import { createProductTelemetryRuntime } from './backend/app/productTelemetryRuntime'
 import {
   closeControlSocketServer,
   ensureControlSocketServer,
@@ -74,7 +75,7 @@ const getConfig = (): UserConfig => mergeConfig(defaultConfig, store.get('config
 
 const getDefaultShell = () => {
   if (process.platform === 'win32') {
-    return process.env.COMSPEC || 'powershell.exe'
+    return 'powershell.exe'
   }
   return process.env.SHELL || '/bin/bash'
 }
@@ -84,6 +85,58 @@ const getCustomBackgroundsPath = () => join(app.getPath('userData'), 'background
 const getCustomNotificationSoundsPath = () => join(app.getPath('userData'), 'notification-sounds')
 const getLogDirPath = () => join(app.getPath('userData'), 'logs')
 configureRuntimeLog({ getLogDir: getLogDirPath })
+
+const productTelemetryRuntime = createProductTelemetryRuntime({
+  stateFilePath: join(app.getPath('userData'), 'product-telemetry-state.json'),
+  endpoint: String(process.env.AIOPSTERM_TELEMETRY_ENDPOINT || 'https://api.aiopsterm.com/v1/telemetry/active').trim(),
+  appVersion: app.getVersion(),
+  platform: process.platform,
+  arch: process.arch,
+  locale: () => app.getLocale(),
+  releaseChannel: process.platform === 'win32' ? 'preview' : 'stable',
+  enabled: app.isPackaged || process.env.AIOPSTERM_ENABLE_DEV_TELEMETRY === '1',
+  getPrivacy: () => getConfig().privacy || defaultConfig.privacy!,
+  savePrivacy: (privacy) => {
+    store.set('config', mergeConfig(getConfig(), { privacy }))
+    for (const window of BrowserWindow.getAllWindows()) {
+      try {
+        if (!window.isDestroyed()) window.webContents.send('product-telemetry:consent-changed', privacy.telemetry)
+      } catch {
+        continue
+      }
+    }
+  },
+  requestConsent: async () => {
+    const chinese = app.getLocale().toLowerCase().startsWith('zh')
+    const messageBoxOptions = {
+      type: 'question',
+      title: chinese ? '匿名使用统计' : 'Anonymous usage statistics',
+      message: chinese ? '是否允许发送匿名安装和每日活跃信息？' : 'Allow anonymous installation and daily activity statistics?',
+      detail: chinese
+        ? '不会发送终端内容、命令、路径、主机名、账户或日志。你可以随时在隐私设置中关闭。'
+        : 'Terminal content, commands, paths, host names, accounts, and logs are never sent. You can disable this at any time in Privacy settings.',
+      buttons: chinese ? ['允许', '不发送'] : ['Allow', 'Do not send'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true
+    } as const
+    const result = mainWindow ? await dialog.showMessageBox(mainWindow, messageBoxOptions) : await dialog.showMessageBox(messageBoxOptions)
+    return result.response === 0 ? 'enabled' : 'disabled'
+  },
+  spawnWorker: () => {
+    const workerPath = app.isPackaged
+      ? join(process.resourcesPath, 'product-telemetry-worker.js')
+      : join(app.getAppPath(), 'resources', 'product-telemetry-worker.js')
+    const child = utilityProcess.fork(workerPath, [], { serviceName: 'aiopsterm-telemetry', stdio: 'ignore' })
+    return {
+      postMessage: (message) => child.postMessage(message),
+      onMessage: (listener) => child.on('message', (message) => listener(message as { ok: boolean; code: string })),
+      onExit: (listener) => child.on('exit', listener),
+      kill: () => child.kill()
+    }
+  },
+  logFailure: (code) => logRuntimeEvent('debug', 'product-telemetry.failed', { code })
+})
 const settingsExternalActionRuntime = () => ({
   userDataPath: app.getPath('userData'),
   appPath: app.getAppPath(),
@@ -354,7 +407,8 @@ app.whenReady().then(async () => {
     normalizeKeywordHighlightConfig,
     normalizeMcpConfigFile,
     broadcastAiAgentSessionEvent,
-    broadcastManagedAiSessionFocusRequest
+    broadcastManagedAiSessionFocusRequest,
+    onConfigSaved: () => productTelemetryRuntime.syncPrivacy()
   })
   await knowledgeBaseRuntime.ensureKnowledgeBaseDirectory().catch((error) => {
     logRuntimeEvent('warn', 'knowledge-base.bundled-docs-sync-failed', {
@@ -381,6 +435,7 @@ app.whenReady().then(async () => {
     })
   })
   appBootstrapRuntime.createWindow()
+  productTelemetryRuntime.start()
   appBootstrapRuntime.handleStartupDeepLink()
 
   app.on('activate', () => {
@@ -404,6 +459,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', (event) => {
+  productTelemetryRuntime.stop()
   terminalRuntime.killAllSessions()
   void shutdownExtensions()
   void closeProjectFilesRuntime()

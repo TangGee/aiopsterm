@@ -6,6 +6,7 @@ import type {
 } from '@shared/contracts/terminalSessions'
 import type { ClineAgentHostTarget } from '@shared/contracts/clineAgent'
 import type { AiAgentSessionSource } from '@shared/contracts/managedAiSessions'
+import type { ManagedAiSessionContentRecord, ManagedAiSessionContentSnapshot } from '@shared/contracts/managedAiSessionContent'
 import type { TerminalProgress } from '@/services/terminal/terminalOscRuntime'
 
 export type PanelDirection = 'right' | 'below'
@@ -34,6 +35,28 @@ export type TerminalSshSession = {
   createdAt?: number
 }
 
+export type ManagedAiSessionContentViewState = {
+  page: number
+  query: string
+  snapshot: ManagedAiSessionContentSnapshot | null
+  records: ManagedAiSessionContentRecord[]
+  drafts: Record<string, string>
+  originals: Record<string, string>
+  fullRecords: Record<string, ManagedAiSessionContentRecord>
+  expandedRecordIds: string[]
+}
+
+export const createManagedAiSessionContentViewState = (): ManagedAiSessionContentViewState => ({
+  page: 1,
+  query: '',
+  snapshot: null,
+  records: [],
+  drafts: {},
+  originals: {},
+  fullRecords: {},
+  expandedRecordIds: []
+})
+
 export type TerminalPanel = {
   id: string
   title: string
@@ -61,6 +84,7 @@ export type TerminalPanel = {
   managedAiSession?: {
     source: AiAgentSessionSource
     sessionId: string
+    contentView?: ManagedAiSessionContentViewState
   }
   projectFile?: {
     source: AiAgentSessionSource

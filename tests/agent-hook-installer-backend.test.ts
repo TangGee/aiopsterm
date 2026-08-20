@@ -33,6 +33,7 @@ type AgentHookInstallerBackend = {
     hookDefinitions: Array<{ source: AgentHookInstallerSource }>
     fileHookMarker: string
     ownedMarker: string
+    isOwnedHookCommand: (command: unknown) => boolean
     mergeOpenCodePluginRegistration: (existing: Record<string, unknown>, install: boolean) => Record<string, unknown>
     pluginFileContentFor: (definition: unknown) => string
     rovoDevYamlHooksBlock: (definition: unknown, scriptPath: string) => string
@@ -73,7 +74,7 @@ describe('agent hook installer backend', () => {
     expect(stopGroups).toHaveLength(2)
     expect(stopGroups[0].hooks[0].command).toBe('python3 /home/user/custom-stop.py')
     expect(stopGroups[1].hooks[0].command).toBe(agentHookCommandFor('codex', 'Stop', '/opt/aiopsterm/aiopsterm-agent-hook.js'))
-    expect(JSON.stringify(result.config)).toContain(__testing.ownedMarker)
+    expect(__testing.isOwnedHookCommand(stopGroups[1].hooks[0].command)).toBe(true)
   })
 
   it('uninstalls only aiopsterm-owned hook entries', async () => {
@@ -275,7 +276,7 @@ describe('agent hook installer backend', () => {
     const yaml = __testing.rovoDevYamlHooksBlock(rovodev, '/opt/aiopsterm/aiopsterm-agent-hook.js')
     expect(yaml).toContain('aiopsterm-rovodev-hooks begin')
     expect(yaml).toContain('SessionStart')
-    expect(yaml).toContain('AIOPSTERM_AGENT_HOOK_MARKER=aiopsterm-agent-hook-v1')
+    expect(yaml).toContain(process.platform === 'win32' ? '-EncodedCommand' : 'AIOPSTERM_AGENT_HOOK_MARKER=aiopsterm-agent-hook-v1')
   })
 
   it('registers and unregisters the OpenCode plugin without removing user plugins', async () => {
@@ -361,9 +362,9 @@ describe('agent hook installer backend', () => {
       getJsRuntimeExecutable: () => 'C:\\Program Files\\aiopsterm\\aiopsterm.exe'
     })
     try {
-      expect(backend.agentHookCommandFor('codex', 'Stop', 'C:\\Program Files\\aiopsterm\\aiopsterm-agent-hook.js')).toBe(
-        'set ELECTRON_RUN_AS_NODE=1&& set AIOPSTERM_AGENT_HOOK_MARKER=aiopsterm-agent-hook-v1&& "C:\\Program Files\\aiopsterm\\aiopsterm.exe" "C:\\Program Files\\aiopsterm\\aiopsterm-agent-hook.js" --source "codex" --event "Stop" || echo {}'
-      )
+      const command = backend.agentHookCommandFor('codex', 'Stop', 'C:\\Program Files\\aiopsterm\\aiopsterm-agent-hook.js')
+      expect(command).toMatch(/^powershell\.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand [A-Za-z0-9+/=]+$/)
+      expect(Buffer.from(command.split(' ').at(-1)!, 'base64').toString('utf16le')).toContain("-Source 'codex' -Event 'Stop'")
     } finally {
       backend.configureAgentHookInstallerRuntime()
     }

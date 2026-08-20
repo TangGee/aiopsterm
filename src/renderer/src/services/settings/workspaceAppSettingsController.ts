@@ -643,6 +643,7 @@ export const createWorkspaceAppSettingsController = (state: WorkspaceAppSettings
           setSettingsNotice('反馈报告生成失败')
           return false
         }
+        await window.aiops.openOfficialExternalLink('issues')
         setSettingsNotice('反馈报告已打开')
         return true
       }

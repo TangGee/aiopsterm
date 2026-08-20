@@ -143,6 +143,7 @@ describe('Codex terminal bridge runtime', () => {
       bridge.registerCodexTerminalBridgeSession({
         id: 'terminal-1',
         kind: 'ssh',
+        shell: 'ssh',
         host: '10.0.0.8',
         cwd: '/root',
         window: {} as never,
@@ -224,6 +225,97 @@ describe('Codex terminal bridge runtime', () => {
       bridge.closeCodexTerminalBridgeServer()
       await rm(root, { recursive: true, force: true })
     }
+  })
+
+  it('uses a PowerShell wrapper for local PowerShell sessions and exposes pre-marker errors', async () => {
+    const bridge = await loadBridge()
+    const writes: string[] = []
+    bridge.registerCodexTerminalBridgeSession({
+      id: 'terminal-powershell',
+      kind: 'local',
+      shell: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+      cwd: 'C:\\Users\\operator',
+      window: {} as never,
+      write: (data: string | Buffer) => writes.push(String(data))
+    })
+
+    const responsePromise = bridge.callCodexTerminalBridgeTool('run_command', {
+      sessionId: 'terminal-powershell',
+      commandId: 'cmd-powershell',
+      command: 'Write-Output "probe-ok"',
+      timeoutMs: 5000,
+      mode: 'wait',
+      execution: 'terminal'
+    })
+    await waitFor(() => writes.length === 1)
+
+    expect(writes[0]).toContain("Write-Output '__AIOPSTERM_CODEX_START_cmd-powershell__'")
+    expect(writes[0]).toContain("& 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'")
+    expect(writes[0]).not.toContain('${SHELL:-sh}')
+    const encoded = writes[0].match(/-EncodedCommand ([a-zA-Z0-9+/=]+)/)?.[1] || ''
+    expect(Buffer.from(encoded, 'base64').toString('utf16le')).toContain('Write-Output "probe-ok"')
+
+    expect(
+      bridge.filterCodexTerminalBridgeDisplayData(
+        'terminal-powershell',
+        `PS C:\\Users\\operator> ${writes[0]}\n`
+      )
+    ).toBe('')
+    expect(
+      bridge.filterCodexTerminalBridgeDisplayData(
+        'terminal-powershell',
+        'At line:1 char:42\r\n'
+      )
+    ).toBe('PS C:\\Users\\operator> Write-Output "probe-ok"\r\nAt line:1 char:42\r\n')
+
+    bridge.appendCodexTerminalBridgeData(
+      'terminal-powershell',
+      '__AIOPSTERM_CODEX_START_cmd-powershell__\r\nprobe-ok\r\n__AIOPSTERM_CODEX_END_cmd-powershell__:0\r\n'
+    )
+    await expect(responsePromise).resolves.toMatchObject({
+      ok: true,
+      data: { output: 'probe-ok', exitCode: 0 }
+    })
+  })
+
+  it('uses a CMD-compatible encoded wrapper for local CMD sessions', async () => {
+    const bridge = await loadBridge()
+    const writes: string[] = []
+    bridge.registerCodexTerminalBridgeSession({
+      id: 'terminal-cmd',
+      kind: 'local',
+      shell: 'C:\\Windows\\System32\\cmd.exe',
+      cwd: 'C:\\Users\\operator',
+      window: {} as never,
+      write: (data: string | Buffer) => writes.push(String(data))
+    })
+
+    const responsePromise = bridge.callCodexTerminalBridgeTool('run_command', {
+      sessionId: 'terminal-cmd',
+      commandId: 'cmd-cmd',
+      command: 'echo probe-ok',
+      timeoutMs: 5000,
+      mode: 'wait',
+      execution: 'terminal'
+    })
+    await waitFor(() => writes.length === 1)
+
+    expect(writes[0]).toMatch(/^powershell\.exe .* -EncodedCommand /)
+    expect(writes[0]).not.toContain('${SHELL:-sh}')
+    const encoded = writes[0].match(/-EncodedCommand ([a-zA-Z0-9+/=]+)/)?.[1] || ''
+    const wrapperScript = Buffer.from(encoded, 'base64').toString('utf16le')
+    expect(wrapperScript).toContain("Write-Output '__AIOPSTERM_CODEX_START_cmd-cmd__'")
+    expect(wrapperScript).toContain("& 'C:\\Windows\\System32\\cmd.exe' /d /s /c")
+    expect(wrapperScript).toContain("Write-Output ('__AIOPSTERM_CODEX_END_cmd-cmd__:' + $__aiopsterm_status)")
+
+    bridge.appendCodexTerminalBridgeData(
+      'terminal-cmd',
+      '__AIOPSTERM_CODEX_START_cmd-cmd__\r\nprobe-ok\r\n__AIOPSTERM_CODEX_END_cmd-cmd__:0\r\n'
+    )
+    await expect(responsePromise).resolves.toMatchObject({
+      ok: true,
+      data: { output: 'probe-ok', exitCode: 0 }
+    })
   })
 
   it('interrupts and resolves an in-flight command when its owner aborts', async () => {

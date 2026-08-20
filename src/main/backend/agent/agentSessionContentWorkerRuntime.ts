@@ -14,6 +14,7 @@ type JsonlWorkerReadInput = {
 export type JsonlWorkerPageInput = JsonlWorkerReadInput & {
   offset: number
   limit: number
+  query?: string
 }
 
 export type JsonlWorkerRecordInput = JsonlWorkerReadInput & {
@@ -38,6 +39,7 @@ type JsonlWorkerDiagnostics = {
 export type JsonlWorkerPageOutcome = JsonlWorkerDiagnostics & {
   sourceRevision: string
   total: number
+  matchTotal: number
   records: ManagedAiSessionContentRecord[]
 }
 
@@ -255,6 +257,8 @@ const selectJsonlRecords = (request, lines, sourceRevision) => {
   const records = []
   let selectedRecord = null
   let total = 0
+  let matchTotal = 0
+  const query = cleanText(request.query).toLowerCase()
   const toolNamesByCallId = request.source === 'codex' ? collectCodexToolNamesByCallId(lines) : undefined
   lines.forEach((line) => {
     if (!line.parsed) return
@@ -263,9 +267,16 @@ const selectJsonlRecords = (request, lines, sourceRevision) => {
       const ordinal = total
       total += 1
       const recordId = jsonlRecordId(line.lineNumber, item.pointer)
+      const locationLabel = 'line ' + line.lineNumber + ' ' + item.pointer
+      const role = inferJsonRole(line.parsed, item.pointer, item.value)
+      const messageType = jsonMessageType(line.parsed, toolNamesByCallId)
+      const matchesQuery = request.kind === 'record' || !query || [role, messageType, locationLabel, item.value].some((value) => String(value).toLowerCase().includes(query))
+      if (!matchesQuery) return
+      const matchOrdinal = matchTotal
+      matchTotal += 1
       const selected = request.kind === 'record'
         ? recordId === request.recordId
-        : ordinal >= request.offset && ordinal < request.offset + request.limit
+        : matchOrdinal >= request.offset && matchOrdinal < request.offset + request.limit
       if (!selected) return
       const truncated = truncateContent(item.value, request.maxContentChars)
       const record = {
@@ -274,9 +285,9 @@ const selectJsonlRecords = (request, lines, sourceRevision) => {
         format: 'jsonl',
         recordId,
         ordinal,
-        locationLabel: 'line ' + line.lineNumber + ' ' + item.pointer,
-        role: inferJsonRole(line.parsed, item.pointer, item.value),
-        messageType: jsonMessageType(line.parsed, toolNamesByCallId),
+        locationLabel,
+        role,
+        messageType,
         content: truncated.content,
         contentTruncated: truncated.contentTruncated,
         fullLength: truncated.fullLength,
@@ -288,7 +299,7 @@ const selectJsonlRecords = (request, lines, sourceRevision) => {
       else records.push(record)
     })
   })
-  return { total, records, selectedRecord }
+  return { total, matchTotal, records, selectedRecord }
 }
 const executeRead = async (request) => {
   const sourceRevision = await revisionForPath(request.path)
@@ -302,6 +313,7 @@ const executeRead = async (request) => {
     ...diagnostics,
     sourceRevision,
     total: selected.total,
+    matchTotal: selected.matchTotal,
     records: selected.records
   }
 }

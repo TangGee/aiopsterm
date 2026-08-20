@@ -839,7 +839,8 @@ describe('workspace store', () => {
         kind: 'managed-ai-session',
         managedAiSession: {
           source: 'claude-code',
-          sessionId: 'claude-history-1'
+          sessionId: 'claude-history-1',
+          contentView: expect.objectContaining({ page: 1, query: '', snapshot: null })
         }
       })
     )
@@ -3731,7 +3732,8 @@ describe('workspace store', () => {
         },
         keywordHighlight: defaultKeywordHighlight,
         privacy: {
-          telemetry: 'enabled',
+          telemetry: 'undecided',
+          telemetryConsentVersion: 0,
           secretRedaction: 'disabled',
           dataSync: 'disabled'
         },
@@ -3817,7 +3819,8 @@ describe('workspace store', () => {
         },
         keywordHighlight: defaultKeywordHighlight,
         privacy: {
-          telemetry: 'enabled',
+          telemetry: 'undecided',
+          telemetryConsentVersion: 0,
           secretRedaction: 'disabled',
           dataSync: 'disabled'
         },
@@ -5821,6 +5824,7 @@ describe('workspace store', () => {
 
     expect(store.privacySettings).toEqual({
       telemetry: 'disabled',
+      telemetryConsentVersion: 1,
       secretRedaction: 'enabled',
       dataSync: 'disabled',
       dataSyncRuntime: 'disabled',
@@ -5838,6 +5842,7 @@ describe('workspace store', () => {
       expect.objectContaining({
         privacy: {
           telemetry: 'disabled',
+          telemetryConsentVersion: 1,
           secretRedaction: 'enabled',
           dataSync: 'disabled'
         }
@@ -12329,7 +12334,8 @@ describe('workspace store', () => {
       await expect(store.updatePrivacySettings({ telemetry: 'disabled' })).resolves.toBe(false)
       expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({
         privacy: {
-          telemetry: 'enabled',
+          telemetry: 'undecided',
+          telemetryConsentVersion: 0,
           secretRedaction: 'disabled',
           dataSync: 'disabled'
         }
@@ -12341,12 +12347,14 @@ describe('workspace store', () => {
       await expect(store.updatePrivacySettings({ dataSync: 'enabled' })).resolves.toBe(true)
       expect(window.aiops.applyPrivacyRuntimeSettings).toHaveBeenLastCalledWith({
         previousPrivacy: {
-          telemetry: 'enabled',
+          telemetry: 'undecided',
+          telemetryConsentVersion: 0,
           secretRedaction: 'disabled',
           dataSync: 'disabled'
         },
         nextPrivacy: {
-          telemetry: 'enabled',
+          telemetry: 'undecided',
+          telemetryConsentVersion: 0,
           secretRedaction: 'disabled',
           dataSync: 'enabled'
         }
@@ -12391,12 +12399,14 @@ describe('workspace store', () => {
       expect(store.settingsNotice).toBe('隐私设置已保存')
       expect(window.aiops.applyPrivacyRuntimeSettings).toHaveBeenLastCalledWith({
         previousPrivacy: {
-          telemetry: 'enabled',
+          telemetry: 'undecided',
+          telemetryConsentVersion: 0,
           secretRedaction: 'disabled',
           dataSync: 'disabled'
         },
         nextPrivacy: {
           telemetry: 'disabled',
+          telemetryConsentVersion: 1,
           secretRedaction: 'enabled',
           dataSync: 'enabled'
         }
@@ -12406,6 +12416,7 @@ describe('workspace store', () => {
       expect(store.privacySettings.dataSync).toBe('enabled')
       expect(store.config.privacy).toEqual({
         telemetry: 'disabled',
+        telemetryConsentVersion: 1,
         secretRedaction: 'enabled',
         dataSync: 'enabled'
       })
@@ -12424,7 +12435,8 @@ describe('workspace store', () => {
     await expect(store.updatePrivacySettings({ secretRedaction: 'enabled' })).resolves.toBe(true)
     expect(window.aiops.saveConfig).toHaveBeenCalledWith({
       privacy: {
-        telemetry: 'enabled',
+        telemetry: 'undecided',
+        telemetryConsentVersion: 0,
         secretRedaction: 'enabled',
         dataSync: 'disabled'
       }
@@ -12434,12 +12446,14 @@ describe('workspace store', () => {
     await expect(store.updatePrivacySettings({ telemetry: 'disabled' })).resolves.toBe(true)
     expect(window.aiops.applyPrivacyRuntimeSettings).toHaveBeenCalledWith({
       previousPrivacy: {
-        telemetry: 'enabled',
+        telemetry: 'undecided',
+        telemetryConsentVersion: 0,
         secretRedaction: 'enabled',
         dataSync: 'disabled'
       },
       nextPrivacy: {
         telemetry: 'disabled',
+        telemetryConsentVersion: 1,
         secretRedaction: 'enabled',
         dataSync: 'disabled'
       }
@@ -13497,6 +13511,7 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       expect.objectContaining({
         privacy: {
           telemetry: 'disabled',
+          telemetryConsentVersion: 1,
           secretRedaction: 'enabled',
           dataSync: 'disabled'
         }

@@ -45,7 +45,8 @@ import {
   uninstallCodexHooksFeature,
   uninstallDeepseekHarnessPatch,
   uninstallKimiCodeHooks,
-  uninstallRovoDevYaml
+  uninstallRovoDevYaml,
+  windowsHookCommandPrefix
 } from './agentHookConfigRuntime'
 import { executableCandidateNames, type PlatformRuntime } from '../app/platformRuntime'
 
@@ -248,8 +249,11 @@ const statusForDefinition = async (definition: AgentHookDefinition): Promise<Age
       const config = parseConfigJson(configRaw, configPath)
       status.installed = configHasOwnedHooks(config)
     }
-    if (status.installed && !configRaw.includes('ELECTRON_RUN_AS_NODE')) {
+    if (status.installed && !configRaw.includes('ELECTRON_RUN_AS_NODE') && !configRaw.includes(windowsHookCommandPrefix)) {
       status.warnings.push('aiopsterm hook is installed with a legacy JavaScript runtime command; reinstall this hook to use the packaged aiopsterm runtime')
+    }
+    if (status.installed && !definition.fileTemplate && getPlatform() === 'win32' && !configRaw.includes(windowsHookCommandPrefix)) {
+      status.warnings.push('aiopsterm hook uses a shell-specific Windows command; reinstall this hook for CMD and PowerShell compatibility')
     }
   } catch (error) {
     status.error = error instanceof Error ? error.message : String(error)

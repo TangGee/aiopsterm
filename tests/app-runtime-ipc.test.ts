@@ -97,6 +97,7 @@ describe('app runtime IPC registrar', () => {
       'app:handle-protocol-url',
       'app:consume-deep-links',
       'app:open-external-url',
+      'app:open-official-link',
       'settings:open-documentation',
       'settings:submit-feedback-report',
       'app:open-log-dir',
@@ -117,6 +118,8 @@ describe('app runtime IPC registrar', () => {
     expect(await handlers.get('app:consume-deep-links')?.({})).toEqual([
       { url: 'aiopsterm://open/files', action: 'open', target: 'files', module: 'files', acceptedAt: 1780490000000 }
     ])
+    await handlers.get('app:open-official-link')?.({}, 'issues')
+    expect(input.openExternal).toHaveBeenCalledWith('https://github.com/tanggee/aiopsterm/issues/new/choose')
 
     expect(await handlers.get('config:get')?.({})).toEqual({ theme: 'dark' })
     expect(await handlers.get('config:save')?.({}, { theme: 'light' })).toEqual({ theme: 'light' })

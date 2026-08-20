@@ -1,3 +1,7 @@
+import { spawnSync } from 'node:child_process'
+import { copyFile, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AgentHookInstallerSource } from '../src/shared/contracts/agentHooks'
 
@@ -13,6 +17,7 @@ type AgentHookConfigRuntimeModule = {
   hookDefinitions: AgentHookDefinition[]
   installCodexHookTrust(content: string, configPath: string, hooks: Record<string, unknown>): string
   installCodexHooksFeature(content: string): string
+  isOwnedHookCommand(command: unknown): boolean
   mergeAgentHookJson(
     existing: Record<string, unknown>,
     definition: AgentHookDefinition,
@@ -37,6 +42,8 @@ const definition = async (source: AgentHookInstallerSource) => {
   return runtime.hookDefinitions.find((item) => item.source === source)!
 }
 
+const windowsIt = process.platform === 'win32' ? it : it.skip
+
 describe('agentHookConfigRuntime', () => {
   it('normalizes source aliases and renders fail-open hook commands', async () => {
     const runtime = await loadRuntime()
@@ -54,9 +61,70 @@ describe('agentHookConfigRuntime', () => {
     const runtime = await loadRuntime()
     const jsRuntime = 'C:\\Program Files\\aiopsterm\\aiopsterm.exe'
 
-    expect(runtime.agentHookCommandFor('claude-code', 'AskUserQuestion', 'C:\\Program Files\\aiopsterm\\aiopsterm-agent-hook.js', 'win32', jsRuntime)).toBe(
-      'set ELECTRON_RUN_AS_NODE=1&& set AIOPSTERM_AGENT_HOOK_MARKER=aiopsterm-agent-hook-v1&& "C:\\Program Files\\aiopsterm\\aiopsterm.exe" "C:\\Program Files\\aiopsterm\\aiopsterm-agent-hook.js" --source "claude-code" --event "AskUserQuestion" --wait-decision --wait-timeout-ms 120000 || echo {}'
-    )
+    const command = runtime.agentHookCommandFor('claude-code', 'AskUserQuestion', 'C:\\Program Files\\aiopsterm\\aiopsterm-agent-hook.js', 'win32', jsRuntime)
+    expect(command).toMatch(/^powershell\.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand [A-Za-z0-9+/=]+$/)
+    const decoded = Buffer.from(command.split(' ').at(-1)!, 'base64').toString('utf16le')
+    expect(decoded).toContain("& 'C:\\Program Files\\aiopsterm\\aiopsterm-agent-hook-v1.ps1'")
+    expect(decoded).toContain("-Runtime 'C:\\Program Files\\aiopsterm\\aiopsterm.exe'")
+    expect(decoded).toContain("-Source 'claude-code' -Event 'AskUserQuestion' -WaitDecision")
+  })
+
+  it('uses the shell-neutral Windows launcher for every command-based agent', async () => {
+    const runtime = await loadRuntime()
+    for (const agent of runtime.hookDefinitions.filter((item) => item.events.length)) {
+      for (const event of agent.events) {
+        const command = runtime.agentHookCommandFor(agent.source, event.hookEvent, 'C:\\Users\\Ops User\\agent-hooks\\aiopsterm-agent-hook.js', 'win32', 'C:\\Program Files\\aiopsterm\\aiopsterm.exe')
+        expect(command).toMatch(/^powershell\.exe .* -EncodedCommand [A-Za-z0-9+/=]+$/)
+        expect(runtime.isOwnedHookCommand(command)).toBe(true)
+        const decoded = Buffer.from(command.split(' ').at(-1)!, 'base64').toString('utf16le')
+        expect(decoded).toContain(`-Source '${agent.source}' -Event '${event.hookEvent}'`)
+      }
+    }
+  })
+
+  windowsIt('runs the same Windows hook command through CMD and PowerShell', async () => {
+    const runtime = await loadRuntime()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-hook-shells-'))
+    try {
+      const scriptPath = join(root, 'aiopsterm-agent-hook.js')
+      const launcherPath = join(root, 'aiopsterm-agent-hook-v1.ps1')
+      await copyFile(join(process.cwd(), 'resources', 'aiopsterm-agent-hook-v1.ps1'), launcherPath)
+      await writeFile(
+        scriptPath,
+        `const chunks = []
+process.stdin.on('data', (chunk) => chunks.push(chunk))
+process.stdin.on('end', () => {
+  const payload = JSON.parse(Buffer.concat(chunks).toString('utf8').replace(/^\uFEFF/, ''))
+  const valid = process.env.ELECTRON_RUN_AS_NODE === '1' &&
+    process.env.AIOPSTERM_AGENT_HOOK_MARKER === 'aiopsterm-agent-hook-v1' &&
+    process.argv.includes('codex') && process.argv.includes('SessionStart') &&
+    payload.session_id === 'shell-smoke' &&
+    payload.last_assistant_message === 'Windows 中文消息以中文句号结束。'
+  process.stdout.write(JSON.stringify({ received: valid }))
+  process.exitCode = valid ? 0 : 7
+})
+`,
+        'utf-8'
+      )
+      const command = runtime.agentHookCommandFor('codex', 'SessionStart', scriptPath, 'win32', process.execPath)
+      const input = JSON.stringify({ session_id: 'shell-smoke', last_assistant_message: 'Windows 中文消息以中文句号结束。' })
+      const invocations = [
+        { shell: process.env.COMSPEC || 'cmd.exe', args: ['/D', '/S', '/C', command] },
+        { shell: 'powershell.exe', args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command] }
+      ]
+
+      for (const invocation of invocations) {
+        const result = spawnSync(invocation.shell, invocation.args, {
+          input,
+          encoding: 'utf-8',
+          env: { ...process.env, AIOPSTERM_AGENT_HOOK_DEBUG: '1' }
+        })
+        expect(result.status, result.stderr).toBe(0)
+        expect(result.stdout, `${invocation.shell}: ${result.stderr}`).toContain('{"received":true}')
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('merges grouped, flat, and Kiro JSON hooks while preserving user entries', async () => {
@@ -77,7 +145,7 @@ describe('agentHookConfigRuntime', () => {
       command: runtime.agentHookCommandFor('codex', 'AskUserQuestion', '/opt/aiopsterm/hook.js'),
       timeout: 5
     })
-    expect(JSON.stringify(grouped.config)).toContain('aiopsterm-agent-hook-v1')
+    expect(runtime.isOwnedHookCommand((grouped.config.hooks as any).Stop[1].hooks[0].command)).toBe(true)
 
     const flat = runtime.mergeAgentHookJson({ version: 1 }, cursor, '/opt/aiopsterm/hook.js', true)
     expect((flat.config.hooks as any).beforeSubmitPrompt[0]).toEqual({
@@ -136,7 +204,7 @@ describe('agentHookConfigRuntime', () => {
     const yaml = runtime.rovoDevYamlHooksBlock(rovodev, '/opt/aiopsterm/hook.js')
     expect(yaml).toContain('aiopsterm-rovodev-hooks begin')
     expect(yaml).toContain('SessionStart')
-    expect(yaml).toContain('AIOPSTERM_AGENT_HOOK_MARKER=aiopsterm-agent-hook-v1')
+    expect(yaml).toContain(process.platform === 'win32' ? '-EncodedCommand' : 'AIOPSTERM_AGENT_HOOK_MARKER=aiopsterm-agent-hook-v1')
 
     expect(runtime.mergeOpenCodePluginRegistration({ plugin: ['user-plugin'] }, true).plugin).toEqual(['user-plugin', './plugins/aiopsterm-session.js'])
     expect(runtime.mergeOpenCodePluginRegistration({ plugin: ['user-plugin', './plugins/aiopsterm-session.js'] }, false).plugin).toEqual(['user-plugin'])

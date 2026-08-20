@@ -1158,6 +1158,7 @@ export const listManagedAiSessionContent = async (input: ManagedAiSessionContent
             executionThread: result.data.format === 'jsonl' ? 'worker' : 'main',
             records: result.data.records.length,
             total: result.data.total,
+            matchTotal: result.data.matchTotal,
             offset: result.data.offset,
             limit: result.data.limit
           }
@@ -1651,14 +1652,23 @@ export const agentHookScriptResourcePathFor = (appPath: string, resourcesPath: s
   return candidates.find((candidate) => existsSync(candidate)) || candidates[0]
 }
 
+const agentHookLauncherResourcePathFor = (appPath: string, resourcesPath: string) => {
+  const launcherName = 'aiopsterm-agent-hook-v1.ps1'
+  const candidates = [join(resourcesPath, launcherName), join(resourcesPath, 'resources', launcherName), join(appPath, 'resources', launcherName)]
+  return candidates.find((candidate) => existsSync(candidate)) || candidates[0]
+}
+
 export const agentHookScriptPathFor = (appPath: string, resourcesPath: string, userDataPath?: string) => {
   const source = agentHookScriptResourcePathFor(appPath, resourcesPath)
+  const launcherSource = agentHookLauncherResourcePathFor(appPath, resourcesPath)
   const userData = cleanText(userDataPath)
   if (!userData) return source
   const stablePath = join(userData, 'agent-hooks', 'aiopsterm-agent-hook.js')
+  const stableLauncherPath = join(userData, 'agent-hooks', 'aiopsterm-agent-hook-v1.ps1')
   try {
     mkdirSync(dirname(stablePath), { recursive: true })
     copyFileSync(source, stablePath)
+    if (process.platform === 'win32') copyFileSync(launcherSource, stableLauncherPath)
     return stablePath
   } catch {
     return source

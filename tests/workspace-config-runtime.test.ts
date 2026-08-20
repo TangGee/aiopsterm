@@ -312,6 +312,7 @@ describe('workspaceConfigRuntime', () => {
   it('normalizes privacy, AI preferences, and runtime snapshot guards', () => {
     expect(normalizePrivacyConfig({ telemetry: 'off' as any, secretRedaction: 'enabled', dataSync: 'enabled' }).normalized).toEqual({
       telemetry: defaultPrivacySettings.telemetry,
+      telemetryConsentVersion: 0,
       secretRedaction: 'enabled',
       dataSync: 'enabled'
     })

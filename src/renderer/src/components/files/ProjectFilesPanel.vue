@@ -519,6 +519,14 @@ const loadDirectory = async (relativeDirectory: string, append = false) => {
   }
 }
 
+// File change notifications update the recent list, but the tree is backed by
+// separately loaded directory pages. Refresh those pages in place so new,
+// renamed, and deleted entries become visible without collapsing the tree.
+const refreshLoadedDirectories = async () => {
+  const loadedDirectories = [...directories.keys()]
+  await Promise.all(loadedDirectories.map((directory) => loadDirectory(directory)))
+}
+
 const activateTreeEntry = (entry: ProjectDirectoryEntry) => {
   if (entry.type === 'file') {
     openFile(entry.relativePath)
@@ -706,8 +714,14 @@ watch(selectedKey, () => void refreshContext(), { immediate: true })
 
 const onChanged = projectFilesClient.onChanged()
 offChanged = onChanged?.((nextContext: ProjectFileContext) => {
-  if (!context.value || nextContext.projectRoot !== context.value.projectRoot) return
+  if (
+    !context.value ||
+    nextContext.projectRoot !== context.value.projectRoot ||
+    nextContext.source !== context.value.source ||
+    nextContext.sessionId !== context.value.sessionId
+  ) return
   context.value = nextContext
+  void refreshLoadedDirectories()
 }) || null
 
 const handleGlobalPointerDown = () => closeContextMenu()

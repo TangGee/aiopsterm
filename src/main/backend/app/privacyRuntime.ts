@@ -17,6 +17,7 @@ type DataSyncRuntimeState = {
   syncRunId: string
   syncedScopes: NonNullable<PrivacyRuntimeSnapshot['syncedScopes']>
   telemetry: PrivacyUserConfig['telemetry']
+  telemetryConsentVersion: 0 | 1
   dataSync: PrivacyUserConfig['dataSync']
   updatedAt: string
   lastSyncAt: string
@@ -24,6 +25,7 @@ type DataSyncRuntimeState = {
 }
 
 const privacyStatusValues = new Set(['enabled', 'disabled'])
+const telemetryStatusValues = new Set(['undecided', 'enabled', 'disabled'])
 
 const defaultDataSyncStateFilePath = () => {
   const envPath = String(process.env.AIOPSTERM_DATA_SYNC_STATE_FILE || '').trim()
@@ -37,7 +39,7 @@ let runtimeConfig: PrivacyRuntimeConfig = {
 }
 
 let runtimeSnapshot: PrivacyRuntimeSnapshot = {
-  telemetry: 'enabled',
+  telemetry: 'undecided',
   dataSync: 'disabled',
   dataSyncRuntime: 'disabled',
   syncStatus: 'disabled',
@@ -52,10 +54,16 @@ let runtimeLoadedStateFilePath = ''
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 
-const isPrivacyStatus = (value: unknown): value is PrivacyUserConfig['telemetry'] => typeof value === 'string' && privacyStatusValues.has(value)
+const isPrivacyStatus = (value: unknown): value is 'enabled' | 'disabled' => typeof value === 'string' && privacyStatusValues.has(value)
+
+const isTelemetryStatus = (value: unknown): value is PrivacyUserConfig['telemetry'] => typeof value === 'string' && telemetryStatusValues.has(value)
 
 const isPrivacyConfig = (value: unknown): value is PrivacyUserConfig =>
-  isRecord(value) && isPrivacyStatus(value.telemetry) && isPrivacyStatus(value.secretRedaction) && isPrivacyStatus(value.dataSync)
+  isRecord(value) &&
+  isTelemetryStatus(value.telemetry) &&
+  (value.telemetryConsentVersion === undefined || value.telemetryConsentVersion === 0 || value.telemetryConsentVersion === 1) &&
+  isPrivacyStatus(value.secretRedaction) &&
+  isPrivacyStatus(value.dataSync)
 
 const cloneSnapshot = (): PrivacyRuntimeSnapshot => ({
   ...runtimeSnapshot,
@@ -111,7 +119,7 @@ const createSyncRunId = () => `sync-${Date.now().toString(36)}-${Math.random().t
 
 const normalizeRuntimeState = (value: unknown): DataSyncRuntimeState | null => {
   if (!isRecord(value)) return null
-  const telemetry = isPrivacyStatus(value.telemetry) ? value.telemetry : 'enabled'
+  const telemetry = isTelemetryStatus(value.telemetry) ? value.telemetry : 'undecided'
   const dataSync = isPrivacyStatus(value.dataSync) ? value.dataSync : 'disabled'
   const runtime =
     value.runtime === 'backend-double' || value.runtime === 'service' || value.runtime === 'local-file'
@@ -128,6 +136,7 @@ const normalizeRuntimeState = (value: unknown): DataSyncRuntimeState | null => {
     syncRunId: dataSync === 'enabled' && typeof value.syncRunId === 'string' ? value.syncRunId.trim() : '',
     syncedScopes: dataSync === 'enabled' ? syncedScopesFromState(value.syncedScopes) : [],
     telemetry,
+    telemetryConsentVersion: value.telemetryConsentVersion === 1 ? 1 : 0,
     dataSync,
     updatedAt: typeof value.updatedAt === 'string' && value.updatedAt.trim() ? value.updatedAt : new Date(0).toISOString(),
     lastSyncAt: dataSync === 'enabled' && typeof value.lastSyncAt === 'string' && value.lastSyncAt.trim() ? value.lastSyncAt : '',
@@ -195,6 +204,7 @@ const persistRuntimeState = (nextPrivacy: PrivacyUserConfig, dataSyncRuntime: Pr
     syncRunId: enabled ? runtimeSnapshot.syncRunId || createSyncRunId() : '',
     syncedScopes: enabled ? ['config'] : [],
     telemetry: nextPrivacy.telemetry,
+    telemetryConsentVersion: nextPrivacy.telemetryConsentVersion === 1 ? 1 : 0,
     dataSync: nextPrivacy.dataSync,
     updatedAt: now,
     lastSyncAt: enabled ? now : runtimeSnapshot.lastSyncAt || '',
@@ -228,7 +238,7 @@ export const configurePrivacyRuntime = (config: PrivacyRuntimeConfig = {}) => {
 
 export const resetPrivacyRuntimeForTests = () => {
   runtimeSnapshot = {
-    telemetry: 'enabled',
+    telemetry: 'undecided',
     dataSync: 'disabled',
     dataSyncRuntime: 'disabled',
     syncStatus: 'disabled',

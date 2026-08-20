@@ -125,7 +125,8 @@ export const defaultConfig: UserConfig = {
   keywordHighlight: defaultKeywordHighlightConfig,
   securityConfig: defaultSecurityConfig,
   privacy: {
-    telemetry: 'enabled',
+    telemetry: 'undecided',
+    telemetryConsentVersion: 0,
     secretRedaction: 'disabled',
     dataSync: 'disabled'
   },

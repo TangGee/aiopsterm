@@ -1,6 +1,6 @@
 import { nextTick } from 'vue'
 import type { TerminalPanel } from '@/stores/workspace'
-import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
+import { createManagedAiSessionContentViewState, isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import {
   controlFail,
   controlOk,
@@ -209,7 +209,8 @@ export const createTerminalControlSurfaceSessionHandlers = ({
       ? {
           managedAiSession: {
             source: item.managedAiSession.source,
-            sessionId: item.managedAiSession.sessionId
+            sessionId: item.managedAiSession.sessionId,
+            contentView: createManagedAiSessionContentViewState()
           }
         }
       : {}),

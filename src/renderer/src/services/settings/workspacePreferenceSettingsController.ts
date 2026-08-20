@@ -133,12 +133,16 @@ export const createWorkspacePreferenceSettingsController = (
 
   const getPrivacySnapshot = (): PrivacyUserConfig => ({
     telemetry: privacySettings.value.telemetry,
+    telemetryConsentVersion: privacySettings.value.telemetryConsentVersion,
     secretRedaction: privacySettings.value.secretRedaction,
     dataSync: privacySettings.value.dataSync
   })
 
   const privacySnapshotsMatch = (left: PrivacyUserConfig, right: PrivacyUserConfig) =>
-    left.telemetry === right.telemetry && left.secretRedaction === right.secretRedaction && left.dataSync === right.dataSync
+    left.telemetry === right.telemetry &&
+    left.telemetryConsentVersion === right.telemetryConsentVersion &&
+    left.secretRedaction === right.secretRedaction &&
+    left.dataSync === right.dataSync
 
   const validatedSavedPrivacy = (savedConfig: unknown, expectedPrivacy: PrivacyUserConfig) => {
     if (!isRecord(savedConfig) || !isRecord(savedConfig.privacy)) return null
@@ -474,7 +478,7 @@ export const createWorkspacePreferenceSettingsController = (
   }
 
   const updatePrivacySettings = async (patch: Partial<PrivacySettings>) => {
-    const hasPersistentPatch = 'telemetry' in patch || 'secretRedaction' in patch || 'dataSync' in patch
+    const hasPersistentPatch = 'telemetry' in patch || 'telemetryConsentVersion' in patch || 'secretRedaction' in patch || 'dataSync' in patch
     const localPatch = {
       ...(('deactivateModalOpen' in patch) ? { deactivateModalOpen: patch.deactivateModalOpen } : {}),
       ...(('deactivateConfirmationInput' in patch) ? { deactivateConfirmationInput: patch.deactivateConfirmationInput } : {}),
@@ -490,7 +494,11 @@ export const createWorkspacePreferenceSettingsController = (
       return true
     }
     const previousPersistent = getPrivacySnapshot()
-    const nextPersistent = normalizePrivacyConfig({ ...previousPersistent, ...patch }).normalized
+    const nextPersistent = normalizePrivacyConfig({
+      ...previousPersistent,
+      ...patch,
+      ...('telemetry' in patch && patch.telemetry !== 'undecided' ? { telemetryConsentVersion: 1 } : {})
+    }).normalized
     const saved = await persistPrivacySettings(previousPersistent, nextPersistent)
     if (!saved) return false
     setSettingsNotice('隐私设置已保存')

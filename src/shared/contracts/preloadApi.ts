@@ -293,6 +293,7 @@ import type {
   NotificationUserConfig,
   OpenPathResult,
   OpenSettingsDocumentationInput,
+  OfficialExternalLink,
   PrivacyRuntimeApplyInput,
   PrivacyRuntimeApplyResult,
   PrivacyUserConfig,
@@ -497,6 +498,8 @@ export type AiopsPreloadApi = {
   consumeDeepLinks: () => Promise<AiopstermDeepLinkPayload[]>
   onDeepLink: (listener: (payload: AiopstermDeepLinkPayload) => void) => () => void
   openExternalUrl: (url: string) => Promise<void>
+  openOfficialExternalLink: (link: OfficialExternalLink) => Promise<void>
+  onProductTelemetryConsent: (listener: (telemetry: 'enabled' | 'disabled') => void) => () => void
   openSettingsDocumentation: (input?: OpenSettingsDocumentationInput) => Promise<SettingsDocumentationResult>
   submitSettingsFeedbackReport: () => Promise<OpenPathResult>
   openLogDir: () => Promise<OpenPathResult>

@@ -859,7 +859,9 @@ export const createSettingsWorkspaceAdvancedPages = (
               { label: '启用', checked: workspace.privacySettings.telemetry === 'enabled', onChange: () => workspace.updatePrivacySettings({ telemetry: 'enabled' }) },
               { label: '禁用', checked: workspace.privacySettings.telemetry === 'disabled', onChange: () => workspace.updatePrivacySettings({ telemetry: 'disabled' }) }
             ]),
-            h('p', { class: 'settings-description' }, 'Telemetry 会帮助改进产品体验，可查看隐私策略。'),
+            workspace.privacySettings.telemetry === 'undecided'
+              ? h('p', { class: 'settings-description' }, '尚未选择。明确启用前不会发送任何产品统计。')
+              : h('p', { class: 'settings-description' }, '仅发送匿名安装和每日活跃信息，不包含终端内容、命令、路径或日志。'),
             radioRow('Secret Redaction', 'secretRedaction', [
               { label: '启用', checked: workspace.privacySettings.secretRedaction === 'enabled', onChange: () => workspace.updatePrivacySettings({ secretRedaction: 'enabled' }) },
               { label: '禁用', checked: workspace.privacySettings.secretRedaction === 'disabled', onChange: () => workspace.updatePrivacySettings({ secretRedaction: 'disabled' }) }
@@ -996,8 +998,22 @@ export const createSettingsWorkspaceAdvancedPages = (
           ]),
           h('div', { class: 'settings-section-card diagnostics-card' }, [
             h('div', { class: 'diagnostics-card-header' }, [h(MessageSquare, { class: 'diagnostics-icon' }), h('strong', 'Feedback')]),
-            h('small', 'Prepare a local diagnostics report for feedback.'),
-            h('button', { class: 'settings-button', onClick: () => workspace.openSettingsExternalAction('反馈页面') }, [h(ExternalLink), 'Open Feedback Report'])
+            h('small', 'Prepare a local diagnostics report, review it, and submit an issue manually.'),
+            h('button', { class: 'settings-button', onClick: () => workspace.openSettingsExternalAction('反馈页面') }, [h(ExternalLink), 'Prepare Report and Open Issue'])
+          ]),
+          h('div', { class: 'settings-section-card diagnostics-card' }, [
+            h('div', { class: 'diagnostics-card-header' }, [h(ExternalLink, { class: 'diagnostics-icon' }), h('strong', 'Official Links')]),
+            h('small', 'Website, documentation, community, support, security, and privacy resources.'),
+            h('div', { class: 'settings-action-row' }, [
+              h('button', { class: 'settings-button', onClick: () => window.aiops.openOfficialExternalLink('website') }, 'Website'),
+              h('button', { class: 'settings-button', onClick: () => window.aiops.openOfficialExternalLink('documentation') }, 'Documentation'),
+              h('button', { class: 'settings-button', onClick: () => window.aiops.openOfficialExternalLink('discussions') }, 'Discussions'),
+              h('button', { class: 'settings-button', onClick: () => window.aiops.openOfficialExternalLink('discord') }, 'Discord'),
+              h('button', { class: 'settings-button', onClick: () => window.aiops.openOfficialExternalLink('wechat') }, 'WeChat'),
+              h('button', { class: 'settings-button', onClick: () => window.aiops.openOfficialExternalLink('supportEmail') }, 'Support'),
+              h('button', { class: 'settings-button', onClick: () => window.aiops.openOfficialExternalLink('securityEmail') }, 'Security'),
+              h('button', { class: 'settings-button', onClick: () => window.aiops.openOfficialExternalLink('privacyPolicy') }, 'Privacy')
+            ])
           ])
         ])
     }

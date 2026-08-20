@@ -20,6 +20,7 @@ import {
   attachTerminalPanelToSplit,
   canForkSshTerminalPanel,
   closeTerminalPanelInCollection,
+  createManagedAiSessionContentViewState,
   createEmptyTerminalPanel,
   createForkSshTerminalPanelInCollection,
   createTerminalPanelInCollection,
@@ -651,7 +652,8 @@ export const createWorkspaceTerminalPanelsController = (
       outputSegments: [],
       managedAiSession: {
         source,
-        sessionId: normalizedSessionId
+        sessionId: normalizedSessionId,
+        contentView: createManagedAiSessionContentViewState()
       }
     }
     panels.value.push(panel)

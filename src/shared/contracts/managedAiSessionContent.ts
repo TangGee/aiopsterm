@@ -28,6 +28,7 @@ export type ManagedAiSessionContentListInput = {
   sessionId: string
   offset?: number
   limit?: number
+  query?: string
   maxContentChars?: number
 }
 
@@ -60,6 +61,7 @@ export type ManagedAiSessionContentSnapshot = {
   format: ManagedAiSessionContentFormat
   sourceRevision: string
   total: number
+  matchTotal: number
   offset: number
   limit: number
   editable: boolean

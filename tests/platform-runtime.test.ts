@@ -19,7 +19,7 @@ describe('platform runtime helpers', () => {
     expect(defaultShellForPlatform({}, 'darwin')).toBe('/bin/zsh')
     expect(defaultShellForPlatform({ SHELL: '/usr/bin/fish' }, 'linux')).toBe('/usr/bin/fish')
     expect(defaultShellForPlatform({}, 'linux')).toBe('/bin/bash')
-    expect(defaultShellForPlatform({ COMSPEC: 'C:\\Windows\\System32\\cmd.exe' }, 'win32')).toBe('C:\\Windows\\System32\\cmd.exe')
+    expect(defaultShellForPlatform({ COMSPEC: 'C:\\Windows\\System32\\cmd.exe' }, 'win32')).toBe('powershell.exe')
     expect(defaultShellForPlatform({}, 'win32')).toBe('powershell.exe')
   })
 

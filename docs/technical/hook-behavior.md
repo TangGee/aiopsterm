@@ -16,6 +16,8 @@ Installed hook files should reference that stable userData copy.
 
 Hook commands run that helper with aiopsterm's packaged JavaScript runtime, not a user-installed `node` command. The command sets `ELECTRON_RUN_AS_NODE=1` and launches the stable aiopsterm executable path; AppImage builds prefer the original `APPIMAGE` path instead of a temporary `/tmp/.mount_*` executable. Older hooks installed with `node <helper>` remain fail-open, but the installer reports a warning so the user can reinstall them onto the packaged runtime.
 
+On Windows, command-based hooks use the staged PowerShell launcher with UTF-8 explicitly selected for both stdin and native-process output. Windows PowerShell 5.1 otherwise decodes and re-encodes hook JSON through legacy console/ASCII encodings, which can corrupt non-ASCII messages and invalidate the JSON. The shared launcher covers every command-based agent and event; plugin-based integrations pass UTF-8 JSON directly to the helper.
+
 ## Codex Event Timing
 
 Opening Codex with `codex resume` restores the TUI and selected conversation, but it does not reliably produce an aiopsterm notification by itself. The installed Codex hooks are event-driven. Notifications are expected after Codex emits hook events such as `UserPromptSubmit`, `PreToolUse`, or `Stop`, which normally requires the user to submit at least one message in the resumed session.

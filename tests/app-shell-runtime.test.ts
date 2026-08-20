@@ -72,6 +72,7 @@ const createHarness = (overrides: Partial<AppShellRuntimeOptions> = {}, workspac
   }
   const listeners = {
     deepLink: undefined as ((payload: AiopstermDeepLinkPayload) => void) | undefined,
+    productTelemetryConsent: undefined as ((telemetry: 'enabled' | 'disabled') => void) | undefined,
     terminalRequest: undefined as ((request: TerminalKeyboardInteractiveRequest) => void) | undefined,
     terminalResult: undefined as ((result: TerminalKeyboardInteractiveResult) => void) | undefined,
     aiAgentEvent: undefined as ((event: AiAgentSessionEvent) => void) | undefined,
@@ -80,6 +81,7 @@ const createHarness = (overrides: Partial<AppShellRuntimeOptions> = {}, workspac
   }
   const stops = {
     deepLink: vi.fn(),
+    productTelemetryConsent: vi.fn(),
     terminalRequest: vi.fn(),
     terminalResult: vi.fn(),
     aiAgentEvent: vi.fn(),
@@ -93,7 +95,17 @@ const createHarness = (overrides: Partial<AppShellRuntimeOptions> = {}, workspac
     agentsLeftWidth: 286,
     config: {
       background: { mode: 'none' },
-      language: 'zh-CN'
+      language: 'zh-CN',
+      privacy: {
+        telemetry: 'undecided' as const,
+        telemetryConsentVersion: 0 as const,
+        secretRedaction: 'disabled' as const,
+        dataSync: 'disabled' as const
+      }
+    },
+    privacySettings: {
+      telemetry: 'undecided' as 'undecided' | 'enabled' | 'disabled',
+      telemetryConsentVersion: 0 as 0 | 1
     },
     mode: 'terminal',
     isLeftVisible: true,
@@ -141,6 +153,10 @@ const createHarness = (overrides: Partial<AppShellRuntimeOptions> = {}, workspac
       onDeepLink: vi.fn(() => (listener: (payload: AiopstermDeepLinkPayload) => void) => {
         listeners.deepLink = listener
         return stops.deepLink
+      }),
+      onProductTelemetryConsent: vi.fn(() => (listener: (telemetry: 'enabled' | 'disabled') => void) => {
+        listeners.productTelemetryConsent = listener
+        return stops.productTelemetryConsent
       })
     },
     terminal: {
@@ -350,6 +366,9 @@ describe('appShellRuntime', () => {
 
     listeners.deepLink?.(databaseLink)
     expect(workspace.handleDeepLink).toHaveBeenCalledWith(databaseLink)
+    listeners.productTelemetryConsent?.('enabled')
+    expect(workspace.config.privacy).toMatchObject({ telemetry: 'enabled', telemetryConsentVersion: 1 })
+    expect(workspace.privacySettings).toMatchObject({ telemetry: 'enabled', telemetryConsentVersion: 1 })
     const agentEvent = aiAgentEvent()
     listeners.aiAgentEvent?.(agentEvent)
     expect(workspace.upsertManagedAiSession).toHaveBeenCalledWith(agentEvent)
@@ -363,6 +382,7 @@ describe('appShellRuntime', () => {
 
     runtime.dispose()
     expect(stops.deepLink).toHaveBeenCalled()
+    expect(stops.productTelemetryConsent).toHaveBeenCalled()
     expect(stops.terminalRequest).toHaveBeenCalled()
     expect(stops.terminalResult).toHaveBeenCalled()
     expect(stops.aiAgentEvent).toHaveBeenCalled()

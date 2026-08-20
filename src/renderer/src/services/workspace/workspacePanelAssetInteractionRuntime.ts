@@ -67,6 +67,7 @@ export const createWorkspacePanelAssetInteractionRuntime = (deps: WorkspacePanel
       const panel = await (deps.openSshTerminalLaunch || openSshTerminalLaunch)(launchContext, asset, { title: asset.name })
       if (!panel) return
     }
+    deps.workspace.activatePanelSurface(panelId, { cause: 'pointer' })
     const displayName = managedAssetDisplayName(asset)
     const endpoint = managedAssetEndpoint(asset)
     const context = asset.isLocalShell

@@ -145,11 +145,15 @@ describe('agent session backend', () => {
     const userDataPath = join(root, 'user-data')
     await mkdir(join(resourcesPath, 'resources'), { recursive: true })
     await writeFile(join(resourcesPath, 'resources', 'aiopsterm-agent-hook.js'), '#!/usr/bin/env node\n', 'utf-8')
+    await writeFile(join(resourcesPath, 'resources', 'aiopsterm-agent-hook-v1.ps1'), "Write-Output '{}'\n", 'utf-8')
 
     const staged = agentHookScriptPathFor(appPath, resourcesPath, userDataPath)
 
     expect(staged).toBe(join(userDataPath, 'agent-hooks', 'aiopsterm-agent-hook.js'))
     expect(await readFile(staged, 'utf-8')).toBe('#!/usr/bin/env node\n')
+    if (process.platform === 'win32') {
+      expect(await readFile(join(userDataPath, 'agent-hooks', 'aiopsterm-agent-hook-v1.ps1'), 'utf-8')).toBe("Write-Output '{}'\n")
+    }
   })
 
   it('normalizes Codex hook payloads into managed AI session events', async () => {

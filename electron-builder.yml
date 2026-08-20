@@ -36,6 +36,8 @@ files:
   - '!node_modules/node-bin-darwin-*/**'
   - '!node_modules/node-win-*/**'
 extraResources:
+  - from: resources/product-telemetry-worker.js
+    to: product-telemetry-worker.js
   - from: resources/icons
     to: icons
   - from: resources/codex-aiopsterm-mcp.js
@@ -44,6 +46,8 @@ extraResources:
     to: aiopsterm-external-codex-mcp.js
   - from: resources/aiopsterm-agent-hook.js
     to: aiopsterm-agent-hook.js
+  - from: resources/aiopsterm-agent-hook-v1.ps1
+    to: aiopsterm-agent-hook-v1.ps1
   - from: resources/aiopsterm-control.js
     to: aiopsterm-control.js
   - from: resources/builtin-plugins
@@ -56,7 +60,7 @@ asar: true
 npmRebuild: false
 afterPack: scripts/prune-packaged-native-modules.mjs
 linux:
-  maintainer: dev@aiopsterm.local
+  maintainer: support@aiopsterm.com
   icon: icons
   target:
     - AppImage
@@ -70,6 +74,7 @@ linux:
 appImage:
   compression: zstd
 win:
+  icon: icon.ico
   target:
     - nsis
   artifactName: ${name}-${version}-setup-${arch}.${ext}

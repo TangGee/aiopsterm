@@ -81,6 +81,12 @@ const api: AiopsPreloadApi = {
     return () => ipcRenderer.off('app:deep-link', wrapped)
   },
   openExternalUrl: (url: string) => ipcRenderer.invoke('app:open-external-url', url),
+  openOfficialExternalLink: (link) => ipcRenderer.invoke('app:open-official-link', link),
+  onProductTelemetryConsent: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, telemetry: 'enabled' | 'disabled') => listener(telemetry)
+    ipcRenderer.on('product-telemetry:consent-changed', wrapped)
+    return () => ipcRenderer.off('product-telemetry:consent-changed', wrapped)
+  },
   openSettingsDocumentation: (input) => ipcRenderer.invoke('settings:open-documentation', input),
   submitSettingsFeedbackReport: () => ipcRenderer.invoke('settings:submit-feedback-report'),
   openLogDir: () => ipcRenderer.invoke('app:open-log-dir'),

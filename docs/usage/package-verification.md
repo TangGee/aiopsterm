@@ -132,3 +132,41 @@ npm run build:win:dir
 Run those commands on Windows so the native Windows Codex package, native modules, and NSIS target are built on the correct platform. Linux development machines can audit the Windows target configuration with `npm run audit:package-config`, but they should not be treated as successful Windows packaging runners.
 
 On a Windows machine without remote CI, `scripts/build-windows.ps1` is the supported local orchestration entrypoint. It uses official sources by default, accepts `-ChinaMirror` as a process-local opt-in, and finishes with the same `package:build -- windows` and `package:verify -- windows` gates documented above.
+
+## Windows Release Signing
+
+Windows does not use the Apple notarization workflow. Local development and controlled internal testing can use unsigned artifacts, but public distribution should Authenticode-sign the NSIS installer, the packaged `aiopsterm.exe`, and every bundled executable launched at runtime. A trusted signature identifies the publisher and lets Microsoft Defender SmartScreen accumulate publisher reputation across releases. It does not guarantee that a new publisher or binary will immediately avoid the SmartScreen unrecognized-app warning.
+
+The current Electron Builder configuration does not require a signing identity. Without signing credentials it can complete successfully and produce unsigned Windows artifacts. A release runner using an exportable code-signing certificate can provide credentials without storing them in the repository:
+
+```powershell
+$env:WIN_CSC_LINK = 'C:\secure\aiopsterm-signing.pfx'
+$env:WIN_CSC_KEY_PASSWORD = '<secret-from-secure-storage>'
+npm run build:windows:one-click
+```
+
+Use an RFC 3161 timestamp through the selected signing provider so an already signed release remains verifiable after the certificate expires. Keep the certificate and password in the Windows certificate store or CI secret storage, never in source control. Production release configuration should enable Electron Builder's `forceCodeSigning` only after a signing identity is provisioned; that converts missing or invalid credentials into a build failure instead of silently publishing unsigned output. Microsoft Artifact Signing can replace an exportable certificate when the publisher and build environment satisfy its availability and identity-verification requirements.
+
+There is no general free public-trust certificate for direct distribution of this repository's NSIS installer. The available no-certificate-cost paths have different boundaries:
+
+- Microsoft Store registration and Store signing can be free through Microsoft's current onboarding flow. The Store signs and distributes the submitted Store package; it does not sign an NSIS installer separately hosted on the project website or source repository. Using this route requires a Store-compatible package and submission workflow in addition to the current NSIS target.
+- SignPath Foundation offers free signing to approved open-source projects whose complete maintained release and build inputs meet its license, provenance, review, and signing-policy requirements. This repository currently declares `private: true` and `license: UNLICENSED`, so it is not eligible without an intentional project-wide open-source licensing and release-policy change.
+- A self-signed certificate is free and useful only for local testing or managed organizations that deploy the corresponding trust root to every target machine. Microsoft SmartScreen treats a self-signed public download like an unsigned file, so it is not a substitute for public Authenticode trust.
+- Microsoft Artifact Signing requires a paid Azure subscription and paid service plan. It is a managed alternative to certificate-file or hardware-token handling, not a free certificate program.
+
+See the [Microsoft Store account flow](https://learn.microsoft.com/en-us/windows/apps/publish/partner-center/open-a-developer-account) and [SignPath Foundation conditions](https://signpath.org/terms.html) before selecting either conditional free route.
+
+Before activating a certificate purchased through a reseller, confirm in writing that the order is a Standard, Individual Validation, or Organization Validation public-trust Authenticode product rather than an Open Source Code Signing product. Confirm the certificate issuer, subscriber identity shown as the Windows publisher, supported executable formats, cloud or hardware key custody, signing quota, RFC 3161 timestamp service, renewal and reissue terms, and the reseller's current authorization with the issuing CA. This repository must not use an open-source-only certificate while it remains private and unlicensed.
+
+Activation must finish in the issuing CA's official account and official signing application. The project owner retains the account, multi-factor authentication, hardware token PIN, cloud-signing approval, and any private-key material. A reseller may assist with validation but must not retain credentials, one-time codes, private keys, remote-control access, or standing authority to sign future builds. Sign a disposable test executable first and verify its certificate chain, publisher identity, timestamp, and revocation status before connecting the credential to the production release process.
+
+Verify both the installer and unpacked executable on the native Windows runner:
+
+```powershell
+Get-AuthenticodeSignature .\dist\aiopsterm-<version>-setup-<arch>.exe
+Get-AuthenticodeSignature .\dist\win-unpacked\aiopsterm.exe
+signtool verify /pa /all /v .\dist\aiopsterm-<version>-setup-<arch>.exe
+signtool verify /pa /all /v .\dist\win-unpacked\aiopsterm.exe
+```
+
+`Status` must be `Valid`, SignTool must succeed, the displayed publisher must match the intended release identity, and timestamp verification must succeed. Also enumerate packaged `.exe` helpers and verify their signatures before external release. See Microsoft's [SmartScreen reputation guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation), [SignTool reference](https://learn.microsoft.com/en-us/windows/win32/seccrypto/signtool), and Electron Builder's [code-signing configuration](https://www.electron.build/docs/features/code-signing/).

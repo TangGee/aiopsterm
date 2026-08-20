@@ -340,6 +340,7 @@
           :source="panel.managedAiSession.source"
           :session-id="panel.managedAiSession.sessionId"
           :panel-title="panel.title"
+          :view-state="panel.managedAiSession.contentView"
         />
         <ProjectFileEditor
           v-else-if="(panel.kind === 'project-file' && panel.projectFile) || (panel.kind === 'local-file' && panel.localFile)"
