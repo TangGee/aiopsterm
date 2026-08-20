@@ -21,7 +21,7 @@ Click **Quick Commands** on the module rail. Use the left toolbar controls for g
 
 ## Panel Overview
 
-![Quick commands panel](../images/quick-commands.png)
+![Quick commands panel](../images/en-US/quick-commands.png)
 
 - **① 命令/分组 (Commands / Groups)** — flat list or grouped browsing.
 - **② Toolbar buttons** — new command, record macro, search.

@@ -6,13 +6,13 @@ Agents is the directory for AI product sessions created and stored by aiopsterm.
 
 Click **Agents** at the top of the module rail. The left pane contains search, the session list, and the `+` button; selecting a session restores it into the right AI pane or Database workspace. Before creating one, configure and check its Provider under **Settings -> Models**; see [Host Agent](03-host-agent.md).
 
-![Agents mode](../images/agents-mode.png)
+![Agents mode](../images/en-US/agents-mode.png)
 
 **①** opens Agents, **②** searches titles, carriers, bindings, and projects, **③** selects a saved session, and **④** is the restored conversation.
 
 ## Create The Three Product Session Types
 
-![New session menu](../images/agents-new-menu.png)
+![New session menu](../images/en-US/agents-new-menu.png)
 
 Click **① `+`** to open **② the menu**:
 
@@ -24,7 +24,7 @@ Use durable task names such as “Production inspection”, “Payments slow SQL
 
 ## Restore, Page, And Continue
 
-![Restore a session](../images/agents-restore.png)
+![Restore a session](../images/en-US/agents-restore.png)
 
 Click **① a session row** to restore messages in **②** and continue from **③**. Restore starts at the newest message; scrolling upward pages older messages without adding those UI pages to the next model request twice.
 

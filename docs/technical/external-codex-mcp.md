@@ -66,6 +66,7 @@ The external server currently exposes:
 - `handle_ai_session`: Marks a managed AI item handled without claiming to approve an agent-native prompt.
 - `clear_ai_session`: Removes a managed AI session record without killing the owning terminal or agent process.
 - `list_ai_session_events`: Reads recent managed AI event-stream frames with a sequence cursor.
+- `wait_ai_session_completion`: Long-polls one managed AI session for a later completion or end event without repeated list calls.
 - `list_ai_notifications`: Lists notification-style attention items derived from managed AI sessions.
 - `mark_ai_notification_read`: Marks one notification or all unread notifications as locally handled.
 - `dismiss_ai_notification`: Removes one read notification or all read notifications from the managed session list.
@@ -86,15 +87,13 @@ The external server currently exposes:
 
 `list_ai_session_events` is the request-response MCP form of the managed-AI event stream. It accepts `afterSeq`/`after_seq`, `name`/`names`, `category`/`categories`, `source`/`sources`, `sessionId`/`sessionIds`, and `limit`, then returns `boot_id`, cursor metadata, `gap`, and matching event frames. The frames come from the in-memory replay ring; use `list_ai_sessions` to refresh state if `gap` is true.
 
+`wait_ai_session_completion` registers an in-memory event-stream waiter rather than polling session state. When `afterSeq` is omitted, the bridge captures the latest sequence at call time and only accepts a later `stop`, `session_end`, or ended lifecycle frame for the selected source/session pair. An explicit cursor can replay a matching frame still present in the ring. The timeout defaults to 120 seconds and is clamped to 1–180 seconds. Match and timeout responses include `bootId`, `afterSeq`, `latestSeq`, and `nextSeq`; callers should resume only after timeout. Closing the MCP request socket aborts the waiter, and shutting down the managed-AI event stream aborts all remaining waiters.
+
 `list_ai_notifications` returns compact attention items with `id`, source, session id, title, summary, read state, event type, request kind, decision mode, cwd, and visible-terminal routing fields. Notification ids use `managed-ai:<source>:<sessionId>`. Opening or jumping to a notification does not mark it read. Dismissing an unread notification is rejected; call `mark_ai_notification_read` first when the user has handled it. `clear_ai_notifications` is the bulk-clear form and removes all managed AI notification records regardless of read state, but it does not close the owning visible terminal or the agent process.
 
 ## Enablement
 
-The local socket bridge is disabled by default. Enable it with:
-
-```bash
-export AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE=1
-```
+The local socket bridge starts automatically with aiopsterm. It authenticates every request with the app-managed token and does not require user-level environment setup. Managed deployments can explicitly disable startup with `AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE=0` or `AIOPSTERM_EXTERNAL_CODEX_MCP_DISABLE=1`.
 
 By default, aiopsterm generates a persistent token on first use and stores it under the app user-data directory at `external-codex-mcp/token.json` with best-effort current-user-only permissions. `AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN` remains supported as an explicit override for managed deployments; when set, it takes precedence over the app-managed token and requires restart after changes.
 
@@ -112,7 +111,7 @@ Missing or unknown scope values fail initialization. There is no aggregate 43-to
 
 Database tools are discovered only through `aiopsterm_databases`, and database access is independently disabled by default. Enable `Allow external Agents to read databases` only for a trusted local Agent. Calls fail with `DB_MCP_DATABASE_READ_DISABLED` while the setting is off or the config cannot be read. External tools use process-scoped random database handles rather than saved connection ids or user-defined names. Non-SQLite DDL and table queries also require the saved connection to be open in the Database workspace.
 
-Built-in installers use the external client's official CLI rather than hand-editing client config files:
+Built-in installers use the separately installed external client's official CLI rather than hand-editing client config files. They never use aiopsterm's bundled customized Codex runtime. Discovery checks the main-process `PATH` and platform-standard user CLI locations, including user npm, Volta, Bun, pnpm, Homebrew, and WinGet directories. Command execution rebuilds the child `PATH` from those directories plus the detected CLI directory, which lets npm shebang wrappers resolve their external Node.js runtime after a desktop GUI launch. Failed commands emit the redacted runtime event `export-mcp.client-command.failed`; token-bearing arguments are not logged:
 
 ```bash
 codex mcp remove aiopsterm_hosts

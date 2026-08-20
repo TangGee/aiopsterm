@@ -43,6 +43,10 @@ type ExternalCodexMcpRequest = {
   token?: string
 }
 
+type ExternalCodexMcpRequestContext = {
+  signal?: AbortSignal
+}
+
 type ExternalConnectionRecord = ExternalCodexMcpConnection & {
   session: SshTerminalSession | null
   lifecycle?: TerminalLifecycleEvent
@@ -141,7 +145,10 @@ const configuredToken = () => {
   }
 }
 
-const isEnabled = () => runtimeConfig.enabled === true || process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE === '1'
+export const shouldStartExternalCodexMcpBridge = (env: NodeJS.ProcessEnv = process.env) =>
+  env.AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE !== '0' && env.AIOPSTERM_EXTERNAL_CODEX_MCP_DISABLE !== '1'
+
+const isEnabled = () => runtimeConfig.enabled ?? shouldStartExternalCodexMcpBridge()
 
 const defaultSocketPath = () => {
   const base = cleanText(runtimeConfig.userDataPath) || process.cwd()
@@ -779,7 +786,10 @@ const targetContext = (params: Record<string, unknown>) => {
   return ok({ context: { assetId: host.assetId, host: host.host, port: host.port, username: host.username, title: host.title, status: 'disconnected' } })
 }
 
-export const handleExternalCodexMcpBridgeRequest = async (request: ExternalCodexMcpRequest): Promise<ExternalCodexMcpResponse> => {
+export const handleExternalCodexMcpBridgeRequest = async (
+  request: ExternalCodexMcpRequest,
+  context: ExternalCodexMcpRequestContext = {}
+): Promise<ExternalCodexMcpResponse> => {
   const token = configuredToken()
   if (!isEnabled()) return fail('EXTERNAL_CODEX_MCP_DISABLED', 'External Codex MCP is disabled.')
   if (!token) return fail('EXTERNAL_CODEX_MCP_TOKEN_REQUIRED', 'External Codex MCP token is not configured.')
@@ -806,7 +816,8 @@ export const handleExternalCodexMcpBridgeRequest = async (request: ExternalCodex
   const databaseResponse = await callDatabaseMcpTool(request.method || '', params)
   if (databaseResponse) return databaseResponse
   const managedAiResponse = await handleExternalCodexMcpManagedAiRequest(request.method, params, {
-    focusManagedAiSession: runtimeConfig.focusManagedAiSession
+    focusManagedAiSession: runtimeConfig.focusManagedAiSession,
+    signal: context.signal
   })
   if (managedAiResponse) return managedAiResponse
   return fail('UNKNOWN_METHOD', `Unknown external Codex MCP bridge method: ${request.method || ''}`)
@@ -835,10 +846,16 @@ export const ensureExternalCodexMcpBridgeServer = async (config: ExternalCodexMc
   }
   server = createServer((socket) => {
     let buffer = ''
+    const requestControllers = new Set<AbortController>()
+    const abortRequests = () => {
+      requestControllers.forEach((controller) => controller.abort())
+      requestControllers.clear()
+    }
     socket.on('error', (error) => {
       logRuntimeEvent('warn', 'external-codex-mcp.socket-error', { error })
       socket.destroy()
     })
+    socket.on('close', abortRequests)
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8')
       for (;;) {
@@ -854,9 +871,12 @@ export const ensureExternalCodexMcpBridgeServer = async (config: ExternalCodexMc
           writeSocketResponse(socket, undefined, fail('INVALID_JSON', 'External MCP bridge request is not valid JSON.'))
           continue
         }
-        void handleExternalCodexMcpBridgeRequest(request)
+        const controller = new AbortController()
+        requestControllers.add(controller)
+        void handleExternalCodexMcpBridgeRequest(request, { signal: controller.signal })
           .then((response) => writeSocketResponse(socket, request.id, response))
           .catch(() => writeSocketResponse(socket, request.id, fail('BRIDGE_REQUEST_FAILED', 'External MCP bridge request failed.')))
+          .finally(() => requestControllers.delete(controller))
       }
     })
   })

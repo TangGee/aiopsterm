@@ -4,13 +4,15 @@ This page lives under `Settings -> Export MCP`. It exports aiopsterm capabilitie
 
 For task-based selection and installation, see [Export MCP](../../best-practices/en-US/08-export-mcp.md).
 
+## Waiting For AI Session Completion
+
+`aiopsterm_ai_sessions` exposes `wait_ai_session_completion` to wait for the selected managed session's next completion event without repeatedly polling `list_ai_sessions` or `list_ai_session_events`. Pass `source` and `sessionId`, with optional `afterSeq` and `timeoutMs`. The default wait is 120 seconds, with a minimum of 1 second and a maximum of 180 seconds.
+
+Only `stop`, `session_end`, or ended lifecycle events after the cursor can match, which prevents a previous turn's completion from satisfying a new wait. A match returns the event, latest session summary, and `nextSeq`. A timeout returns `timedOut: true` with the same resumable cursor fields. The external Agent should wait again with `nextSeq` only after a timeout. Cancelling the tool call or disconnecting its socket immediately removes the waiter.
+
 ## Prerequisites
 
-Export MCP is controlled by aiopsterm startup environment variables:
-
-```bash
-export AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE=1
-```
+aiopsterm creates the local Export MCP socket and access token automatically at startup. Normal installations do not need environment configuration. `AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE=0` or `AIOPSTERM_EXTERNAL_CODEX_MCP_DISABLE=1` is reserved for managed deployments that must explicitly disable the service.
 
 By default, aiopsterm generates the token on first use and stores it at `external-codex-mcp/token.json` under the app data directory. The file mode is best-effort restricted to the current user. `AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN` can still be used as an explicit override; restart aiopsterm after setting it, and the settings page's `Regenerate Token` action will not override that environment variable.
 
@@ -61,6 +63,10 @@ The built-in installer independently detects and manages `aiopsterm_hosts`, `aio
 
 - Codex removes and adds only the selected server entry.
 - Claude Code removes and adds only the selected user-scope server entry.
+
+The installer invokes only a separately installed external Agent CLI; it never uses aiopsterm's bundled customized Codex runtime. CLI discovery checks the app process `PATH` plus common user npm, Volta, Bun, pnpm, Homebrew, and WinGet locations on macOS, Linux, and Windows. The same directories are added to the child process `PATH`, so npm-installed CLIs that use `#!/usr/bin/env node` can resolve Node.js when aiopsterm starts from Finder, the Dock, or a desktop shortcut. Normal installations need no manual environment setup.
+
+Failed CLI installation commands write a redacted `export-mcp.client-command.failed` event to the app runtime log. The event includes the client, add/remove operation, server name, and error message, but never records the Export MCP token.
 
 All three entries reuse the same helper, socket, and token, but set `AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE` to `hosts`, `ai-sessions`, or `databases`. The helper rejects initialization when scope is missing or invalid and never falls back to the aggregate tool list.
 

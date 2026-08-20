@@ -6,13 +6,13 @@ Agents 是 aiopsterm 自己创建并保存的 AI 产品会话目录。它管理�
 
 点击模块栏顶部的 **Agents** 图标。左侧会显示搜索框、会话列表和 `+` 新建按钮；单击会话会恢复到右侧 AI 面板或数据库工作区。首次创建前，先在 **设置 -> 模型** 配置并检查对应 Provider；具体配置见[主机 Agent](03-host-agent.md)。
 
-![Agents 模式](../images/agents-mode.png)
+![Agents 模式](../images/zh-CN/agents-mode.png)
 
 图中 **①** 是 Agents 入口，**②** 搜索标题、载体、绑定和项目，**③** 选择已有会话，**④** 是恢复后的对话区域。
 
 ## 新建三类产品会话
 
-![新建会话菜单](../images/agents-new-menu.png)
+![新建会话菜单](../images/zh-CN/agents-new-menu.png)
 
 点击 **① `+`** 打开 **② 新建菜单**：
 
@@ -24,7 +24,7 @@ Agents 是 aiopsterm 自己创建并保存的 AI 产品会话目录。它管理�
 
 ## 恢复、分页和续聊
 
-![恢复会话](../images/agents-restore.png)
+![恢复会话](../images/zh-CN/agents-restore.png)
 
 点击 **① 会话行** 后，历史消息在 **②** 恢复，输入框 **③** 可以直接续聊。恢复后默认定位到最新消息；向上滚动才按页加载更早记录，旧页面消息不会被重复加入下一轮模型上下文。
 

@@ -586,6 +586,25 @@ const managedAiTools = [
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   },
   {
+    name: 'wait_ai_session_completion',
+    title: 'Wait for aiopsterm managed AI session completion',
+    description:
+      'Wait without polling until the selected managed AI session reports a later turn completion or session end. The call returns immediately when a matching event after afterSeq already exists, otherwise it blocks for up to timeoutMs. On timeout, call it again with the returned nextSeq instead of repeatedly listing sessions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...aiSessionSelectorProperties,
+        afterSeq: { type: 'number', description: 'Optional event cursor. Only completion events with a greater sequence can match. Defaults to the latest sequence when the call starts.' },
+        after_seq: { type: 'number', description: 'Alias for afterSeq.' },
+        timeoutMs: { type: 'number', minimum: 1000, maximum: 180000, description: 'Maximum wait in milliseconds. Defaults to 120000 and is capped at 180000.' },
+        timeout_ms: { type: 'number', minimum: 1000, maximum: 180000, description: 'Alias for timeoutMs.' }
+      },
+      required: ['sessionId'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  {
     name: 'list_ai_notifications',
     title: 'List aiopsterm managed AI notifications',
     description:

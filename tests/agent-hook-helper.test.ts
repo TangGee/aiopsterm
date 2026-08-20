@@ -113,6 +113,29 @@ const runHelper = (args: string[], input: string, env: NodeJS.ProcessEnv) =>
   })
 
 describe('aiopsterm agent hook helper', () => {
+  it.each([
+    ['kimi-code', 'Kimi Code · project'],
+    ['deepseek-harness', 'DeepSeek Harness · project']
+  ])('uses the product label for %s notifications', async (source, title) => {
+    const server = await startSocketServer()
+    try {
+      const result = await runHelper(
+        ['--source', source, '--event', 'Stop'],
+        JSON.stringify({ session_id: `${source}-session`, cwd: '/work/project' }),
+        {
+          ...process.env,
+          AIOPSTERM_MANAGED_TERMINAL: '1',
+          AIOPSTERM_AGENT_SOCKET_PATH: server.socketPath
+        }
+      )
+
+      expect(result.code).toBe(0)
+      expect(server.received).toEqual([expect.objectContaining({ source, title })])
+    } finally {
+      await server.close()
+    }
+  })
+
   it('posts hook stdin with managed terminal context to the agent socket', async () => {
     const server = await startSocketServer()
     try {

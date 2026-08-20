@@ -14,13 +14,13 @@ Click **AI Sessions** on the module rail. Install the matching Agent Hook before
 
 > Local history import and live Hooks are separate. History may appear in the Library without a Hook, but live running, approval, question, completion, and reliable recent-file events require the Hook.
 
-![AI notification settings](../images/settings-ai-notifications.png)
+![AI notification settings](../images/en-US/settings-ai-notifications.png)
 
 **①** opens AI Notifications, **②** controls sound, **③** imports/previews audio, and **④** installs and checks Agent Hooks.
 
 ## The Three Inbox Views
 
-![AI Sessions inbox](../images/ai-sessions-inbox.png)
+![AI Sessions inbox](../images/en-US/ai-sessions-inbox.png)
 
 - **Pending** contains approval, answer, or confirmation requests; the top bell cycles these sessions.
 - **Running** contains active sessions, grouped by project by default.
@@ -30,7 +30,7 @@ Double-click a session to focus its aiopsterm terminal. Restorable idle records 
 
 ## Inspect The Complete AI Conversation
 
-![AI session content](../images/ai-session-content.png)
+![AI session content](../images/en-US/ai-session-content.png)
 
 1. Right-click a session row and choose **Open Session Content**.
 2. A named content tab opens in the main workspace. **①** is the message timeline, **②** switches source/rendered or content views, and **③** contains save state/actions.
@@ -52,7 +52,7 @@ Editing history does not undo commands or file changes already performed by the 
 
 ## Inspect And Edit AI Project Files
 
-![AI project files](../images/ai-project-files.png)
+![AI project files](../images/en-US/ai-project-files.png)
 
 Open a session and click **Project Files** on its toolbar:
 

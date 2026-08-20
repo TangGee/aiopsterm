@@ -6,7 +6,7 @@ Plugins add pages, tools, or integrations to aiopsterm. Verify provenance and pe
 
 Click **Extensions** on the module rail to reveal the plugin list. Click a plugin card before expecting the middle workspace to show its details, then use **Install/Update/Uninstall** there. For a local package, drag a supported package onto the dashed drop target at the bottom of the left list and wait for validation and confirmation.
 
-![Plugin list](../images/extensions-workspace.png)
+![Plugin list](../images/en-US/extensions-workspace.png)
 
 ## Browse And Manage
 

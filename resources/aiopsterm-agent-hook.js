@@ -116,6 +116,8 @@ const sourceLabel = (source) => {
   if (source === 'hermes-agent' || source === 'hermes') return 'Hermes Agent'
   if (source === 'rovodev' || source === 'rovo') return 'Rovo Dev'
   if (source === 'qoder') return 'Qoder'
+  if (source === 'kimi-code' || source === 'kimi') return 'Kimi Code'
+  if (source === 'deepseek-harness' || source === 'dsh') return 'DeepSeek Harness'
   return source
 }
 

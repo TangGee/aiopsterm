@@ -16,8 +16,10 @@
 ## Agent Hook 安装器
 
 - 会话管理 Hook：把 aiopsterm 的 Hook Helper 显式写入支持的 Agent 用户级 Hook 配置，用于让左侧 `AI 会话` 面板发现通过 aiopsterm 本地连接终端启动的 AI 会话。
-- CLI：显示是否在当前 `PATH` 中检测到对应命令，例如 `codex`、`claude`、`cursor-agent`、`gemini`、`copilot`、`grok`、`opencode`、`codebuddy`、`droid`、`qodercli`、`amp`、`pi`、`omp`、`kiro-cli`、`acli`。
+- CLI：显示是否在当前 `PATH` 中检测到对应命令，例如 `codex`、`claude`、`cursor-agent`、`gemini`、`copilot`、`grok`、`opencode`、`codebuddy`、`droid`、`qodercli`、`amp`、`pi`、`omp`、`kiro-cli`、`acli`、`kimi` 或 `dsh`。
 - Hook 配置：安装器只插入带 aiopsterm marker 的命令，不删除其它用户 Hook。
+- Kimi Code：安装器把受标记的 `[[hooks]]` 区块写入 `~/.kimi-code/config.toml`，覆盖会话、回合、权限、工具、完成、失败与退出事件，同时保留用户的模型和其它 Hook 配置。
+- DeepSeek Harness：安装器为 `web` 和 `headless` profile 安装官方 `@deepseek-ai/dsh-hooks-codex` bridge，并把受标记的 profile patch 指向 `~/.dsh/aiopsterm/hooks.json`。首次安装需要 `pnpm`；安装器只移除自己的 patch，不删除用户 profile 或插件依赖。
 - 生效范围：Hook Helper 只有在 `AIOPSTERM_MANAGED_TERMINAL=1` 且存在 `AIOPSTERM_AGENT_SOCKET_PATH` 的 aiopsterm 本地连接终端里才会上报事件。外部系统终端会空返回，不接管 Agent 原生审批。
 
 ## AI 会话休眠

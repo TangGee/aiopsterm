@@ -281,6 +281,15 @@ describe('external Codex MCP bridge runtime', () => {
     delete process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET
   })
 
+  it('starts by default and supports explicit managed-deployment disable overrides', async () => {
+    const { bridge } = await loadBackends()
+    activeBridge = bridge
+
+    expect(bridge.shouldStartExternalCodexMcpBridge({})).toBe(true)
+    expect(bridge.shouldStartExternalCodexMcpBridge({ AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE: '0' })).toBe(false)
+    expect(bridge.shouldStartExternalCodexMcpBridge({ AIOPSTERM_EXTERNAL_CODEX_MCP_DISABLE: '1' })).toBe(false)
+  })
+
   it('requires the external MCP feature flag and token before serving host data', async () => {
     const { bridge } = await loadBackends()
     activeBridge = bridge
@@ -1223,6 +1232,122 @@ describe('external Codex MCP bridge runtime', () => {
     )
   })
 
+  it('waits for managed AI completion events without client polling', async () => {
+    const { bridge, agentSessions } = await loadBackends()
+    activeBridge = bridge
+    activeAgentSessions = agentSessions
+    agentSessions.publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'UserPromptSubmit',
+        sessionId: 'codex-wait-completion-1',
+        summary: 'run verification',
+        receivedAt: Date.now()
+      },
+      null
+    )
+    const afterSeq = agentSessions.__testing.streamLatestSeq()
+    const waiting = bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'wait_ai_session_completion',
+      token: 'test-token',
+      params: { source: 'codex', sessionId: 'codex-wait-completion-1', afterSeq, timeoutMs: 5_000 }
+    })
+    setTimeout(() => {
+      agentSessions.publishAiAgentSessionEvent(
+        {
+          source: 'codex',
+          event: 'Stop',
+          sessionId: 'codex-wait-completion-1',
+          summary: 'verification complete',
+          receivedAt: Date.now()
+        },
+        null
+      )
+    }, 20)
+
+    await expect(waiting).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          matched: true,
+          timedOut: false,
+          reason: 'completed',
+          after_seq: afterSeq,
+          event: expect.objectContaining({ name: 'agent.hook.Stop', source: 'codex' }),
+          session: expect.objectContaining({ sessionId: 'codex-wait-completion-1', lastEvent: 'stop' })
+        })
+      })
+    )
+  })
+
+  it('cancels managed AI completion waiting when the request is aborted', async () => {
+    const { bridge, agentSessions } = await loadBackends()
+    activeBridge = bridge
+    activeAgentSessions = agentSessions
+    agentSessions.publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'UserPromptSubmit',
+        sessionId: 'codex-wait-cancel-1',
+        summary: 'long task',
+        receivedAt: Date.now()
+      },
+      null
+    )
+    const controller = new AbortController()
+    const waiting = bridge.handleExternalCodexMcpBridgeRequest(
+      {
+        method: 'wait_ai_session_completion',
+        token: 'test-token',
+        params: { source: 'codex', sessionId: 'codex-wait-cancel-1', timeoutMs: 5_000 }
+      },
+      { signal: controller.signal }
+    )
+    controller.abort()
+
+    await expect(waiting).resolves.toEqual(
+      expect.objectContaining({ ok: false, errorCode: 'AI_SESSION_WAIT_CANCELLED' })
+    )
+  })
+
+  it('removes managed AI completion waiters when the MCP socket disconnects', async () => {
+    const { bridge, agentSessions } = await loadBackends()
+    activeBridge = bridge
+    activeAgentSessions = agentSessions
+    agentSessions.publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'UserPromptSubmit',
+        sessionId: 'codex-wait-socket-close-1',
+        summary: 'long task',
+        receivedAt: Date.now()
+      },
+      null
+    )
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-external-mcp-wait-close-'))
+    const socketPath = testSocketPath('aiopsterm-external-mcp-wait-close', root)
+    try {
+      await bridge.ensureExternalCodexMcpBridgeServer({ enabled: true, token: 'test-token', socketPath, userDataPath: root })
+      const client = createConnection(socketPath)
+      client.on('error', () => undefined)
+      await new Promise<void>((resolve) => client.on('connect', () => resolve()))
+      client.write(
+        `${JSON.stringify({
+          id: 'wait-drop',
+          method: 'wait_ai_session_completion',
+          token: 'test-token',
+          params: { source: 'codex', sessionId: 'codex-wait-socket-close-1', timeoutMs: 5_000 }
+        })}\n`
+      )
+      await waitFor(() => agentSessions.__testing.streamWaiterCount() === 1)
+      client.destroy()
+      await waitFor(() => agentSessions.__testing.streamWaiterCount() === 0)
+    } finally {
+      bridge.closeExternalCodexMcpBridgeServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('exposes managed AI notifications through external Codex MCP', async () => {
     const { bridge, agentSessions } = await loadBackends()
     activeBridge = bridge
@@ -1454,6 +1579,7 @@ describe('external Codex MCP bridge runtime', () => {
           'handle_ai_session',
           'clear_ai_session',
           'list_ai_session_events',
+          'wait_ai_session_completion',
           'list_ai_notifications',
           'mark_ai_notification_read',
           'dismiss_ai_notification',
@@ -1463,6 +1589,9 @@ describe('external Codex MCP bridge runtime', () => {
           ])
           const listAiSessionsTool = aiTools.result?.tools?.find((tool) => tool.name === 'list_ai_sessions')
           expect(listAiSessionsTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }))
+          const waitAiSessionTool = aiTools.result?.tools?.find((tool) => tool.name === 'wait_ai_session_completion')
+          expect(waitAiSessionTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }))
+          expect((waitAiSessionTool?.inputSchema as any)?.properties?.timeoutMs).toEqual(expect.objectContaining({ maximum: 180000 }))
           const clearAiSessionTool = aiTools.result?.tools?.find((tool) => tool.name === 'clear_ai_session')
           expect(clearAiSessionTool?.annotations).toEqual(expect.objectContaining({ destructiveHint: true }))
 

@@ -127,6 +127,9 @@ const exactEnUS: Record<string, string> = {
   '反馈页面': 'Feedback',
   '日志目录': 'Log directory',
   '本地终端': 'Local terminal',
+  '本地连接': 'Local connections',
+  '新session': 'New session',
+  '新会话': 'New chat',
   '连接中': 'Connecting',
   '开启': 'On',
   '启用': 'Enable',
@@ -136,9 +139,51 @@ const exactEnUS: Record<string, string> = {
   '命名空间': 'Namespace',
   '全部命名空间': 'All namespaces',
   '尚未添加 Kubernetes 集群': 'No Kubernetes clusters added',
+  '本地集群': 'Local clusters',
+  '暂无本地集群': 'No local clusters',
+  '添加集群': 'Add cluster',
   '就绪': 'Ready',
   '运行中': 'Running',
   '测试连接': 'Test connection',
+  '快捷键设置': 'Shortcut settings',
+  '新建终端': 'New terminal',
+  '显示/隐藏 AI 侧边栏': 'Show/hide AI sidebar',
+  '切换到指定标签': 'Switch to a numbered tab',
+  '打开快捷命令': 'Open quick commands',
+  '关闭当前面板': 'Close current panel',
+  '打开最近面板': 'Open recent panels',
+  '导航到上一个面板': 'Navigate to previous panel',
+  '导航到下一个面板': 'Navigate to next panel',
+  '按标签栏顺序切换到左侧面板': 'Switch to the panel on the left',
+  '按标签栏顺序切换到右侧面板': 'Switch to the panel on the right',
+  '重置全部': 'Reset all',
+  '添加模型': 'Add model',
+  'User Rules 会作为 Agent 行为约束参与对话和命令生成。': 'User Rules constrain Agent conversations and command generation.',
+  '执行生产变更前必须先给出只读检查命令和回滚点。': 'Before production changes, provide read-only checks and a rollback point.',
+  '不要自动执行删除、重启、扩容、写文件或修改配置类命令。': 'Do not automatically delete, restart, scale, write files, or modify configuration.',
+  '新增连接 或 左侧拖拽至此': 'Add a connection or drag one here from the left',
+  '点击加号选择连接，或从左侧文件管理直接拖入': 'Click plus to select a connection, or drag one from the left file manager',
+  '大小': 'Size',
+  '修改日期': 'Modified',
+  '使用指南': 'User Guide',
+  'Markdown语法指南.md': 'Markdown Guide.md',
+  '插件功能': 'Features',
+  '从标准 HTTP JSON 接口同步 SSH 资产。': 'Synchronize SSH assets from a standard HTTP JSON API.',
+  '提供可扩展的 Linux 运维检查树和终端操作。': 'Provides extensible Linux operations checks and terminal actions.',
+  'HTTP CMDB Provider 从用户配置的 HTTP JSON 接口获取资产。访问令牌由宿主加密保存，资产校验和持久化由 aiopsterm 后端完成。': 'HTTP CMDB Provider reads assets from a configured HTTP JSON API. aiopsterm encrypts access tokens, validates assets, and persists them.',
+  '测试 CMDB 连接': 'Test CMDB connection',
+  '请求已配置的 CMDB 地址并返回资产数量。': 'Request the configured CMDB endpoint and return the asset count.',
+  'HTTP CMDB 配置': 'HTTP CMDB configuration',
+  'CMDB 地址': 'CMDB endpoint',
+  '返回资产数组或包含 assets 数组的 HTTP 地址。': 'HTTP endpoint returning an asset array or an object containing an assets array.',
+  '可选认证令牌，由宿主加密保存。': 'Optional authentication token encrypted by the host.',
+  '默认分组': 'Default group',
+  '选择集群打开 Kubernetes 终端': 'Select a cluster to open a Kubernetes terminal',
+  '管理 Agent 可用的 MCP servers、tools 和 resources。': 'Manage the MCP servers, tools, and resources available to the Agent.',
+  '源码': 'Source',
+  '渲染': 'Preview',
+  '明细': 'Details',
+  '命令组': 'Command group',
   '测试中': 'Testing',
   '处理中': 'Processing',
   '保存中': 'Saving',
@@ -567,6 +612,7 @@ const exactZhTW: Record<string, string> = {
 }
 
 const staticPatterns: Array<[RegExp, string]> = [
+  [/堡垒机/g, 'bastion'],
   [/^(.+) 上传成功$/, '$1 upload succeeded'],
   [/^(.+) 上传失败$/, '$1 upload failed'],
   [/^(.+) 上传已取消$/, '$1 upload canceled'],
@@ -1222,7 +1268,8 @@ export const installStaticTextI18n = (options: StaticTextRuntimeOptions) => {
     // \u672a\u8ddf\u8e2a\u4e14\u6240\u6709\u5c5e\u6027\u90fd\u65e0\u53ef\u7ffb\u8bd1\u5185\u5bb9\u65f6\u8df3\u8fc7\uff0c\u907f\u514d\u4e3a\u6bcf\u4e2a\u53d8\u66f4\u5143\u7d20\u8dd1 closest
     const trackedAttrs = attrOriginals.get(element)
     if (!trackedAttrs && !attrs.some((attr) => translatableTextPattern.test(element.getAttribute(attr) ?? ''))) return
-    if (shouldSkipNode(element)) return
+    // Editable values are user content, but their title/placeholder attributes are UI copy.
+    if (element.closest('script, style, code, pre, .markdown-body')) return
     for (const attr of attrs) {
       const value = element.getAttribute(attr)
       if (!value) continue

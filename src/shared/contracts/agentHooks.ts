@@ -16,6 +16,8 @@ export type AgentHookInstallerSource =
   | 'omp'
   | 'kiro'
   | 'rovodev'
+  | 'kimi-code'
+  | 'deepseek-harness'
 
 export type AgentHookInstallerStatus = {
   source: AgentHookInstallerSource

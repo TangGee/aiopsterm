@@ -50,4 +50,8 @@ Codex permission hooks become local pending notifications because stock Codex ow
 
 Cursor, Gemini, Copilot, Grok, CodeBuddy, Factory, Qoder, and Kiro currently report lifecycle, notification, and tool-related hook events through the generic managed-session normalization path. OpenCode, Amp, Pi, OMP, and Rovo Dev use plugin or config hooks for lifecycle/tool events. No second transcript-style question monitor is installed for those agents because their supported aiopsterm hook definitions do not expose a Codex-like hidden `request_user_input` transcript path.
 
+Kimi Code uses its native `[[hooks]]` entries in `~/.kimi-code/config.toml`. The installer owns only the block between the aiopsterm markers and preserves model settings and user-created hooks. Kimi exposes session, prompt, turn, tool, permission, notification, completion, failure, and exit events through this path.
+
+DeepSeek Harness uses the official `@deepseek-ai/dsh-hooks-codex` bridge. The installer adds the dependency to both the `web` and `headless` profiles, stores the Codex-shaped hook configuration in `~/.dsh/aiopsterm/hooks.json`, and inserts a marked block into each profile's `cordis.patch.yml`. The bridge currently exposes session, prompt, tool, and completion events; it does not expose a native approval event, so aiopsterm cannot raise approval notifications for DeepSeek Harness until the upstream bridge provides one.
+
 Antigravity and Hermes Agent are recognized event sources when compatible events are reported. aiopsterm does not yet install their hook files automatically; compatible approval or notification events are still normalized if they reach the managed-agent socket.

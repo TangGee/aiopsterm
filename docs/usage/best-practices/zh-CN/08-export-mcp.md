@@ -8,7 +8,7 @@
 
 ## 三个独立的导出能力
 
-![导出 MCP](../images/settings-export-mcp.png)
+![导出 MCP](../images/zh-CN/settings-export-mcp.png)
 
 从左侧 **① 导出 MCP** 进入页面，**②** 管理本地网关和 Token，**③** 是第一个独立能力卡片；其余两个 Server 卡片在同页下方。
 
@@ -17,7 +17,7 @@
 | Server | 典型场景 | 能力边界 |
 | --- | --- | --- |
 | `aiopsterm_hosts` | 外部 Agent 复用已保存主机，建立无界面 SSH 连接并排查远程文件 | 列出主机、连接/断开、认证请求、运行有界命令、读取文件、glob 和 grep；不返回密码、私钥或令牌 |
-| `aiopsterm_ai_sessions` | 外部 Agent 查看另一个编码代理卡在哪里，并把你带回对应终端 | 列出会话、审批/问题/计划、事件和通知，定位、标记、清理；Claude 阻塞 Hook 可回复，原生 Codex 提示只能定位后在其终端处理 |
+| `aiopsterm_ai_sessions` | 外部 Agent 查看另一个编码代理卡在哪里，并把你带回对应终端 | 列出会话、审批/问题/计划、事件和通知，无轮询等待会话完成，定位、标记、清理；Claude 阻塞 Hook 可回复，原生 Codex 提示只能定位后在其终端处理 |
 | `aiopsterm_databases` | 让可信外部 Agent 浏览保存连接的结构并读取有界数据样本 | 连接投影、目录搜索、表结构/DDL、结构化筛选和分页；不接受任意 SQL，数据库读取权限默认关闭 |
 
 安装步骤：
@@ -26,6 +26,8 @@
 2. 只安装任务需要的能力卡片。未安装的 Server 不会向 Agent 提供 tool schema。
 3. 数据库场景还要显式开启 **允许外部 Agent 读取数据库**；非 SQLite 连接通常需要先在数据库工作区打开。
 4. 回到外部 Agent 重新加载 MCP 列表，用一次只读查询验证连接。
+
+监控另一个 Agent 完成任务时，不要让外部 Agent 每几秒调用一次 `list_ai_sessions`。先取得目标 `source` 和 `sessionId`，再调用一次 `wait_ai_session_completion`；它会在后续 `stop`、`session_end` 或生命周期结束事件到达时立即返回，默认最多等待 120 秒。只有返回 `timedOut: true` 时，才使用响应中的 `nextSeq` 作为下一次 `afterSeq` 继续等待。返回完成事件后，再由外部 Agent 检查工作目录、代码差异和测试结果。
 
 页面提供外部 Agent MCP 安装器与 Token 管理。三个 Server 共用本地 socket、应用自带运行时和当前 Token，但工具列表完全隔离：
 

@@ -6,7 +6,7 @@
 
 点击 **设置齿轮 -> 主机Agent -> MCP**。点击 **Add Server** 打开 JSON 编辑器；保存后回到服务器列表查看连接状态、Tools 和 Resources。这个页面不会安装 `aiopsterm_hosts`、`aiopsterm_ai_sessions` 或 `aiopsterm_databases`，这些服务位于[导出 MCP](08-export-mcp.md)。
 
-![MCP 设置页](../images/settings-mcp.png)
+![MCP 设置页](../images/zh-CN/settings-mcp.png)
 
 图中 **①** 是 MCP 子页签，**②** 打开 Server 配置，**③** 展示发现到的工具和资源。
 

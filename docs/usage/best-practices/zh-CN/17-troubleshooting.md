@@ -6,7 +6,7 @@
 
 点击左下角 **设置 -> 关于**，可查看版本、复制诊断信息并打开日志目录。AI 通知和外部会话 Hook 在 **设置 -> AI 通知**；Host Agent 的模型和 MCP 在 **设置 -> 模型**、**设置 -> 主机 Agent**；导出给外部 Agent 的 MCP 在 **设置 -> 导出 MCP**。
 
-![关于与日志入口](../images/settings-about.png)
+![关于与日志入口](../images/zh-CN/settings-about.png)
 
 ## 安装后无法打开
 

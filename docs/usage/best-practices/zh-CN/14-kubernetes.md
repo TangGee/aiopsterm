@@ -6,7 +6,7 @@
 
 点击模块栏的 **Kubernetes**。没有集群时点击集群区域的添加按钮，选择导入 kubeconfig 或手工配置，保存前先点击连接测试。连接后可从资源行打开 Describe/Logs，从集群操作打开终端，从资源工作区的 **Agent** 命令栏执行集群范围命令；资源输出区的 **发送输出到 AI** 会把真实输出交给右侧 AI 对话分析，使用前需在 **设置 -> 模型** 配置可用模型。
 
-![Kubernetes 工作区](../images/kubernetes-workspace.png)
+![Kubernetes 工作区](../images/zh-CN/kubernetes-workspace.png)
 
 **①** 切换 context，**②** 是 kubectl 终端，**③** 管理集群配置，**④** 浏览和操作资源。
 
@@ -41,7 +41,7 @@
 
 ## 场景四：集群 Agent 命令工作流
 
-![Kubernetes Agent 与 AI](../images/kubernetes-ai-workflow.png)
+![Kubernetes Agent 与 AI](../images/zh-CN/kubernetes-ai-workflow.png)
 
 资源工作区顶部的 Agent 栏始终绑定一个明确的 cluster/context：
 

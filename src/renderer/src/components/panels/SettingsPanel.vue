@@ -5,6 +5,7 @@
       :key="item.key"
       class="settings-nav-item"
       :class="{ active: isSettingsNavItemActive(item.key) }"
+      :data-settings-key="item.key"
       :data-onboarding-id="
         item.key === 'general'
           ? 'settings-side-nav'

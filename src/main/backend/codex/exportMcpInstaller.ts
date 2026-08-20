@@ -1,7 +1,7 @@
 import { access, mkdir, readFile, stat } from 'fs/promises'
 import { copyFileSync, existsSync, mkdirSync } from 'fs'
 import { execFile as nodeExecFile } from 'child_process'
-import { delimiter, dirname, isAbsolute, join } from 'path'
+import { basename, delimiter, dirname, isAbsolute, join } from 'path'
 import type {
   ExportMcpBridgeStatus,
   ExportMcpCopyConfigInput,
@@ -15,6 +15,7 @@ import type {
   ExportMcpTokenResetResult
 } from '@shared/contracts/exportMcp'
 import { executableCandidateNames, type PlatformRuntime } from '../app/platformRuntime'
+import { logRuntimeEvent } from '../app/runtimeLog'
 import { getExternalCodexMcpBridgeRuntimeStatus } from './externalCodexMcpBridge'
 import { getEffectiveExportMcpToken, rotateStoredExportMcpToken } from './exportMcpTokenRuntime'
 
@@ -172,13 +173,39 @@ const pathExists = async (path: string) => {
   }
 }
 
+const pathEnvironmentKey = (env: NodeJS.ProcessEnv) => Object.keys(env).find((key) => key.toUpperCase() === 'PATH') || (getPlatform() === 'win32' ? 'Path' : 'PATH')
+
+const binarySearchDirectories = (env: NodeJS.ProcessEnv = getEnv()) => {
+  const home = getHomeDir()
+  const platform = getPlatform()
+  const pathDirectories = cleanText(env[pathEnvironmentKey(env)]).split(delimiter)
+  const packageManagerDirectories = [
+    cleanText(env.NPM_CONFIG_PREFIX) ? join(cleanText(env.NPM_CONFIG_PREFIX), 'bin') : '',
+    cleanText(env.VOLTA_HOME) ? join(cleanText(env.VOLTA_HOME), 'bin') : '',
+    cleanText(env.BUN_INSTALL) ? join(cleanText(env.BUN_INSTALL), 'bin') : '',
+    cleanText(env.PNPM_HOME)
+  ]
+  const platformDirectories = platform === 'win32'
+    ? [
+        cleanText(env.APPDATA) ? join(cleanText(env.APPDATA), 'npm') : '',
+        cleanText(env.LOCALAPPDATA) ? join(cleanText(env.LOCALAPPDATA), 'Microsoft', 'WinGet', 'Links') : '',
+        join(home, 'AppData', 'Roaming', 'npm'),
+        join(home, '.local', 'bin')
+      ]
+    : [
+        join(home, '.npm-global', 'bin'),
+        join(home, '.local', 'bin'),
+        join(home, '.volta', 'bin'),
+        join(home, '.bun', 'bin'),
+        ...(platform === 'darwin' ? [join(home, 'Library', 'pnpm'), '/opt/homebrew/bin'] : []),
+        '/usr/local/bin'
+      ]
+  return [...new Set([...pathDirectories, ...packageManagerDirectories, ...platformDirectories].map(cleanText).filter(Boolean))]
+}
+
 const findBinary = async (binaryName: string, env: NodeJS.ProcessEnv = getEnv()) => {
-  const pathValue = cleanText(env.PATH)
-  if (!pathValue) return ''
   const names = executableCandidateNames(binaryName, env, getPlatform())
-  for (const entry of pathValue.split(delimiter)) {
-    const dir = cleanText(entry)
-    if (!dir) continue
+  for (const dir of binarySearchDirectories(env)) {
     for (const name of names) {
       const candidate = join(dir, name)
       try {
@@ -186,7 +213,7 @@ const findBinary = async (binaryName: string, env: NodeJS.ProcessEnv = getEnv())
         const metadata = await getStat()(candidate)
         if (metadata.isFile()) return candidate
       } catch {
-        // Continue searching PATH.
+        // Continue searching configured and platform-standard CLI directories.
       }
     }
   }
@@ -326,12 +353,13 @@ const statusForDefinition = async (definition: ExportMcpClientDefinition, server
   const runtimePath = getJsRuntimeExecutable()
   const bridge = bridgeStatus()
   const token = await getExportMcpToken()
+  const detectedBinaryPath = await findBinary(definition.binaryName, env)
   const status: ExportMcpClientStatus = {
     serverId: server.id,
     source: definition.source,
     label: definition.label,
     binaryName: definition.binaryName,
-    binaryPath: await findBinary(definition.binaryName, env),
+    binaryPath: detectedBinaryPath,
     configPath,
     configExists: await pathExists(configPath),
     installed: false,
@@ -342,10 +370,10 @@ const statusForDefinition = async (definition: ExportMcpClientDefinition, server
     warnings: []
   }
 
-  if (!status.binaryPath) status.warnings.push(`${definition.binaryName} not found on PATH`)
+  if (!status.binaryPath) status.warnings.push(`${definition.binaryName} CLI was not found in system or platform-standard install locations`)
   if (!scriptPath || !(await pathExists(scriptPath))) status.warnings.push('aiopsterm external MCP helper path is unavailable')
   if (!runtimePath || !(await pathExists(runtimePath))) status.warnings.push('aiopsterm JavaScript runtime path is unavailable')
-  if (!bridge.enabled) status.warnings.push('External MCP bridge is disabled; relaunch aiopsterm with AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE=1')
+  if (!bridge.enabled) status.warnings.push('External MCP bridge is disabled by runtime configuration')
   if (!bridge.tokenConfigured || !token) status.warnings.push('Export MCP token is not configured')
   if (bridge.enabled && !bridge.listening) status.warnings.push('External MCP bridge is enabled but not listening yet')
 
@@ -372,23 +400,36 @@ export const listExportMcpInstallers = async (): Promise<ExportMcpInstallerSnaps
 }
 
 const runClientCommand = async (binaryPath: string, args: string[], options: { ignoreFailure?: boolean } = {}) => {
+  const env = getEnv()
+  const pathKey = pathEnvironmentKey(env)
+  const commandEnv = {
+    ...env,
+    [pathKey]: [...new Set([dirname(binaryPath), ...binarySearchDirectories(env)])].join(delimiter)
+  }
   try {
     await getExecFile()(binaryPath, args, {
-      env: getEnv(),
+      env: commandEnv,
       timeout: 30000,
       windowsHide: true
     })
   } catch (error) {
     if (options.ignoreFailure) return
     const details = error as Error & { stderr?: string; stdout?: string }
-    const stderr = cleanText(details.stderr)
-    const stdout = cleanText(details.stdout)
-    throw new ExportMcpInstallerError('EXPORT_MCP_CLIENT_COMMAND_FAILED', stderr || stdout || details.message || 'External MCP client command failed.')
+    const errorMessage = (cleanText(details.stderr) || cleanText(details.stdout) || details.message || 'External MCP client command failed.')
+      .replace(/AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN=(?:"[^"]*"|'[^']*'|\S+)/g, 'AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN=<redacted>')
+      .slice(0, 2000)
+    logRuntimeEvent('error', 'export-mcp.client-command.failed', {
+      client: basename(binaryPath),
+      operation: args.includes('add') ? 'add' : args.includes('remove') ? 'remove' : 'unknown',
+      serverName: args.find((arg) => arg.startsWith('aiopsterm_')) || '',
+      errorMessage
+    })
+    throw new ExportMcpInstallerError('EXPORT_MCP_CLIENT_COMMAND_FAILED', errorMessage)
   }
 }
 
 const assertInstallReady = async (status: ExportMcpClientStatus, token: string) => {
-  if (!status.binaryPath) throw new ExportMcpInstallerError('EXPORT_MCP_CLIENT_MISSING', `${status.label} CLI was not found on PATH.`)
+  if (!status.binaryPath) throw new ExportMcpInstallerError('EXPORT_MCP_CLIENT_MISSING', `${status.label} CLI was not found in system or platform-standard install locations.`)
   if (!status.scriptPath || !(await pathExists(status.scriptPath))) {
     throw new ExportMcpInstallerError('EXPORT_MCP_SCRIPT_MISSING', 'aiopsterm external MCP helper path is unavailable.')
   }
@@ -536,7 +577,7 @@ const uninstallDefinition = async (
   server: ExportMcpServerDefinition
 ): Promise<ExportMcpInstallerOperationResult> => {
   const status = await statusForDefinition(definition, server)
-  if (!status.binaryPath) throw new ExportMcpInstallerError('EXPORT_MCP_CLIENT_MISSING', `${status.label} CLI was not found on PATH.`)
+  if (!status.binaryPath) throw new ExportMcpInstallerError('EXPORT_MCP_CLIENT_MISSING', `${status.label} CLI was not found in system or platform-standard install locations.`)
   if (definition.source === 'codex') {
     await runClientCommand(status.binaryPath, ['mcp', 'remove', server.name])
   } else {

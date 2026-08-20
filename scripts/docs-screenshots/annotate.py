@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Annotate aiopsterm docs screenshots: crops + numbered badges + arrows from manifest boxes."""
-import json, math, os
+import json, math, os, sys
 from PIL import Image, ImageDraw, ImageFont
 
 import pathlib
 REPO = pathlib.Path(__file__).resolve().parents[2]
-RAW = str(REPO / 'test-results' / 'docs-screenshots' / 'raw')
-OUT = str(REPO / 'docs' / 'usage' / 'best-practices' / 'images')
-os.makedirs(OUT, exist_ok=True)
+RAW_ROOT = REPO / 'test-results' / 'docs-screenshots' / 'raw'
+OUT_ROOT = REPO / 'docs' / 'usage' / 'best-practices' / 'images'
 
 ACCENT = (255, 109, 58, 255)      # orange
 BADGE_TEXT = (255, 255, 255, 255)
@@ -25,9 +24,10 @@ def load_badge_font():
 
 FONT = load_badge_font()
 
-def load(name):
-    im = Image.open(f'{RAW}/{name}.png').convert('RGBA')
-    with open(f'{RAW}/{name}.json') as f:
+def load(locale, name):
+    raw = RAW_ROOT / locale
+    im = Image.open(raw / f'{name}.png').convert('RGBA')
+    with open(raw / f'{name}.json') as f:
         boxes = json.load(f)
     return im, boxes
 
@@ -79,22 +79,23 @@ def callout(d, imsize, box, num, side='left', dist=70, outline=True, pad=4):
         arrow(d, start, end)
     badge(d, start, num)
 
-def render(fig):
-    im, boxes = load(fig['src'])
+def render(locale, fig):
+    im, boxes = load(locale, fig['src'])
     d = ImageDraw.Draw(im)
     for c in fig['callouts']:
         b = boxes.get(c['key']) if 'key' in c else c.get('box')
         if not b:
-            print(f"  !! {fig['out']}: missing box {c.get('key')}")
-            continue
+            raise ValueError(f"missing box {c.get('key')}")
         callout(d, im.size, b, c['n'], side=c.get('side', 'left'), dist=c.get('dist', 70),
                 outline=c.get('outline', True), pad=c.get('pad', 4))
     if fig.get('crop'):
         im = im.crop(fig['crop'])
     if fig.get('scale'):
         im = im.resize((int(im.width*fig['scale']), int(im.height*fig['scale'])), Image.LANCZOS)
-    im.convert('RGB').save(f"{OUT}/{fig['out']}.png", optimize=True)
-    print(f"  ok {fig['out']} {im.size}")
+    output = OUT_ROOT / locale
+    output.mkdir(parents=True, exist_ok=True)
+    im.convert('RGB').save(output / f"{fig['out']}.png", optimize=True)
+    print(f"  ok {locale}/{fig['out']} {im.size}")
 
 FIGS = [
   # ---- getting started ----
@@ -269,9 +270,18 @@ FIGS = [
   ]),
 ]
 
-for fig in FIGS:
-    try:
-        render(fig)
-    except Exception as e:
-        print(f"  ERR {fig['out']}: {e}")
+requested_locales = sys.argv[1:] or ['zh-CN', 'en-US']
+if any(locale not in ('zh-CN', 'en-US') for locale in requested_locales):
+    raise SystemExit('Usage: annotate.py [zh-CN] [en-US]')
+
+errors = []
+for locale in requested_locales:
+    for fig in FIGS:
+        try:
+            render(locale, fig)
+        except Exception as e:
+            print(f"  ERR {locale}/{fig['out']}: {e}")
+            errors.append(f"{locale}/{fig['out']}: {e}")
+if errors:
+    raise SystemExit(f"annotation failed ({len(errors)}): " + '; '.join(errors))
 print('done')

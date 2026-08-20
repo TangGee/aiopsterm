@@ -1,4 +1,6 @@
 import { access, mkdir, readFile, rm, stat, writeFile } from 'fs/promises'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
 import { delimiter, dirname, isAbsolute, join } from 'path'
 import type {
   AgentHookInstallerOperationInput,
@@ -14,14 +16,20 @@ import {
   configHasOwnedHooks,
   configHasOwnedOpenCodePlugin,
   codexHookHash,
+  deepseekPatchBegin,
+  deepseekPatchEnd,
   fileHookMarker,
   hookDefinitions,
   installCodexHookTrust,
   installCodexHooksFeature,
+  installDeepseekHarnessPatch,
+  installKimiCodeHooks,
   installRovoDevYaml,
   isOwnedFileHook,
   isOwnedHookCommand,
   isPlainObject,
+  kimiTomlBegin,
+  kimiTomlEnd,
   mergeAgentHookJson,
   mergeOpenCodePluginRegistration,
   normalizeSource,
@@ -35,11 +43,22 @@ import {
   rovoDevYamlHooksBlock,
   type AgentHookDefinition,
   uninstallCodexHooksFeature,
+  uninstallDeepseekHarnessPatch,
+  uninstallKimiCodeHooks,
   uninstallRovoDevYaml
 } from './agentHookConfigRuntime'
 import { executableCandidateNames, type PlatformRuntime } from '../app/platformRuntime'
 
-export { codexHookHash, installCodexHooksFeature, mergeAgentHookJson, uninstallCodexHooksFeature } from './agentHookConfigRuntime'
+export {
+  codexHookHash,
+  installCodexHooksFeature,
+  installDeepseekHarnessPatch,
+  installKimiCodeHooks,
+  mergeAgentHookJson,
+  uninstallCodexHooksFeature,
+  uninstallDeepseekHarnessPatch,
+  uninstallKimiCodeHooks
+} from './agentHookConfigRuntime'
 
 type AgentHookInstallerRuntimeConfig = {
   getEnv?: () => NodeJS.ProcessEnv
@@ -53,6 +72,7 @@ type AgentHookInstallerRuntimeConfig = {
   mkdir?: typeof mkdir
   access?: typeof access
   stat?: typeof stat
+  runCommand?: (command: string, args: string[], env: NodeJS.ProcessEnv) => Promise<void>
 }
 
 const runtimeConfig: AgentHookInstallerRuntimeConfig = {}
@@ -69,6 +89,7 @@ export const configureAgentHookInstallerRuntime = (config: AgentHookInstallerRun
   runtimeConfig.mkdir = config.mkdir
   runtimeConfig.access = config.access
   runtimeConfig.stat = config.stat
+  runtimeConfig.runCommand = config.runCommand
 }
 
 const getEnv = () => runtimeConfig.getEnv?.() || process.env
@@ -80,6 +101,8 @@ const getRm = () => runtimeConfig.rm || rm
 const getMkdir = () => runtimeConfig.mkdir || mkdir
 const getAccess = () => runtimeConfig.access || access
 const getStat = () => runtimeConfig.stat || stat
+const runCommand = (command: string, args: string[], env: NodeJS.ProcessEnv) =>
+  runtimeConfig.runCommand?.(command, args, env) || promisify(execFile)(command, args, { env }).then(() => undefined)
 const getJsRuntimeExecutable = () => cleanText(runtimeConfig.getJsRuntimeExecutable?.()) || cleanText(getEnv().APPIMAGE) || process.execPath
 
 const definitionFor = (source: AgentHookInstallerSource) => hookDefinitions.find((definition) => definition.source === source)
@@ -96,6 +119,14 @@ const configDirFor = (definition: AgentHookDefinition, env: NodeJS.ProcessEnv = 
 const configPathFor = (definition: AgentHookDefinition, env: NodeJS.ProcessEnv = getEnv()) => join(configDirFor(definition, env), definition.configFileName)
 
 const codexConfigTomlPathFor = (definition: AgentHookDefinition, env: NodeJS.ProcessEnv = getEnv()) => join(configDirFor(definition, env), 'config.toml')
+
+const deepseekHomeFor = (env: NodeJS.ProcessEnv = getEnv()) => {
+  const override = cleanText(env.DSH_HOME)
+  return override ? (isAbsolute(override) ? override : join(getHomeDir(), override)) : join(getHomeDir(), '.dsh')
+}
+
+const deepseekProfilePatchPaths = (env: NodeJS.ProcessEnv = getEnv()) =>
+  ['web', 'headless'].map((profile) => join(deepseekHomeFor(env), 'profiles', profile, 'cordis.patch.yml'))
 
 const pathExists = async (path: string) => {
   try {
@@ -190,7 +221,16 @@ const statusForDefinition = async (definition: AgentHookDefinition): Promise<Age
 
   try {
     const configRaw = status.configExists ? String(await getReadFile()(configPath, 'utf-8')) : ''
-    if (definition.fileTemplate) {
+    if (definition.kimiToml) {
+      status.installed = configRaw.includes(kimiTomlBegin) && configRaw.includes(kimiTomlEnd)
+    } else if (definition.deepseekHarness) {
+      const config = parseConfigJson(configRaw, configPath)
+      const patchPaths = deepseekProfilePatchPaths(env)
+      status.extraConfigPath = patchPaths[0]
+      const patches = await Promise.all(patchPaths.map(async (path) => (await pathExists(path)) ? String(await getReadFile()(path, 'utf-8')) : ''))
+      status.installed = configHasOwnedHooks(config) && patches.every((raw) => raw.includes(deepseekPatchBegin) && raw.includes(deepseekPatchEnd))
+      if (!await findBinary('pnpm', env)) status.warnings.push('pnpm not found on PATH; DeepSeek Harness plugin installation requires pnpm')
+    } else if (definition.fileTemplate) {
       status.installed = isOwnedFileHook(configRaw)
       if (definition.source === 'opencode') {
         const configJsonPath = openCodeConfigPathFor(definition, env)
@@ -245,6 +285,31 @@ const installDefinition = async (definition: AgentHookDefinition): Promise<Agent
   if (!scriptPath) throw new AgentHookInstallerError('AGENT_HOOK_SCRIPT_MISSING', 'Agent hook helper path is unavailable.')
   const configPath = configPathFor(definition)
   await getMkdir()(dirname(configPath), { recursive: true })
+  if (definition.kimiToml) {
+    const existingRaw = (await pathExists(configPath)) ? String(await getReadFile()(configPath, 'utf-8')) : ''
+    await getWriteFile()(configPath, installKimiCodeHooks(existingRaw, definition, scriptPath, getPlatform(), getJsRuntimeExecutable()), 'utf-8')
+    const snapshot = await listAgentHookInstallers()
+    return { ok: true, data: { operation: 'install', source: definition.source, status: snapshot.installers.find((item) => item.source === definition.source)!, snapshot } }
+  }
+  if (definition.deepseekHarness) {
+    const existingRaw = (await pathExists(configPath)) ? String(await getReadFile()(configPath, 'utf-8')) : ''
+    const existing = parseConfigJson(existingRaw, configPath)
+    const merged = mergeAgentHookJson(existing, definition, scriptPath, true, getPlatform(), getJsRuntimeExecutable())
+    await getWriteFile()(configPath, prettyJson(merged.config), 'utf-8')
+    const env = { ...getEnv(), npm_config_registry: getEnv().npm_config_registry || 'https://registry.npmmirror.com/' }
+    const dshBinary = await findBinary(definition.binaryName, env)
+    if (!dshBinary) throw new AgentHookInstallerError('AGENT_HOOK_BINARY_MISSING', 'DeepSeek Harness dsh executable was not found on PATH.')
+    for (const profile of ['web', 'headless']) {
+      await runCommand(dshBinary, ['plugin', '--profile', profile, 'add', '@deepseek-ai/dsh-hooks-codex@next'], env)
+    }
+    for (const patchPath of deepseekProfilePatchPaths(env)) {
+      await getMkdir()(dirname(patchPath), { recursive: true })
+      const patchRaw = (await pathExists(patchPath)) ? String(await getReadFile()(patchPath, 'utf-8')) : '[]\n'
+      await getWriteFile()(patchPath, installDeepseekHarnessPatch(patchRaw, configPath), 'utf-8')
+    }
+    const snapshot = await listAgentHookInstallers()
+    return { ok: true, data: { operation: 'install', source: definition.source, status: snapshot.installers.find((item) => item.source === definition.source)!, snapshot } }
+  }
   if (definition.fileTemplate) {
     await installFileHookDefinition(definition, scriptPath)
     const snapshot = await listAgentHookInstallers()
@@ -275,6 +340,27 @@ const installDefinition = async (definition: AgentHookDefinition): Promise<Agent
 
 const uninstallDefinition = async (definition: AgentHookDefinition): Promise<AgentHookInstallerOperationResult> => {
   const configPath = configPathFor(definition)
+  if (definition.kimiToml) {
+    if (await pathExists(configPath)) {
+      await getWriteFile()(configPath, uninstallKimiCodeHooks(String(await getReadFile()(configPath, 'utf-8'))), 'utf-8')
+    }
+    const snapshot = await listAgentHookInstallers()
+    return { ok: true, data: { operation: 'uninstall', source: definition.source, status: snapshot.installers.find((item) => item.source === definition.source)!, snapshot } }
+  }
+  if (definition.deepseekHarness) {
+    if (await pathExists(configPath)) {
+      const existing = parseConfigJson(String(await getReadFile()(configPath, 'utf-8')), configPath)
+      const merged = mergeAgentHookJson(existing, definition, hookScriptPath() || 'aiopsterm-agent-hook', false, getPlatform(), getJsRuntimeExecutable())
+      await getWriteFile()(configPath, prettyJson(merged.config), 'utf-8')
+    }
+    for (const patchPath of deepseekProfilePatchPaths()) {
+      if (await pathExists(patchPath)) {
+        await getWriteFile()(patchPath, uninstallDeepseekHarnessPatch(String(await getReadFile()(patchPath, 'utf-8'))), 'utf-8')
+      }
+    }
+    const snapshot = await listAgentHookInstallers()
+    return { ok: true, data: { operation: 'uninstall', source: definition.source, status: snapshot.installers.find((item) => item.source === definition.source)!, snapshot } }
+  }
   if (definition.fileTemplate) {
     await uninstallFileHookDefinition(definition)
     const snapshot = await listAgentHookInstallers()

@@ -18,6 +18,8 @@ export type AiAgentSessionSource =
   | 'amp'
   | 'pi'
   | 'omp'
+  | 'kimi-code'
+  | 'deepseek-harness'
 
 export type AiAgentSessionEventName =
   | 'session_start'

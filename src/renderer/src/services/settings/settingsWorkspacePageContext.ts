@@ -249,6 +249,31 @@ export const createSettingsWorkspacePageContext = (workspace: SettingsWorkspaceS
       installed: false,
       scriptPath: '',
       warnings: []
+    },
+    {
+      source: 'kimi-code',
+      label: 'Kimi Code',
+      binaryName: 'kimi',
+      launchCommand: 'kimi',
+      binaryPath: '',
+      configPath: '~/.kimi-code/config.toml',
+      configExists: false,
+      installed: false,
+      scriptPath: '',
+      warnings: []
+    },
+    {
+      source: 'deepseek-harness',
+      label: 'DeepSeek Harness',
+      binaryName: 'dsh',
+      launchCommand: 'dsh web',
+      binaryPath: '',
+      configPath: '~/.dsh/aiopsterm/hooks.json',
+      configExists: false,
+      installed: false,
+      scriptPath: '',
+      extraConfigPath: '~/.dsh/profiles/web/cordis.patch.yml',
+      warnings: []
     }
   ]
 
@@ -311,11 +336,6 @@ export const createSettingsWorkspacePageContext = (workspace: SettingsWorkspaceS
       label: 'CLI Helper',
       descriptionKey: 'settings.ai.automation.cliHelperDescription' as const,
       value: 'aio list-notifications'
-    },
-    {
-      label: 'External Codex MCP',
-      descriptionKey: 'settings.ai.automation.externalCodexMcpDescription' as const,
-      value: 'AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE=1'
     },
     {
       label: 'External Codex MCP Token',

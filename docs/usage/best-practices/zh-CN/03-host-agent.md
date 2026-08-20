@@ -6,7 +6,7 @@
 
 主机 Agent 必须先有可用模型，只有 SSH 连接没有模型配置不能发送对话。
 
-![模型设置](../images/settings-models.png)
+![模型设置](../images/zh-CN/settings-models.png)
 
 1. 点击 **设置齿轮 -> 模型 -> 添加模型**。
 2. 使用内嵌 Codex 时，选择 **OpenAI Compatible**，填写 Base URL、API Key 和 Model，并把 **API Format** 设为 **Responses**。Codex 不使用该 Provider 的 Chat Completions 格式。
@@ -18,7 +18,7 @@
 
 远程主机无需安装 Codex 或 Classic。Agent 在本机运行，远程操作通过已连接终端及其代理/跳板路径完成。
 
-![主机 AI 面板](../images/ai-panel.png)
+![主机 AI 面板](../images/zh-CN/ai-panel.png)
 
 通过 **①** 选择 Codex CLI 或 Classic，**②** 检查 AI 返回内容，**③** 显式添加主机上下文，在 **④** 输入任务并于 **⑤** 确认模型，最后从 **⑥** 发送或停止任务。
 

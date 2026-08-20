@@ -8,7 +8,7 @@ Click **Knowledge** on the module rail. Search and the `+` add button are at the
 
 ## The Tree Panel
 
-![Knowledge tree](../images/knowledge-tree.png)
+![Knowledge tree](../images/en-US/knowledge-tree.png)
 
 - **① Add button** — `新建文档` (New document) creates a Markdown document that opens immediately and enters inline rename; folders and file/directory uploads are here too.
 - **② Search box** — filter tree nodes by name.
@@ -22,7 +22,7 @@ Organizing:
 
 ## Editing Documents
 
-![Knowledge editor](../images/knowledge-editor.png)
+![Knowledge editor](../images/en-US/knowledge-editor.png)
 
 - Double-click a document in the **① tree** to open the **③ editor** in the main workspace.
 - **② `源码` / `渲染` (Source / Preview)** toggles raw Markdown and rendered view — tables, code highlighting, Mermaid diagrams, knowledge-local images, and sanitized HTML all render. Your choice is remembered: later Markdown documents open in the last-selected mode (jumping to a specific line from search still opens the source editor).

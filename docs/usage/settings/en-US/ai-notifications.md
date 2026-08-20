@@ -16,8 +16,10 @@ For operator workflows, see [AI Session Management](../../best-practices/en-US/0
 ## Agent Hook Installer
 
 - Session Management Hook: Writes the aiopsterm Hook Helper into supported agent user-level hook configuration so the `AI Sessions` panel can discover AI sessions launched from aiopsterm local-connection terminals.
-- CLI: Shows whether the matching command is visible in the current `PATH`, such as `codex`, `claude`, `cursor-agent`, `gemini`, `copilot`, `grok`, `opencode`, `codebuddy`, `droid`, `qodercli`, `amp`, `pi`, `omp`, `kiro-cli`, or `acli`.
+- CLI: Shows whether the matching command is visible in the current `PATH`, such as `codex`, `claude`, `cursor-agent`, `gemini`, `copilot`, `grok`, `opencode`, `codebuddy`, `droid`, `qodercli`, `amp`, `pi`, `omp`, `kiro-cli`, `acli`, `kimi`, or `dsh`.
 - Hook Config: The installer only inserts aiopsterm-marked commands and preserves other user hooks.
+- Kimi Code: The installer adds a marked `[[hooks]]` block to `~/.kimi-code/config.toml` for session, turn, permission, tool, completion, failure, and exit events while preserving model and user hook configuration.
+- DeepSeek Harness: The installer adds the official `@deepseek-ai/dsh-hooks-codex` bridge to the `web` and `headless` profiles and points a marked profile patch at `~/.dsh/aiopsterm/hooks.json`. Initial installation requires `pnpm`; uninstall removes only the aiopsterm patch and keeps user profiles and plugin dependencies.
 - Scope: The helper reports events only inside aiopsterm local-connection terminals with `AIOPSTERM_MANAGED_TERMINAL=1` and `AIOPSTERM_AGENT_SOCKET_PATH`. External system terminals return empty output and native agent approval remains untouched.
 
 ## AI Session Hibernation

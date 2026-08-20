@@ -39,6 +39,25 @@ export type AgentSessionEventStreamListResult = {
   errorMessage?: string
 }
 
+export type AgentSessionEventStreamWaitResult = {
+  protocol: 'aiopsterm-agent-events'
+  version: 1
+  bootId: string
+  afterSeq: number
+  latestSeq: number
+  nextSeq: number
+  timedOut: boolean
+  aborted: boolean
+  event?: AgentSessionEventStreamFrame
+}
+
+export type AgentSessionEventStreamWaitInput = {
+  afterSeq: number
+  timeoutMs: number
+  signal?: AbortSignal
+  predicate: (frame: AgentSessionEventStreamFrame) => boolean
+}
+
 type AgentSessionEventStreamFilters = {
   names: Set<string>
   categories: Set<AgentSessionEventStreamCategory>
@@ -50,6 +69,16 @@ type AgentSessionEventStreamSubscriber = {
   socket: Socket
   filters: AgentSessionEventStreamFilters
   heartbeat: NodeJS.Timeout | null
+}
+
+type AgentSessionEventStreamWaiter = {
+  id: string
+  afterSeq: number
+  predicate: (frame: AgentSessionEventStreamFrame) => boolean
+  timer: NodeJS.Timeout
+  signal?: AbortSignal
+  abortListener?: () => void
+  resolve: (result: AgentSessionEventStreamWaitResult) => void
 }
 
 type AgentSessionEventStreamRuntimeOptions = {
@@ -67,6 +96,7 @@ export const createAgentSessionEventStreamRuntime = (options: AgentSessionEventS
   let streamSeq = 0
   let streamEvents: AgentSessionEventStreamFrame[] = []
   let streamSubscribers = new Map<string, AgentSessionEventStreamSubscriber>()
+  let streamWaiters = new Map<string, AgentSessionEventStreamWaiter>()
 
   const socketWriteJsonLine = (socket: Socket, value: unknown) => {
     socket.write(`${JSON.stringify(value)}\n`)
@@ -100,12 +130,40 @@ export const createAgentSessionEventStreamRuntime = (options: AgentSessionEventS
   const streamMatches = (frame: AgentSessionEventStreamFrame, filters: AgentSessionEventStreamFilters) =>
     (!filters.names.size || filters.names.has(frame.name)) && (!filters.categories.size || filters.categories.has(frame.category))
 
+  const waitResult = (
+    afterSeq: number,
+    options: { timedOut?: boolean; aborted?: boolean; event?: AgentSessionEventStreamFrame } = {}
+  ): AgentSessionEventStreamWaitResult => ({
+    protocol: 'aiopsterm-agent-events',
+    version: 1,
+    bootId: streamBootId,
+    afterSeq,
+    latestSeq: streamSeq,
+    nextSeq: streamSeq + 1,
+    timedOut: options.timedOut === true,
+    aborted: options.aborted === true,
+    ...(options.event ? { event: options.event } : {})
+  })
+
+  const finishWaiter = (id: string, options: { timedOut?: boolean; aborted?: boolean; event?: AgentSessionEventStreamFrame } = {}) => {
+    const waiter = streamWaiters.get(id)
+    if (!waiter) return
+    streamWaiters.delete(id)
+    clearTimeout(waiter.timer)
+    if (waiter.signal && waiter.abortListener) waiter.signal.removeEventListener('abort', waiter.abortListener)
+    waiter.resolve(waitResult(waiter.afterSeq, options))
+  }
+
   const publishStreamFrame = (frame: AgentSessionEventStreamFrame) => {
     streamEvents.push(frame)
     if (streamEvents.length > maxStreamEvents) streamEvents = streamEvents.slice(-maxStreamEvents)
     streamSubscribers.forEach((subscriber) => {
       if (!streamMatches(frame, subscriber.filters)) return
       socketWriteJsonLine(subscriber.socket, frame)
+    })
+    streamWaiters.forEach((waiter) => {
+      if (frame.seq <= waiter.afterSeq || !waiter.predicate(frame)) return
+      finishWaiter(waiter.id, { event: frame })
     })
   }
 
@@ -323,22 +381,51 @@ export const createAgentSessionEventStreamRuntime = (options: AgentSessionEventS
     }
   }
 
+  const waitForEvent = ({ afterSeq, timeoutMs, signal, predicate }: AgentSessionEventStreamWaitInput) => {
+    const normalizedAfterSeq = Number.isFinite(afterSeq) ? Math.max(0, Math.floor(afterSeq)) : streamSeq
+    const replay = streamEvents.find((frame) => frame.seq > normalizedAfterSeq && predicate(frame))
+    if (replay) return Promise.resolve(waitResult(normalizedAfterSeq, { event: replay }))
+    if (signal?.aborted) return Promise.resolve(waitResult(normalizedAfterSeq, { aborted: true }))
+    const normalizedTimeoutMs = Number.isFinite(timeoutMs) ? Math.max(1, Math.floor(timeoutMs)) : 120_000
+    return new Promise<AgentSessionEventStreamWaitResult>((resolve) => {
+      const id = randomUUID()
+      const timer = setTimeout(() => finishWaiter(id, { timedOut: true }), normalizedTimeoutMs)
+      const waiter: AgentSessionEventStreamWaiter = {
+        id,
+        afterSeq: normalizedAfterSeq,
+        predicate,
+        timer,
+        signal,
+        resolve
+      }
+      if (signal) {
+        waiter.abortListener = () => finishWaiter(id, { aborted: true })
+        signal.addEventListener('abort', waiter.abortListener, { once: true })
+      }
+      streamWaiters.set(id, waiter)
+    })
+  }
+
   const closeEventStreams = () => {
     streamSubscribers.forEach((subscriber) => {
       if (subscriber.heartbeat) clearInterval(subscriber.heartbeat)
       subscriber.socket.destroy()
     })
     streamSubscribers = new Map()
+    ;[...streamWaiters.keys()].forEach((id) => finishWaiter(id, { aborted: true }))
+    streamWaiters = new Map()
   }
 
   return {
     streamBootId,
     streamEventCount: () => streamEvents.length,
     streamLatestSeq: () => streamSeq,
+    streamWaiterCount: () => streamWaiters.size,
     publishAgentEventStreamFrame,
     publishManagedAiStreamFrame,
     startEventStream,
     listManagedAiSessionEvents,
+    waitForEvent,
     closeEventStreams
   }
 }

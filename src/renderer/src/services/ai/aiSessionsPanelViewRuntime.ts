@@ -103,7 +103,9 @@ const sourceLabels: Record<AiAgentSessionSource, string> = {
   opencode: 'OpenCode',
   pi: 'Pi',
   qoder: 'Qoder',
-  rovodev: 'Rovo Dev'
+  rovodev: 'Rovo Dev',
+  'kimi-code': 'Kimi Code',
+  'deepseek-harness': 'DeepSeek Harness'
 }
 
 export const managedAiSourceLabel = (source: AiAgentSessionSource) => sourceLabels[source] || source

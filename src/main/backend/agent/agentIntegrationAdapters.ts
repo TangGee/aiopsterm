@@ -23,7 +23,9 @@ const definitions: AgentIntegrationAdapter[] = [
   { id: 'rovodev', aliases: ['rovo', 'rovo-dev'], projectFileTracking: 'limited' },
   { id: 'amp', aliases: [], projectFileTracking: 'adapter' },
   { id: 'pi', aliases: [], projectFileTracking: 'adapter' },
-  { id: 'omp', aliases: [], projectFileTracking: 'adapter' }
+  { id: 'omp', aliases: [], projectFileTracking: 'adapter' },
+  { id: 'kimi-code', aliases: ['kimi', 'kimi-cli'], projectFileTracking: 'adapter' },
+  { id: 'deepseek-harness', aliases: ['deepseek', 'dsh'], projectFileTracking: 'limited' }
 ]
 
 const normalizedId = (value: unknown) =>

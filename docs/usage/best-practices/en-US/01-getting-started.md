@@ -4,7 +4,7 @@ aiopsterm combines local terminals, SSH assets, AI operations, external AI-sessi
 
 ## Start With The Main Window
 
-![Main window](../images/main-window.png)
+![Main window](../images/en-US/main-window.png)
 
 | # | Region | Purpose |
 | --- | --- | --- |
@@ -21,7 +21,7 @@ The welcome page lets users select a language. **Getting Started** opens the bil
 
 **Entry:** click **Workspace**, then double-click `127.0.0.1` for a local shell or a saved host for SSH. Right-click a terminal for command input, AI Command, split, search, file management, and global execution.
 
-![Split terminal](../images/terminal-split.png)
+![Split terminal](../images/en-US/terminal-split.png)
 
 Tabs, splits, proxies, keys, SSH Agent, standard jumps, relay-shell, `aio`, and `aiossh` are covered in [Terminal And Main Workspace](02-terminal-workspace.md).
 
@@ -29,7 +29,7 @@ Tabs, splits, proxies, keys, SSH Agent, standard jumps, relay-shell, `aio`, and 
 
 **Entry:** open a terminal, use the mode control at the top of the right AI panel, and select **Codex CLI** or **Classic**. Configure a provider first under **Settings -> Models**.
 
-![Host AI](../images/ai-panel.png)
+![Host AI](../images/en-US/ai-panel.png)
 
 Embedded Codex uses terminal-bound remote tools. Classic offers Chat, Command, and Agent permission levels. The remote host needs no installed agent, including proxy and jump-host targets. See [Host Agent](03-host-agent.md).
 
@@ -37,7 +37,7 @@ Embedded Codex uses terminal-bound remote tools. Classic offers Chat, Command, a
 
 **Entry:** click **Agents** at the top of the module rail. Use `+` to create Classic, Codex, or DB AI sessions, and select history to restore and continue.
 
-![Agents mode](../images/agents-mode.png)
+![Agents mode](../images/en-US/agents-mode.png)
 
 Agents stores conversations created by aiopsterm with their terminal, project, or database bindings. See [Agents Product Sessions](04-agents-product-sessions.md).
 
@@ -45,7 +45,7 @@ Agents stores conversations created by aiopsterm with their terminal, project, o
 
 **Entry:** click **AI Sessions** on the rail. Use **Settings -> AI Notifications** to install hooks and configure desktop and sound alerts.
 
-![AI Sessions](../images/ai-sessions-inbox.png)
+![AI Sessions](../images/en-US/ai-sessions-inbox.png)
 
 Track pending, running, and historical external-agent sessions. Right-click **Open Session Content** to inspect the complete conversation, switch source/rendered views, and revise its transcript; use **Project Files** for recent changes and the real project tree. Live state and notifications require the matching trusted Agent Hook. See [AI Session Management](05-ai-sessions.md).
 
@@ -53,7 +53,7 @@ Track pending, running, and historical external-agent sessions. Right-click **Op
 
 **Entry:** click **Quick Commands** and use its toolbar add button. Terminal context actions send input or execute globally.
 
-![Quick Commands](../images/quick-commands.png)
+![Quick Commands](../images/en-US/quick-commands.png)
 
 Store operational commands, record macros, broadcast safely, and reference commands with `/` in AI. See [Quick Commands](06-quick-commands.md).
 
@@ -61,7 +61,7 @@ Store operational commands, record macros, broadcast safely, and reference comma
 
 **Entry:** open **Settings -> Shortcuts** and click the key field beside an action.
 
-![Shortcuts](../images/settings-shortcuts.png)
+![Shortcuts](../images/en-US/settings-shortcuts.png)
 
 Bindings preserve plain shell control keys and can be remapped per OS. See [Keyboard Shortcuts](07-shortcuts.md).
 
@@ -69,7 +69,7 @@ Bindings preserve plain shell control keys and can be remapped per OS. See [Keyb
 
 **Entry:** open **Settings -> Export MCP**, then install each capability card independently for Codex or Claude Code.
 
-![Export MCP](../images/settings-export-mcp.png)
+![Export MCP](../images/en-US/settings-export-mcp.png)
 
 The three servers expose hosts/SSH, managed AI sessions, and authorized read-only databases to external Agents. See [Export MCP](08-export-mcp.md).
 
@@ -77,7 +77,7 @@ The three servers expose hosts/SSH, managed AI sessions, and authorized read-onl
 
 **Entry:** open **Settings -> Host Agent -> MCP**, use **Add Server** for a stdio or HTTP Server, then inspect connection state and tool approval.
 
-![MCP settings](../images/settings-mcp.png)
+![MCP settings](../images/en-US/settings-mcp.png)
 
 This imports third-party tools into embedded Classic, the opposite direction from Export MCP. See [Third-party MCP Servers](09-third-party-mcp.md).
 
@@ -85,7 +85,7 @@ This imports third-party tools into embedded Classic, the opposite direction fro
 
 **Entry:** click **Files**, or right-click an SSH terminal and choose **File Management**.
 
-![Files](../images/files-workspace.png)
+![Files](../images/en-US/files-workspace.png)
 
 Browse local and remote SFTP sides, transfer with progress, edit, rename, and manage permissions. See [File Management](10-files.md).
 
@@ -93,7 +93,7 @@ Browse local and remote SFTP sides, transfer with progress, edit, rename, and ma
 
 **Entry:** click **Assets**, then use the top tabs for hosts, bastions, keys, and proxies.
 
-![Assets](../images/assets-workspace.png)
+![Assets](../images/en-US/assets-workspace.png)
 
 Save connection settings, credential references, proxies, standard SSH jump hosts, and JumpServer sources. See [Assets](11-assets.md).
 
@@ -101,7 +101,7 @@ Save connection settings, credential references, proxies, standard SSH jump host
 
 **Entry:** click **Knowledge**. Search and add controls are at the top of its source panel; selecting a file opens the source/preview editor in the center.
 
-![Knowledge](../images/knowledge-editor.png)
+![Knowledge](../images/en-US/knowledge-editor.png)
 
 Markdown, images, search, Mermaid, internal links, and AI context are covered in [Knowledge Base](12-knowledge-base.md).
 
@@ -109,7 +109,7 @@ Markdown, images, search, Mermaid, internal links, and AI context are covered in
 
 **Entry:** click **Plugins**, select a card, then install, enable, or disable it from details.
 
-![Plugins](../images/extensions-workspace.png)
+![Plugins](../images/en-US/extensions-workspace.png)
 
 Plugins contribute pages, tools, and aliases after manifest validation and trust. See [Plugins And Extensions](13-extensions.md).
 
@@ -117,7 +117,7 @@ Plugins contribute pages, tools, and aliases after manifest validation and trust
 
 **Entry:** click **Kubernetes**, use the add control in the cluster area to import kubeconfig, then connect.
 
-![Kubernetes](../images/kubernetes-workspace.png)
+![Kubernetes](../images/en-US/kubernetes-workspace.png)
 
 Resources, logs, Describe, isolated kubectl terminals, the cluster Agent command bar, and sending output to AI are covered in [Kubernetes](14-kubernetes.md).
 
@@ -125,7 +125,7 @@ Resources, logs, Describe, isolated kubectl terminals, the cluster Agent command
 
 **Entry:** click **Database**, use the add control in the connection sidebar, choose an engine, and test the connection.
 
-![Database](../images/database-workspace.png)
+![Database](../images/en-US/database-workspace.png)
 
 Catalog browsing, SQL, result editing, and DB AI generation, explanation, optimization, conversion, and diagnosis are covered in [Database And DB AI](15-database.md).
 
@@ -133,7 +133,7 @@ Catalog browsing, SQL, result editing, and DB AI generation, explanation, optimi
 
 **Entry:** use **Settings -> General** for theme/background and **Settings -> Terminal** for font, line height, cursor, and terminal options.
 
-![Theme](../images/settings-general.png)
+![Theme](../images/en-US/settings-general.png)
 
 System/light/dark themes, bundled and custom backgrounds, and cross-platform typography are covered in [Themes](16-themes.md).
 

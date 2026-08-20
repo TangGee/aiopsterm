@@ -8,7 +8,7 @@ Click the lower-left **Settings gear -> Export MCP**. The header manages gateway
 
 ## The Three Independent Exports
 
-![Export MCP](../images/settings-export-mcp.png)
+![Export MCP](../images/en-US/settings-export-mcp.png)
 
 Open **① Export MCP**, manage the local gateway and token at **②**, and install the first independent capability card at **③**. The other two server cards follow on the same page.
 
@@ -17,7 +17,7 @@ Open **① Export MCP**, manage the local gateway and token at **②**, and inst
 | Server | Typical scenario | Capability boundary |
 | --- | --- | --- |
 | `aiopsterm_hosts` | Reuse saved hosts from an external agent, open headless SSH connections, and inspect remote files | Host listing, connect/disconnect, authentication requests, bounded commands, file reads, glob, and grep; never returns passwords, private keys, or tokens |
-| `aiopsterm_ai_sessions` | See where another coding agent is blocked and return the operator to its terminal | Sessions, approvals/questions/plans, events and notifications, focus, mark, and clear; blocking Claude hooks can receive replies, while native Codex prompts must be completed in the Codex terminal |
+| `aiopsterm_ai_sessions` | See where another coding agent is blocked and return the operator to its terminal | Sessions, approvals/questions/plans, events and notifications, polling-free completion waits, focus, mark, and clear; blocking Claude hooks can receive replies, while native Codex prompts must be completed in the Codex terminal |
 | `aiopsterm_databases` | Let a trusted external agent inspect saved schemas and bounded data samples | Redacted connections, catalog search, table metadata/DDL, structured filters and paging; no arbitrary SQL, and external database reads are off by default |
 
 Installation flow:
@@ -26,6 +26,8 @@ Installation flow:
 2. Install only the capability cards required for the task. An uninstalled server contributes no tool schemas.
 3. For database work, also enable **Allow external Agents to read databases**; non-SQLite connections normally need to be open in Database Workspace.
 4. Reload the external agent's MCP list and verify it with one read-only call.
+
+Do not ask an external agent to call `list_ai_sessions` every few seconds while monitoring another agent. Resolve the target `source` and `sessionId`, then call `wait_ai_session_completion` once. It returns as soon as a later `stop`, `session_end`, or ended lifecycle event arrives and waits for at most 120 seconds by default. Only when it returns `timedOut: true` should the caller continue with the returned `nextSeq` as the next `afterSeq`. After a completion event, the external agent can inspect the working tree, diff, and test results.
 
 The three servers share the local socket, bundled runtime, and current token, while publishing fully disjoint tool lists:
 

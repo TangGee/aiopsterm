@@ -27,7 +27,7 @@ import { configureControlSocketRuntime, getControlSocketPath } from '../control/
 import { configureDatabaseBackendRuntime } from '../database/database'
 import { configureDatabaseCommentsRuntime } from '../database/databaseComments'
 import { activateInstalledExtensions, configureExtensionBackendRuntime, runExtensionBastionAction } from '../extensions/extensions'
-import { ensureExternalCodexMcpBridgeServer } from '../codex/externalCodexMcpBridge'
+import { ensureExternalCodexMcpBridgeServer, shouldStartExternalCodexMcpBridge } from '../codex/externalCodexMcpBridge'
 import { configureFilesBackendRuntime } from '../files/files'
 import { configureKubernetesBackendRuntime, setKubernetesTerminalEventSink } from '../kubernetes/kubernetes'
 import { configureLocalTerminalBackendRuntime } from '../terminal/localTerminal'
@@ -247,7 +247,7 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
     useBackendDouble: shouldUseSshTerminalBackendDouble()
   })
   void ensureExternalCodexMcpBridgeServer({
-    enabled: process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE === '1',
+    enabled: shouldStartExternalCodexMcpBridge(process.env),
     token: process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN,
     getToken: getEffectiveExportMcpToken,
     getConfig: input.getConfig,

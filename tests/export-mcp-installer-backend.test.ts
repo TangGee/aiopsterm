@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
-import { basename, join } from 'path'
+import { basename, delimiter, join } from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ExportMcpClientSource, ExportMcpServerId } from '../src/shared/contracts/exportMcp'
 
@@ -8,16 +8,17 @@ type ExportMcpInstallerBackend = {
   configureExportMcpInstallerRuntime: (config?: {
     getHomeDir?: () => string
     getEnv?: () => NodeJS.ProcessEnv
+    getPlatform?: () => NodeJS.Platform
     getExportMcpScriptPath?: () => string
     getJsRuntimeExecutable?: () => string
     getExportMcpToken?: () => string
     resetExportMcpToken?: () => string
-    execFile?: (file: string, args: string[]) => Promise<{ stdout: string; stderr: string }>
+    execFile?: (file: string, args: string[], options?: { env?: NodeJS.ProcessEnv }) => Promise<{ stdout: string; stderr: string }>
   }) => void
   listExportMcpInstallers: () => Promise<{
-    clients: Array<{ source: ExportMcpClientSource; serverId: ExportMcpServerId; installed: boolean; warnings: string[] }>
+    clients: Array<{ source: ExportMcpClientSource; serverId: ExportMcpServerId; binaryPath: string; installed: boolean; warnings: string[] }>
   }>
-  installExportMcp: (input: { source: ExportMcpClientSource; serverId: ExportMcpServerId }) => Promise<{ ok: boolean; errorCode?: string }>
+  installExportMcp: (input: { source: ExportMcpClientSource; serverId: ExportMcpServerId }) => Promise<{ ok: boolean; errorCode?: string; errorMessage?: string }>
   uninstallExportMcp: (input: { source: ExportMcpClientSource; serverId: ExportMcpServerId }) => Promise<{ ok: boolean; errorCode?: string }>
   resetExportMcpToken: () => Promise<{ ok: boolean }>
   buildExportMcpManualConfig: (input: { kind: 'json' | 'command'; serverId: ExportMcpServerId }) => Promise<{ kind: 'json' | 'command'; text: string }>
@@ -94,6 +95,105 @@ afterEach(async () => {
 })
 
 describe('Export MCP installer backend', () => {
+  it('finds a user-installed Codex CLI outside a macOS GUI PATH', async () => {
+    const { installer, home, codexHome, scriptPath, runtimePath, token } = await prepareRuntime()
+    const npmBinDir = join(home, '.npm-global', 'bin')
+    const userCodexPath = join(npmBinDir, 'codex')
+    await mkdir(npmBinDir, { recursive: true })
+    await writeFile(userCodexPath, '#!/bin/sh\n', 'utf-8')
+
+    installer.configureExportMcpInstallerRuntime({
+      getHomeDir: () => home,
+      getPlatform: () => 'darwin',
+      getEnv: () => ({ HOME: home, CODEX_HOME: codexHome, PATH: '/usr/bin' }),
+      getExportMcpScriptPath: () => scriptPath,
+      getJsRuntimeExecutable: () => runtimePath,
+      getExportMcpToken: () => token
+    })
+
+    const snapshot = await installer.listExportMcpInstallers()
+    expect(snapshot.clients.find((client) => client.source === 'codex' && client.serverId === 'hosts')?.binaryPath).toBe(userCodexPath)
+  })
+
+  it.each([
+    { platform: 'linux' as const, directoryParts: ['.local', 'bin'], binaryName: 'codex', extraEnv: {} },
+    { platform: 'win32' as const, directoryParts: ['AppData', 'Roaming', 'npm'], binaryName: 'codex.cmd', extraEnv: { PATHEXT: '.CMD' } }
+  ])('finds a user-installed Codex CLI in $platform standard locations', async ({ platform, directoryParts, binaryName, extraEnv }) => {
+    const { installer, home, codexHome, scriptPath, runtimePath, token } = await prepareRuntime()
+    const standardBinDir = join(home, ...directoryParts)
+    const userCodexPath = join(standardBinDir, binaryName)
+    await mkdir(standardBinDir, { recursive: true })
+    await writeFile(userCodexPath, platform === 'win32' ? '@echo off\r\n' : '#!/bin/sh\n', 'utf-8')
+
+    installer.configureExportMcpInstallerRuntime({
+      getHomeDir: () => home,
+      getPlatform: () => platform,
+      getEnv: () => ({ HOME: home, CODEX_HOME: codexHome, PATH: join(home, 'missing-bin'), ...extraEnv }),
+      getExportMcpScriptPath: () => scriptPath,
+      getJsRuntimeExecutable: () => runtimePath,
+      getExportMcpToken: () => token
+    })
+
+    const snapshot = await installer.listExportMcpInstallers()
+    expect(snapshot.clients.find((client) => client.source === 'codex' && client.serverId === 'hosts')?.binaryPath).toBe(userCodexPath)
+  })
+
+  it('augments a macOS GUI PATH before invoking a user-installed npm Codex CLI', async () => {
+    const { installer, home, codexHome, scriptPath, runtimePath, socketPath, token } = await prepareRuntime()
+    const npmBinDir = join(home, '.npm-global', 'bin')
+    const userCodexPath = join(npmBinDir, 'codex')
+    const calls: Array<{ file: string; args: string[]; env?: NodeJS.ProcessEnv }> = []
+    await mkdir(npmBinDir, { recursive: true })
+    await writeFile(userCodexPath, '#!/usr/bin/env node\n', 'utf-8')
+
+    installer.configureExportMcpInstallerRuntime({
+      getHomeDir: () => home,
+      getPlatform: () => 'darwin',
+      getEnv: () => ({ HOME: home, CODEX_HOME: codexHome, PATH: '/usr/bin:/bin' }),
+      getExportMcpScriptPath: () => scriptPath,
+      getJsRuntimeExecutable: () => runtimePath,
+      getExportMcpToken: () => token,
+      execFile: async (file, args, options) => {
+        calls.push({ file, args, env: options?.env })
+        return { stdout: '', stderr: '' }
+      }
+    })
+
+    await expect(installer.installExportMcp({ source: 'codex', serverId: 'hosts' })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    expect(calls).toHaveLength(2)
+    expect(calls[1].file).toBe(userCodexPath)
+    expect(calls[1].args).toContain(`AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET=${socketPath}`)
+    const commandPath = String(calls[1].env?.PATH || '')
+    expect(commandPath.split(delimiter)).toEqual(expect.arrayContaining([npmBinDir, '/opt/homebrew/bin', '/usr/local/bin']))
+  })
+
+  it('redacts the Export MCP token from client command failures', async () => {
+    const { installer, home, binDir, codexHome, scriptPath, runtimePath, token } = await prepareRuntime()
+    let callCount = 0
+    installer.configureExportMcpInstallerRuntime({
+      getHomeDir: () => home,
+      getEnv: () => ({ HOME: home, CODEX_HOME: codexHome, PATH: binDir }),
+      getExportMcpScriptPath: () => scriptPath,
+      getJsRuntimeExecutable: () => runtimePath,
+      getExportMcpToken: () => token,
+      execFile: async () => {
+        callCount += 1
+        if (callCount === 1) return { stdout: '', stderr: '' }
+        const error = new Error('Codex MCP add failed') as Error & { stderr: string }
+        error.stderr = `invalid --env AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN=${token}`
+        throw error
+      }
+    })
+
+    const result = await installer.installExportMcp({ source: 'codex', serverId: 'hosts' })
+    expect(result).toEqual(expect.objectContaining({
+      ok: false,
+      errorCode: 'EXPORT_MCP_CLIENT_COMMAND_FAILED',
+      errorMessage: expect.stringContaining('AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN=<redacted>')
+    }))
+    expect(result.errorMessage).not.toContain(token)
+  })
+
   it('detects Codex TOML and Claude JSON aiopsterm export MCP entries', async () => {
     const { installer, home, codexHome, scriptPath, runtimePath, socketPath, token } = await prepareRuntime()
     await writeFile(

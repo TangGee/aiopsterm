@@ -6,7 +6,7 @@ This guide explains how to operate terminals, tabs, search, AI, and layout from 
 
 Click the **Settings gear** at the lower-left corner, then select **Shortcuts** in the Settings navigation. Click the key field beside an action and press the new combination. Conflicts appear immediately. Use the row reset control for one action or the page reset control for all defaults.
 
-![Shortcut settings](../images/settings-shortcuts.png)
+![Shortcut settings](../images/en-US/settings-shortcuts.png)
 
 ## Why Terminal Shortcuts Use Modifiers
 

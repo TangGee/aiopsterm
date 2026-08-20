@@ -7,7 +7,8 @@ import { platformSocketPath } from '../app/platformRuntime'
 import { logRuntimeEvent } from '../app/runtimeLog'
 import {
   createAgentSessionEventStreamRuntime,
-  type AgentSessionEventStreamListResult
+  type AgentSessionEventStreamListResult,
+  type AgentSessionEventStreamWaitInput
 } from './agentSessionEventStreamRuntime'
 import { createAgentSessionAuditRuntime, type ManagedAiSessionAuditKind } from './agentSessionAuditRuntime'
 import {
@@ -202,6 +203,9 @@ export const configureManagedAiSessionAutoNamingRuntime = (config?: ManagedAiSes
 
 export const listManagedAiSessionEvents = (input: Record<string, unknown> = {}): AgentSessionEventStreamListResult =>
   agentSessionEventStreamRuntime.listManagedAiSessionEvents(input)
+
+export const waitForManagedAiSessionEvent = (input: AgentSessionEventStreamWaitInput) =>
+  agentSessionEventStreamRuntime.waitForEvent(input)
 
 const auditPathFor = (userDataPath: string) => join(userDataPath, 'agent-sessions', 'managed-ai-sessions.audit.jsonl')
 
@@ -1746,6 +1750,7 @@ export const __testing = {
   streamBootId: agentSessionEventStreamRuntime.streamBootId,
   streamEventCount: agentSessionEventStreamRuntime.streamEventCount,
   streamLatestSeq: agentSessionEventStreamRuntime.streamLatestSeq,
+  streamWaiterCount: agentSessionEventStreamRuntime.streamWaiterCount,
   flushManagedAiSessionImports: () => flushScheduledImportScan(),
   flushManagedAiSessionGitRefresh: () => flushScheduledGitRefresh(),
   flushManagedAiSessionWrites: async () => {

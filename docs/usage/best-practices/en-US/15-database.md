@@ -6,7 +6,7 @@ Use this guide to save database connections, browse objects, execute SQL, and as
 
 Click **Database** on the module rail. Add and test a connection, then open SQL from a table menu or the main `+` control. Click **Toggle DB AI Pane** on the Database workspace to bind the active connection. Before DB AI, configure, Check, and Save a working Provider under **Settings -> Models**.
 
-![Database workspace](../images/database-workspace.png)
+![Database workspace](../images/en-US/database-workspace.png)
 
 **①** is the connection and object tree, **②** manages SQL, data, and result tabs, and **③** is the current database workspace.
 
@@ -33,7 +33,7 @@ Generated SQL can run directly only when it is read-only and the active tab stil
 
 ## Scenario 3: Generate SQL From Natural Language
 
-![DB AI workflow](../images/database-ai-workflow.png)
+![DB AI workflow](../images/en-US/database-ai-workflow.png)
 
 1. Open a connection and select database/schema, then click **Toggle DB AI Pane**.
 2. Confirm connection, database, and schema in **① context**; sending is disabled without context.

@@ -8,7 +8,7 @@
 
 ## 会话标签
 
-![终端会话](../images/terminal-session.png)
+![终端会话](../images/zh-CN/terminal-session.png)
 
 - **① 会话标签**：单行紧凑显示，标题过长自动省略；悬停可查看类型、状态、主机、cwd、后端会话 ID 等完整信息。异常连接状态才会出现指示标记，正常的 `running/ready` 不占空间。
 - **② 终端窗格**：当前选中的窗格是拆分、重连、搜索、字体缩放等操作的作用目标。
@@ -20,7 +20,7 @@
 
 ## 右键菜单：终端操作的入口
 
-![终端右键菜单](../images/terminal-context-menu.png)
+![终端右键菜单](../images/zh-CN/terminal-context-menu.png)
 
 在终端窗格或标签上右键：
 
@@ -35,7 +35,7 @@
 
 ## 拆分与合并窗格
 
-![终端拆分](../images/terminal-split.png)
+![终端拆分](../images/zh-CN/terminal-split.png)
 
 - 右键选择 `向右拆分` / `向下拆分`，新窗格出现在**选中区域**的右侧或下方（图中 ① 原窗格、② 新窗格）。
 - 右键 `取消拆分` 把窗格还原为独立标签，终端会自动重新适配尺寸。
@@ -76,7 +76,7 @@
 
 ## 跳板机与文件管理
 
-![连接主机](../images/connect-host.png)
+![连接主机](../images/zh-CN/connect-host.png)
 
 SSH 连接参数不在终端打开后临时填写。创建第一台主机：
 

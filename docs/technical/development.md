@@ -118,13 +118,14 @@ npm run test:e2e
 
 ## Built-In Guide Maintenance
 
-The product guide shipped into the Knowledge Base lives under `docs/usage/best-practices/`. Keep the `zh-CN` and `en-US` trees aligned at 15 numbered articles. Every detailed article starts with `从哪里打开` / `Where To Open It` and names the actual rail icon, button, menu, shortcut, or settings page that reveals the feature before explaining the resulting surface.
+The product guide shipped into the Knowledge Base lives under `docs/usage/best-practices/`. Keep the `zh-CN` and `en-US` trees aligned at 17 numbered articles. Every detailed article starts with `从哪里打开` / `Where To Open It` and names the actual rail icon, button, menu, shortcut, or settings page that reveals the feature before explaining the resulting surface. Screenshots are locale-specific: Chinese articles use `images/zh-CN/`, English articles use `images/en-US/`, and the capture pipeline must run once in each application language.
 
 Capture screenshots from the real seeded application and generate numbered callouts with:
 
 ```bash
 npm run build
-node scripts/docs-screenshots/capture.js
+node scripts/docs-screenshots/capture.js --locale zh-CN
+node scripts/docs-screenshots/capture.js --locale en-US
 python3 scripts/docs-screenshots/annotate.py
 ```
 

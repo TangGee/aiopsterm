@@ -15,12 +15,17 @@ type AgentHookInstallerBackend = {
   ) => { config: Record<string, unknown>; removed: number }
   installCodexHooksFeature: (content: string) => string
   uninstallCodexHooksFeature: (content: string) => string
+  installKimiCodeHooks: (content: string, definition: unknown, scriptPath: string, platform?: NodeJS.Platform, runtime?: string) => string
+  uninstallKimiCodeHooks: (content: string) => string
+  installDeepseekHarnessPatch: (content: string, hooksPath: string) => string
+  uninstallDeepseekHarnessPatch: (content: string) => string
   configureAgentHookInstallerRuntime: (config?: {
     getHomeDir?: () => string
     getEnv?: () => NodeJS.ProcessEnv
     getPlatform?: () => NodeJS.Platform
     getAgentHookScriptPath?: () => string
     getJsRuntimeExecutable?: () => string
+    runCommand?: (command: string, args: string[], env: NodeJS.ProcessEnv) => Promise<void>
   }) => void
   installAgentHook: (input: { source: AgentHookInstallerSource }) => Promise<{ ok: boolean; errorMessage?: string }>
   uninstallAgentHook: (input: { source: AgentHookInstallerSource }) => Promise<{ ok: boolean; errorMessage?: string }>
@@ -149,6 +154,89 @@ describe('agent hook installer backend', () => {
     expect(__testing.hookDefinitions.find((definition) => definition.source === 'rovodev')).toEqual(
       expect.objectContaining({ launchCommand: 'acli rovodev run' })
     )
+  })
+
+  it('installs and removes Kimi Code TOML hooks without changing user configuration', async () => {
+    const backend = await loadBackend()
+    const kimi = backend.__testing.hookDefinitions.find((definition) => definition.source === 'kimi-code')!
+    const installed = backend.installKimiCodeHooks(
+      'default_model = "kimi-for-coding"\n',
+      kimi,
+      '/opt/aiopsterm/aiopsterm-agent-hook.js',
+      'darwin',
+      '/Applications/aiopsterm.app/Contents/MacOS/aiopsterm'
+    )
+
+    expect(installed).toContain('default_model = "kimi-for-coding"')
+    expect(installed).toContain('# aiopsterm-kimi-code-hooks begin')
+    expect(installed).toContain('event = "PermissionRequest"')
+    expect(installed).toContain("--source 'kimi-code'")
+    expect(backend.uninstallKimiCodeHooks(installed)).toBe('default_model = "kimi-for-coding"\n')
+  })
+
+  it('installs and removes a DeepSeek Harness profile patch without changing user patches', async () => {
+    const backend = await loadBackend()
+    const installed = backend.installDeepseekHarnessPatch(
+      '- id: approval\n  config:\n    policy: never\n',
+      '/Users/ops/.dsh/aiopsterm/hooks.json'
+    )
+
+    expect(installed).toContain('id: approval')
+    expect(installed).toContain('id: aiopsterm-hooks')
+    expect(installed).toContain("name: '@deepseek-ai/dsh-hooks-codex'")
+    expect(installed).toContain('configPath: "/Users/ops/.dsh/aiopsterm/hooks.json"')
+    expect(backend.uninstallDeepseekHarnessPatch(installed)).toBe('- id: approval\n  config:\n    policy: never\n')
+  })
+
+  it('installs Kimi Code hooks in the configured home', async () => {
+    const backend = await loadBackend()
+    const home = await mkdtemp(join(tmpdir(), 'aiopsterm-kimi-hooks-'))
+    cleanupDirs.push(home)
+    backend.configureAgentHookInstallerRuntime({
+      getHomeDir: () => home,
+      getEnv: () => ({ HOME: home, PATH: process.env.PATH || '' }),
+      getAgentHookScriptPath: () => '/opt/aiopsterm/aiopsterm-agent-hook.js',
+      getJsRuntimeExecutable: () => '/opt/aiopsterm/aiopsterm'
+    })
+    try {
+      await expect(backend.installAgentHook({ source: 'kimi-code' })).resolves.toEqual(expect.objectContaining({ ok: true }))
+      expect(await readFile(join(home, '.kimi-code/config.toml'), 'utf-8')).toContain("--source 'kimi-code'")
+      await expect(backend.uninstallAgentHook({ source: 'kimi-code' })).resolves.toEqual(expect.objectContaining({ ok: true }))
+      expect(await readFile(join(home, '.kimi-code/config.toml'), 'utf-8')).not.toContain('aiopsterm-kimi-code-hooks')
+    } finally {
+      backend.configureAgentHookInstallerRuntime()
+    }
+  })
+
+  it('installs DeepSeek Harness hooks and both official profile bridges', async () => {
+    const backend = await loadBackend()
+    const home = await mkdtemp(join(tmpdir(), 'aiopsterm-deepseek-hooks-'))
+    cleanupDirs.push(home)
+    const binDir = join(home, 'bin')
+    await import('node:fs/promises').then(async ({ mkdir, writeFile }) => {
+      await mkdir(binDir, { recursive: true })
+      await writeFile(join(binDir, 'dsh'), '', 'utf-8')
+      await writeFile(join(binDir, 'pnpm'), '', 'utf-8')
+    })
+    const commands: string[] = []
+    backend.configureAgentHookInstallerRuntime({
+      getHomeDir: () => home,
+      getEnv: () => ({ HOME: home, PATH: binDir }),
+      getAgentHookScriptPath: () => '/opt/aiopsterm/aiopsterm-agent-hook.js',
+      getJsRuntimeExecutable: () => '/opt/aiopsterm/aiopsterm',
+      runCommand: async (command, args) => { commands.push([command, ...args].join(' ')) }
+    })
+    try {
+      const result = await backend.installAgentHook({ source: 'deepseek-harness' })
+      expect(result).toEqual(expect.objectContaining({ ok: true }))
+      expect(commands).toHaveLength(2)
+      expect(commands.every((command) => command.includes('@deepseek-ai/dsh-hooks-codex@next'))).toBe(true)
+      expect(await readFile(join(home, '.dsh/aiopsterm/hooks.json'), 'utf-8')).toContain("--source 'deepseek-harness'")
+      expect(await readFile(join(home, '.dsh/profiles/web/cordis.patch.yml'), 'utf-8')).toContain('aiopsterm-hooks')
+      expect(await readFile(join(home, '.dsh/profiles/headless/cordis.patch.yml'), 'utf-8')).toContain('aiopsterm-hooks')
+    } finally {
+      backend.configureAgentHookInstallerRuntime()
+    }
   })
 
   it('installs Kiro agent JSON hooks with timeout_ms entries', async () => {

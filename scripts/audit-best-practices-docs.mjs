@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
-import { dirname, extname, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
 
 const root = resolve('docs/usage/best-practices')
 const locales = ['zh-CN', 'en-US']
@@ -23,6 +24,7 @@ const expectedFiles = [
   '17-troubleshooting.md'
 ]
 const failures = []
+const localeImageHashes = new Map(locales.map((locale) => [locale, new Map()]))
 
 const requiredContent = {
   '02-terminal-workspace.md': [
@@ -55,6 +57,8 @@ const localTargets = (markdown) => {
   for (const match of markdown.matchAll(pattern)) targets.push(match[1])
   return targets
 }
+
+const imageTargets = (markdown) => [...markdown.matchAll(/!\[[^\]]*\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g)].map((match) => match[1])
 
 const resolveLocalTarget = (sourceFile, href) => {
   if (/^(?:https?:|mailto:|tel:)/i.test(href) || href.startsWith('#')) return null
@@ -105,7 +109,19 @@ for (const locale of locales) {
       }
     }
 
-    if (!/^!\[[^\]]*\]\([^)]+\)/m.test(markdown)) fail(file, '缺少界面截图')
+    const images = imageTargets(markdown)
+    if (images.length === 0) fail(file, '缺少界面截图')
+    for (const href of images) {
+      const expectedPrefix = `../images/${locale}/`
+      if (!href.startsWith(expectedPrefix)) {
+        fail(file, `截图必须来自当前文档语言目录 ${expectedPrefix}，当前为 ${href}`)
+        continue
+      }
+      const target = resolveLocalTarget(file, href)
+      if (target && existsSync(target)) {
+        localeImageHashes.get(locale).set(basename(target), createHash('sha256').update(readFileSync(target)).digest('hex'))
+      }
+    }
     for (const pattern of requiredContent[name] || []) {
       if (!pattern.test(markdown)) fail(file, `缺少必要内容：${pattern}`)
     }
@@ -120,6 +136,13 @@ for (const locale of locales) {
       const target = resolveLocalTarget(file, href)
       if (target && !existsSync(target)) fail(file, `链接目标不存在：${href}`)
     }
+  }
+}
+
+for (const [name, zhHash] of localeImageHashes.get('zh-CN')) {
+  const enHash = localeImageHashes.get('en-US').get(name)
+  if (enHash && enHash === zhHash) {
+    fail(join(root, 'images', 'en-US', name), '英文截图与中文截图完全相同，必须从英文界面重新截取')
   }
 }
 
@@ -138,4 +161,4 @@ if (failures.length > 0) {
   process.exit(1)
 }
 
-console.log('Best-practices documentation audit passed: 17 bilingual guides, content boundaries, entry paths, screenshots, and local links are complete.')
+console.log('Best-practices documentation audit passed: 17 bilingual guides, locale-specific screenshots, content boundaries, entry paths, and local links are complete.')

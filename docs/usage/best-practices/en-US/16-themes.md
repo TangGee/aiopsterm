@@ -6,7 +6,7 @@ Appearance affects both aesthetics and readability during long operations. Choos
 
 Click the lower-left **Settings gear**. Select **General** for app theme and background, or **Terminal** for font, size, line height, cursor, and terminal options. Click a background tile to apply it; use the upload control in the Background section for a custom image.
 
-![General settings](../images/settings-general.png)
+![General settings](../images/en-US/settings-general.png)
 
 ## Theme And Background
 

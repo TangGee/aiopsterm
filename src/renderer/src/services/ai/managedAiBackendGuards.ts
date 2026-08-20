@@ -59,7 +59,9 @@ const agentHookInstallerSources = new Set<AgentHookInstallerSource>([
   'pi',
   'omp',
   'kiro',
-  'rovodev'
+  'rovodev',
+  'kimi-code',
+  'deepseek-harness'
 ])
 const exportMcpClientSources = new Set<ExportMcpClientSource>(['codex', 'claude-code'])
 const exportMcpServerIds = new Set<ExportMcpServerId>(['hosts', 'ai-sessions', 'databases'])
@@ -80,7 +82,9 @@ const aiAgentSessionSources = new Set<AiAgentSessionSource>([
   'rovodev',
   'amp',
   'pi',
-  'omp'
+  'omp',
+  'kimi-code',
+  'deepseek-harness'
 ])
 const aiAgentSessionEventNames = new Set<AiAgentSessionEventName>([
   'session_start',

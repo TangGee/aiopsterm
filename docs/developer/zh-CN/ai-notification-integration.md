@@ -23,7 +23,7 @@ aiopsterm 创建的本地终端会提供以下环境变量：
 | `AIOPSTERM_SURFACE_ID` | 所属表面 |
 | `AIOPSTERM_WORKSPACE_ID` | 所属工作区 |
 
-`source` 不是任意字符串。当前已注册 `codex`、`claude-code`、`cursor`、`gemini`、`copilot`、`grok`、`opencode`、`codebuddy`、`factory`、`qoder`、`antigravity`、`kiro`、`hermes-agent`、`rovodev`、`amp`、`pi` 和 `omp`。下文的 `my-agent` 假设开发者已经完成 source 注册；未注册名称会被拒绝。
+`source` 不是任意字符串。当前已注册 `codex`、`claude-code`、`cursor`、`gemini`、`copilot`、`grok`、`opencode`、`codebuddy`、`factory`、`qoder`、`antigravity`、`kiro`、`hermes-agent`、`rovodev`、`amp`、`pi`、`omp`、`kimi-code` 和 `deepseek-harness`。下文的 `my-agent` 假设开发者已经完成 source 注册；未注册名称会被拒绝。
 
 新增 Agent source 时需要：
 

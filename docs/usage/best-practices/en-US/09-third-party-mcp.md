@@ -6,7 +6,7 @@ This guide connects third-party MCP tools and resources to aiopsterm's Classic H
 
 Open **Settings -> Host Agent -> MCP**. Click **Add Server** to edit JSON, save, then inspect connection state, Tools, and Resources. This page does not install `aiopsterm_hosts`, `aiopsterm_ai_sessions`, or `aiopsterm_databases`; those belong to [Export MCP](08-export-mcp.md).
 
-![MCP settings](../images/settings-mcp.png)
+![MCP settings](../images/en-US/settings-mcp.png)
 
 **①** selects MCP, **②** opens Server configuration, and **③** displays discovered tools and resources.
 

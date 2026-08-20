@@ -17,11 +17,13 @@ import {
   listManagedAiSessions,
   markManagedAiNotificationRead,
   openManagedAiNotification,
-  replyManagedAiSession
+  replyManagedAiSession,
+  waitForManagedAiSessionEvent
 } from '../agent/agentSessions'
 
 export type ExternalCodexMcpManagedAiRuntimeConfig = {
   focusManagedAiSession?: (request: ManagedAiSessionFocusRequest) => void
+  signal?: AbortSignal
 }
 
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
@@ -63,6 +65,7 @@ export const externalCodexMcpManagedAiMethods: ReadonlySet<string> = new Set([
   'handle_ai_session',
   'clear_ai_session',
   'list_ai_session_events',
+  'wait_ai_session_completion',
   'list_ai_notifications',
   'mark_ai_notification_read',
   'dismiss_ai_notification',
@@ -421,6 +424,59 @@ const listAiSessionEvents = (params: Record<string, unknown>) => {
   })
 }
 
+const waitAiSessionCompletion = async (
+  params: Record<string, unknown>,
+  config: ExternalCodexMcpManagedAiRuntimeConfig
+) => {
+  const resolved = await resolveManagedAiSession(params)
+  if (resolved.error) return resolved.error
+  const session = resolved.session!
+  const cursor = listManagedAiSessionEvents({ limit: 1 })
+  if (!cursor.ok || !cursor.data) {
+    return fail(cursor.errorCode || 'AI_SESSION_EVENTS_UNAVAILABLE', cursor.errorMessage || 'Managed AI session events are unavailable.')
+  }
+  const suppliedAfterSeq = params.afterSeq ?? params.after_seq
+  const afterSeq = Number.isFinite(Number(suppliedAfterSeq))
+    ? Math.max(0, Math.floor(Number(suppliedAfterSeq)))
+    : cursor.data.latestSeq
+  const timeoutMs = normalizeInteger(params.timeoutMs ?? params.timeout_ms, 120_000, 1_000, 180_000)
+  const waited = await waitForManagedAiSessionEvent({
+    afterSeq,
+    timeoutMs,
+    signal: config.signal,
+    predicate: (frame) => {
+      const source = cleanText(frame.payload.source || frame.source)
+      const sessionId = cleanText(frame.payload.sessionId || frame.payload.session_id)
+      if (source !== session.source || sessionId !== session.id) return false
+      const event = cleanText(frame.payload.event).toLowerCase()
+      const lifecycle = cleanText(frame.payload.agentLifecycle).toLowerCase()
+      return event === 'stop' || event === 'session_end' || (event === 'lifecycle' && lifecycle === 'ended')
+    }
+  })
+  if (waited.aborted) return fail('AI_SESSION_WAIT_CANCELLED', 'Waiting for managed AI session completion was cancelled.')
+  const latest = await resolveManagedAiSession({ source: session.source, sessionId: session.id })
+  const currentSession = latest.session || session
+  const eventName = cleanText(waited.event?.payload.event).toLowerCase()
+  const reason = eventName === 'session_end' || currentSession.state === 'ended' ? 'ended' : waited.event ? 'completed' : 'timeout'
+  return ok({
+    matched: Boolean(waited.event),
+    timedOut: waited.timedOut,
+    reason,
+    timeoutMs,
+    protocol: waited.protocol,
+    bootId: waited.bootId,
+    boot_id: waited.bootId,
+    afterSeq: waited.afterSeq,
+    after_seq: waited.afterSeq,
+    latestSeq: waited.latestSeq,
+    latest_seq: waited.latestSeq,
+    nextSeq: waited.nextSeq,
+    next_seq: waited.nextSeq,
+    ...(waited.event ? { event: waited.event } : {}),
+    session: managedAiSessionSummary(currentSession, { includeEvents: true, eventLimit: 10 })
+  })
+}
+
 const listAiNotifications = async (params: Record<string, unknown>) => {
   const result = await listManagedAiNotifications({
     query: cleanOptionalText(params.query),
@@ -527,6 +583,7 @@ export const handleExternalCodexMcpManagedAiRequest = async (
   if (method === 'handle_ai_session') return handleAiSession(params)
   if (method === 'clear_ai_session') return clearAiSession(params)
   if (method === 'list_ai_session_events') return listAiSessionEvents(params)
+  if (method === 'wait_ai_session_completion') return waitAiSessionCompletion(params, config)
   if (method === 'list_ai_notifications') return listAiNotifications(params)
   if (method === 'mark_ai_notification_read') return markAiNotificationRead(params)
   if (method === 'dismiss_ai_notification') return dismissAiNotification(params)

@@ -6,7 +6,7 @@ This guide contains checks an installed-app user can complete. Confirm the entry
 
 Click **Settings -> About** to inspect the version, copy diagnostics, and open the log directory. External-session hooks are under **Settings -> AI Notifications**; Host Agent model and MCP settings are under **Settings -> Models** and **Settings -> Host Agent**; MCP exported to external Agents is under **Settings -> Export MCP**.
 
-![About and log entry points](../images/settings-about.png)
+![About and log entry points](../images/en-US/settings-about.png)
 
 ## The Installed App Will Not Open
 

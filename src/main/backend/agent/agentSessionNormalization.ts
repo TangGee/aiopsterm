@@ -383,8 +383,12 @@ export const resumeCommandFor = (source: AiAgentSessionSource, sessionId: string
                       ? `codebuddy --resume ${id}`
                       : source === 'factory'
                         ? `droid --resume ${id}`
-                        : source === 'qoder'
+                  : source === 'qoder'
                           ? `qodercli --resume ${id}`
+                          : source === 'kimi-code'
+                            ? `kimi --session ${id}`
+                            : source === 'deepseek-harness'
+                              ? `dsh --profile web --resume ${id}`
                           : ''
   if (!command) return undefined
   return cwd ? `cd ${shellQuote(cwd)} && ${command}` : command
@@ -427,7 +431,9 @@ export const sourceLabel = (source: AiAgentSessionSource) => {
     opencode: 'OpenCode',
     pi: 'Pi',
     qoder: 'Qoder',
-    rovodev: 'Rovo Dev'
+    rovodev: 'Rovo Dev',
+    'kimi-code': 'Kimi Code',
+    'deepseek-harness': 'DeepSeek Harness'
   }
   return labels[source] || source
 }

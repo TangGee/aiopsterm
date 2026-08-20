@@ -25,6 +25,8 @@ export type AgentHookDefinition = {
   createConfigDirIfMissing?: boolean
   events: HookCommandEvent[]
   configToml?: boolean
+  kimiToml?: boolean
+  deepseekHarness?: boolean
 }
 
 export class AgentHookInstallerError extends Error {
@@ -46,6 +48,10 @@ const codexTrustEnd = '# aiopsterm-codex-hook-trust end'
 export const fileHookMarker = 'aiopsterm-agent-plugin-v1'
 export const rovoYamlBegin = '# aiopsterm-rovodev-hooks begin'
 export const rovoYamlEnd = '# aiopsterm-rovodev-hooks end'
+export const kimiTomlBegin = '# aiopsterm-kimi-code-hooks begin'
+export const kimiTomlEnd = '# aiopsterm-kimi-code-hooks end'
+export const deepseekPatchBegin = '# aiopsterm-deepseek-harness-hooks begin'
+export const deepseekPatchEnd = '# aiopsterm-deepseek-harness-hooks end'
 const openCodePluginSpec = './plugins/aiopsterm-session.js'
 
 export const hookDefinitions: AgentHookDefinition[] = [
@@ -256,6 +262,41 @@ export const hookDefinitions: AgentHookDefinition[] = [
       { agentEvent: 'SessionStart', hookEvent: 'SessionStart', timeout: 5 },
       { agentEvent: 'Stop', hookEvent: 'Stop', timeout: 5 },
       { agentEvent: 'SessionEnd', hookEvent: 'SessionEnd', timeout: 5 }
+    ]
+  },
+  {
+    source: 'kimi-code',
+    label: 'Kimi Code',
+    binaryName: 'kimi',
+    configDirName: '.kimi-code',
+    configFileName: 'config.toml',
+    kimiToml: true,
+    events: [
+      { agentEvent: 'SessionStart', hookEvent: 'SessionStart', timeout: 5 },
+      { agentEvent: 'UserPromptSubmit', hookEvent: 'UserPromptSubmit', timeout: 5 },
+      { agentEvent: 'TurnStarted', hookEvent: 'lifecycle', timeout: 5 },
+      { agentEvent: 'PreToolUse', hookEvent: 'PreToolUse', timeout: 5 },
+      { agentEvent: 'PostToolUse', hookEvent: 'PostToolUse', timeout: 5 },
+      { agentEvent: 'PermissionRequest', hookEvent: 'PermissionRequest', timeout: 5 },
+      { agentEvent: 'Notification', hookEvent: 'Notification', timeout: 5 },
+      { agentEvent: 'Stop', hookEvent: 'Stop', timeout: 5 },
+      { agentEvent: 'StopFailure', hookEvent: 'Notification', timeout: 5 },
+      { agentEvent: 'SessionEnd', hookEvent: 'SessionEnd', timeout: 5 }
+    ]
+  },
+  {
+    source: 'deepseek-harness',
+    label: 'DeepSeek Harness',
+    binaryName: 'dsh',
+    configDirName: '.dsh/aiopsterm',
+    configFileName: 'hooks.json',
+    deepseekHarness: true,
+    events: [
+      { agentEvent: 'SessionStart', hookEvent: 'SessionStart', timeout: 5 },
+      { agentEvent: 'UserPromptSubmit', hookEvent: 'UserPromptSubmit', timeout: 5 },
+      { agentEvent: 'PreToolUse', hookEvent: 'PreToolUse', timeout: 5 },
+      { agentEvent: 'PostToolUse', hookEvent: 'PostToolUse', timeout: 5 },
+      { agentEvent: 'Stop', hookEvent: 'Stop', timeout: 5 }
     ]
   }
 ]
@@ -578,6 +619,53 @@ const tomlLineIsTable = (line: string, tableName: string) => new RegExp(`^\\s*\\
 const tomlLineIsAnyTable = (line: string) => /^\s*\[[^\]]+\]\s*(#.*)?$/.test(line)
 
 const tomlContent = (lines: string[]) => `${lines.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '')}\n`
+
+export const installKimiCodeHooks = (
+  content: string,
+  definition: AgentHookDefinition,
+  scriptPath: string,
+  platform: PlatformRuntime = process.platform,
+  jsRuntimeExecutable = defaultJsRuntimeExecutable()
+) => {
+  const stripped = removeMarkedBlock(content || '', kimiTomlBegin, kimiTomlEnd).replace(/\s+$/, '')
+  const entries = definition.events.flatMap((event) => [
+    '[[hooks]]',
+    `event = ${JSON.stringify(event.agentEvent)}`,
+    `command = ${JSON.stringify(agentHookCommandFor(definition.source, event.hookEvent, scriptPath, platform, jsRuntimeExecutable))}`,
+    `timeout = ${event.timeout}`,
+    ''
+  ])
+  return tomlContent([
+    ...(stripped ? [stripped, ''] : []),
+    kimiTomlBegin,
+    ...entries.slice(0, -1),
+    kimiTomlEnd
+  ])
+}
+
+export const uninstallKimiCodeHooks = (content: string) => tomlContent(removeMarkedBlock(content || '', kimiTomlBegin, kimiTomlEnd).replace(/\s+$/, '').split(/\r?\n/))
+
+export const installDeepseekHarnessPatch = (content: string, hooksPath: string) => {
+  const stripped = removeMarkedBlock(content || '', deepseekPatchBegin, deepseekPatchEnd)
+    .replace(/^\s*\[\]\s*$/gm, '')
+    .replace(/\s+$/, '')
+  const block = [
+    deepseekPatchBegin,
+    '- insert:',
+    '    - id: aiopsterm-hooks',
+    "      name: '@deepseek-ai/dsh-hooks-codex'",
+    '      config:',
+    `        configPath: ${JSON.stringify(hooksPath)}`,
+    '        model: deepseek',
+    deepseekPatchEnd
+  ].join('\n')
+  return `${stripped ? `${stripped}\n` : ''}${block}\n`
+}
+
+export const uninstallDeepseekHarnessPatch = (content: string) => {
+  const stripped = removeMarkedBlock(content || '', deepseekPatchBegin, deepseekPatchEnd).replace(/\s+$/, '')
+  return stripped ? `${stripped}\n` : '[]\n'
+}
 
 export const installCodexHooksFeature = (content: string) => {
   const stripped = removeCodexFeatureBlock(content || '', false)

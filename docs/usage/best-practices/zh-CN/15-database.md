@@ -6,7 +6,7 @@
 
 点击模块栏的 **数据库**。点击左侧连接栏添加按钮，选择数据库类型，填写连接并先点击测试；保存后双击连接或使用行菜单连接。从目录树表的右键菜单新建查询/打开数据，或点击主区域 `+` 新建 SQL 标签。DB AI 通过数据库工作区右侧 **切换 DB AI 面板** 打开并绑定当前连接。使用 DB AI 前先到 **设置 -> 模型** 配置、Check 并 Save 一个可用 Provider。
 
-![数据库工作区](../images/database-workspace.png)
+![数据库工作区](../images/zh-CN/database-workspace.png)
 
 **①** 是连接和对象树，**②** 管理 SQL、数据和结果页签，**③** 是当前数据库工作区内容。
 
@@ -33,7 +33,7 @@ Run all 会识别常见 SQL 语句边界并逐条执行。字符串、注释、�
 
 ## 场景三：用自然语言生成 SQL
 
-![DB AI 工作流](../images/database-ai-workflow.png)
+![DB AI 工作流](../images/zh-CN/database-ai-workflow.png)
 
 1. 打开连接并选定 database/schema，再点击 **切换 DB AI 面板**。
 2. 在 **① 上下文**确认连接、database 和 schema；没有上下文时不能发送。

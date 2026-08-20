@@ -15,6 +15,7 @@ const agentSessionsMock = vi.hoisted(() => ({
   replyManagedAiSession: vi.fn(),
   clearManagedAiSession: vi.fn(),
   listManagedAiSessionEvents: vi.fn(),
+  waitForManagedAiSessionEvent: vi.fn(),
   listManagedAiNotifications: vi.fn(),
   markManagedAiNotificationRead: vi.fn(),
   dismissManagedAiNotification: vi.fn(),
@@ -117,6 +118,29 @@ beforeEach(() => {
   agentSessionsMock.replyManagedAiSession.mockResolvedValue({ ok: true, data: { snapshot: snapshot([]) } })
   agentSessionsMock.clearManagedAiSession.mockResolvedValue({ ok: true, data: { snapshot: snapshot([]) } })
   agentSessionsMock.listManagedAiSessionEvents.mockReturnValue({ ok: true, data: { protocol: 'aiopsterm-agent-events', bootId: 'boot-1', afterSeq: 1, oldestSeq: 1, latestSeq: 2, nextSeq: 3, events: [], count: 0 } })
+  agentSessionsMock.waitForManagedAiSessionEvent.mockResolvedValue({
+    protocol: 'aiopsterm-agent-events',
+    version: 1,
+    bootId: 'boot-1',
+    afterSeq: 2,
+    latestSeq: 3,
+    nextSeq: 4,
+    timedOut: false,
+    aborted: false,
+    event: {
+      type: 'event',
+      protocol: 'aiopsterm-agent-events',
+      version: 1,
+      boot_id: 'boot-1',
+      seq: 3,
+      id: 'boot-1-3',
+      name: 'agent.hook.Stop',
+      category: 'agent',
+      source: 'codex',
+      occurred_at: '2026-08-16T12:00:00.000Z',
+      payload: { source: 'codex', sessionId: 'codex-wait-1', event: 'stop', state: 'needsInput' }
+    }
+  })
   agentSessionsMock.listManagedAiNotifications.mockResolvedValue({ ok: true, data: { notifications: [], count: 0, total: 0, unreadCount: 0 } })
   agentSessionsMock.markManagedAiNotificationRead.mockResolvedValue({ ok: true, data: { changed: 0, notifications: [], snapshot: snapshot([]) } })
   agentSessionsMock.dismissManagedAiNotification.mockResolvedValue({ ok: true, data: { changed: 0, notifications: [], snapshot: snapshot([]) } })
@@ -308,6 +332,86 @@ describe('externalCodexMcpManagedAiRuntime', () => {
             needsInput: false
           }),
           unreadCount: 0
+        })
+      })
+    )
+  })
+
+  it('waits for a later completion event and returns a resumable cursor without polling', async () => {
+    const runtime = await loadRuntime()
+    const completed = sessionRecord({
+      id: 'codex-wait-1',
+      source: 'codex',
+      state: 'needsInput',
+      lastEvent: 'stop',
+      requestKind: 'notification',
+      decisionMode: 'local'
+    })
+    agentSessionsMock.listManagedAiSessions.mockResolvedValue({ ok: true, data: snapshot([completed]) })
+
+    const response = await runtime.handleExternalCodexMcpManagedAiRequest('wait_ai_session_completion', {
+      source: 'codex',
+      sessionId: 'codex-wait-1',
+      timeoutMs: 45_000
+    })
+
+    expect(agentSessionsMock.waitForManagedAiSessionEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ afterSeq: 2, timeoutMs: 45_000, predicate: expect.any(Function) })
+    )
+    expect(response).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          matched: true,
+          timedOut: false,
+          reason: 'completed',
+          after_seq: 2,
+          next_seq: 4,
+          session: expect.objectContaining({ source: 'codex', sessionId: 'codex-wait-1', lastEvent: 'stop' }),
+          event: expect.objectContaining({ name: 'agent.hook.Stop', seq: 3 })
+        })
+      })
+    )
+  })
+
+  it('returns the latest session and next cursor when completion waiting times out', async () => {
+    const runtime = await loadRuntime()
+    const working = sessionRecord({
+      id: 'codex-wait-timeout-1',
+      source: 'codex',
+      state: 'working',
+      lastEvent: 'prompt_submit',
+      requestKind: 'telemetry',
+      decisionMode: 'telemetry',
+      pendingRequestId: undefined
+    })
+    agentSessionsMock.listManagedAiSessions.mockResolvedValue({ ok: true, data: snapshot([working]) })
+    agentSessionsMock.waitForManagedAiSessionEvent.mockResolvedValue({
+      protocol: 'aiopsterm-agent-events',
+      version: 1,
+      bootId: 'boot-1',
+      afterSeq: 2,
+      latestSeq: 2,
+      nextSeq: 3,
+      timedOut: true,
+      aborted: false
+    })
+
+    const response = await runtime.handleExternalCodexMcpManagedAiRequest('wait_ai_session_completion', {
+      source: 'codex',
+      sessionId: 'codex-wait-timeout-1',
+      timeoutMs: 1_000
+    })
+
+    expect(response).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          matched: false,
+          timedOut: true,
+          reason: 'timeout',
+          next_seq: 3,
+          session: expect.objectContaining({ state: 'working' })
         })
       })
     )

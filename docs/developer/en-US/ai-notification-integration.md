@@ -23,7 +23,7 @@ Local terminals created by aiopsterm receive:
 | `AIOPSTERM_SURFACE_ID` | Owning surface |
 | `AIOPSTERM_WORKSPACE_ID` | Owning workspace |
 
-`source` is not an arbitrary string. Registered ids currently include `codex`, `claude-code`, `cursor`, `gemini`, `copilot`, `grok`, `opencode`, `codebuddy`, `factory`, `qoder`, `antigravity`, `kiro`, `hermes-agent`, `rovodev`, `amp`, `pi`, and `omp`. The `my-agent` examples below assume that the developer has registered that source; an unregistered name is rejected.
+`source` is not an arbitrary string. Registered ids currently include `codex`, `claude-code`, `cursor`, `gemini`, `copilot`, `grok`, `opencode`, `codebuddy`, `factory`, `qoder`, `antigravity`, `kiro`, `hermes-agent`, `rovodev`, `amp`, `pi`, `omp`, `kimi-code`, and `deepseek-harness`. The `my-agent` examples below assume that the developer has registered that source; an unregistered name is rejected.
 
 To add an agent source:
 

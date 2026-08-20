@@ -6,7 +6,7 @@ This guide starts with a common goal: save a production entry once, reconnect by
 
 Click **Assets** on the module rail. The top Host, Bastion, Key, and Proxy tabs are separate surfaces. Creation lives in tree context menus or empty states: right-click blank host-tree space for a top-level folder/host, or a folder for a child folder/host. Edit, clone, test, and delete are in the host row's more menu. Double-click a host to connect and switch to Workspace.
 
-![Assets workspace](../images/assets-workspace.png)
+![Assets workspace](../images/en-US/assets-workspace.png)
 
 Use **① Host Management**, **② Bastion Management**, **③ Key Management**, and **④ Proxy Management** for separate resource types; **⑤** is a connectable host asset.
 

@@ -14,13 +14,13 @@ AI 会话模块用于观察和管理外部 Codex、Claude Code、OpenCode 等编
 
 > 本地历史导入与实时 Hook 是两条路径：历史文件可进入“会话库”，但没有 Hook 时不会得到实时运行、审批、提问、完成通知和可靠的最近文件变更。
 
-![AI 通知设置](../images/settings-ai-notifications.png)
+![AI 通知设置](../images/zh-CN/settings-ai-notifications.png)
 
 图中 **①** 打开 AI 通知，**②** 控制通知声音，**③** 导入或试听声音，**④** 安装并检查各 Agent Hook。
 
 ## 收件箱的三个视图
 
-![AI 会话收件箱](../images/ai-sessions-inbox.png)
+![AI 会话收件箱](../images/zh-CN/ai-sessions-inbox.png)
 
 - **待处理**：等待审批、回答或确认的会话；顶栏铃铛会在这些会话间轮转。
 - **运行中**：当前活跃会话，默认按项目分组。
@@ -30,7 +30,7 @@ AI 会话模块用于观察和管理外部 Codex、Claude Code、OpenCode 等编
 
 ## 查看完整 AI 对话内容
 
-![AI 会话内容](../images/ai-session-content.png)
+![AI 会话内容](../images/zh-CN/ai-session-content.png)
 
 1. 在会话行上点击右键，选择 **打开会话内容**。
 2. 主工作区会新建以该会话命名的内容标签；图中 **①** 是消息时间线，**②** 切换源码/渲染或内容视图，**③** 是保存状态和操作区。
@@ -52,7 +52,7 @@ AI 会话模块用于观察和管理外部 Codex、Claude Code、OpenCode 等编
 
 ## 查看和修改 AI 项目文件
 
-![AI 项目文件](../images/ai-project-files.png)
+![AI 项目文件](../images/zh-CN/ai-project-files.png)
 
 打开目标会话后，点击会话工具栏的 **项目文件** 按钮：
 

@@ -6,7 +6,7 @@ Use this guide when a host is already saved and connected in aiopsterm and you w
 
 A Host Agent requires a working model. An SSH connection alone cannot send AI requests.
 
-![Model settings](../images/settings-models.png)
+![Model settings](../images/en-US/settings-models.png)
 
 1. Open **Settings -> Models -> Add Model**.
 2. For embedded Codex, select **OpenAI Compatible**, enter Base URL, API Key, and Model, and set **API Format** to **Responses**. Codex does not use Chat Completions from this Provider.
@@ -18,7 +18,7 @@ A Host Agent requires a working model. An SSH connection alone cannot send AI re
 
 The remote host does not need Codex or Classic installed. The local agent operates through the connected terminal and its proxy/jump path.
 
-![Host AI panel](../images/ai-panel.png)
+![Host AI panel](../images/en-US/ai-panel.png)
 
 Use **①** to choose Codex CLI or Classic, review output at **②**, add host context explicitly at **③**, enter the task at **④**, verify the model at **⑤**, and send or stop at **⑥**.
 

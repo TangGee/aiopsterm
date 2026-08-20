@@ -6,7 +6,7 @@ This guide starts with a common task: import a kubeconfig, inspect workloads in 
 
 Click **Kubernetes** on the module rail. With no cluster, use the add control, import kubeconfig or configure manually, and run Connection Test before saving. After connecting, open Describe/Logs from resource rows, a terminal from cluster actions, and scoped commands from the resource workspace **Agent** bar. **Send Output To AI** passes real output to the right AI conversation; configure a model under **Settings -> Models** first.
 
-![Kubernetes workspace](../images/kubernetes-workspace.png)
+![Kubernetes workspace](../images/en-US/kubernetes-workspace.png)
 
 Use **①** to switch context, **②** for the kubectl terminal, **③** for cluster configuration, and **④** to browse and operate resources.
 
@@ -41,7 +41,7 @@ Streaming logs and `kubectl exec` work. Full-screen TUI programs are not support
 
 ## Scenario 4: Cluster Agent Command Workflow
 
-![Kubernetes Agent and AI](../images/kubernetes-ai-workflow.png)
+![Kubernetes Agent and AI](../images/en-US/kubernetes-ai-workflow.png)
 
 The Agent bar is always bound to an explicit cluster/context:
 

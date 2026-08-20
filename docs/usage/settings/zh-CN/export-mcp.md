@@ -4,13 +4,15 @@
 
 按任务选择和安装三个服务的流程见 [导出 MCP](../../best-practices/zh-CN/08-export-mcp.md)。
 
+## 等待 AI 会话完成
+
+`aiopsterm_ai_sessions` 提供 `wait_ai_session_completion`，用于等待指定托管会话的下一次完成事件，不需要持续轮询 `list_ai_sessions` 或 `list_ai_session_events`。传入 `source`、`sessionId`，可选传入事件游标 `afterSeq` 和 `timeoutMs`；默认等待 120 秒，最短 1 秒，最长 180 秒。
+
+工具只匹配游标之后的 `stop`、`session_end` 或生命周期结束事件，避免把上一轮完成误认为当前任务完成。命中时返回事件、最新会话摘要和 `nextSeq`；超时时返回 `timedOut: true` 和同样的可续游标。外部 Agent 只有在超时后才应携带 `nextSeq` 继续等待。客户端取消工具调用或断开 socket 时，aiopsterm 会立即清理对应 waiter。
+
 ## 前置条件
 
-导出 MCP 由 aiopsterm 启动环境变量控制：
-
-```bash
-export AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE=1
-```
+aiopsterm 会在启动时自动创建本地 Export MCP socket 并生成访问 token，普通安装不需要配置环境变量。`AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE=0` 或 `AIOPSTERM_EXTERNAL_CODEX_MCP_DISABLE=1` 仅用于托管部署显式关闭服务。
 
 token 默认由 aiopsterm 在首次使用时生成并保存到应用数据目录下的 `external-codex-mcp/token.json`，文件权限会尽量设置为仅当前用户可读写。`AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN` 仍可作为显式覆盖；设置后需要重启 aiopsterm，并且设置页的“重新生成 Token”不会覆盖该环境变量。
 
@@ -61,6 +63,10 @@ token 用来证明调用方是被授权的外部 MCP 客户端。即使 socket �
 
 - Codex：只移除并重新添加用户选择的 server 条目。
 - Claude Code：只移除并重新添加用户选择的 user-scope server 条目。
+
+安装器只调用用户独立安装的外部 Agent CLI，不会调用 aiopsterm 随包的定制 Codex 运行时。CLI 探测除当前进程 `PATH` 外，还覆盖 macOS/Linux 的常见用户级 npm、Volta、Bun、pnpm 和 Homebrew 目录，以及 Windows 的用户 npm 和 WinGet 目录。执行 CLI 时会把同一组目录加入子进程 `PATH`，确保通过 npm 安装且使用 `#!/usr/bin/env node` 的 CLI 从 Dock、Finder 或桌面快捷方式启动时也能找到 Node.js，普通用户无需手动补环境变量。
+
+CLI 安装命令失败时，aiopsterm 会把脱敏后的 `export-mcp.client-command.failed` 事件写入应用运行日志；事件保留客户端、add/remove 操作、server 名称和错误信息，但不会记录 Export MCP token。
 
 三个条目复用同一个 helper、socket 和 token，但分别写入 `AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE=hosts`、`ai-sessions` 或 `databases`。helper 缺少合法 scope 时会拒绝初始化，不会回退到聚合 tools。
 

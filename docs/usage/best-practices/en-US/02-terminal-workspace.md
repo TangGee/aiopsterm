@@ -8,7 +8,7 @@ Click **Workspace** at the top of the module rail. Double-click **Local Connecti
 
 ## Session Tabs
 
-![Terminal session](../images/terminal-session.png)
+![Terminal session](../images/en-US/terminal-session.png)
 
 - **① Session tab**: a single compact row; long titles ellipsize. Hover to see the full type, state, host, cwd, and backend session id. Only exceptional connection states show indicators — routine `running/ready` text stays out of the label.
 - **② Terminal pane**: the selected pane is the target for split, reconnect, search, and font-zoom actions.
@@ -20,7 +20,7 @@ Terminal programs may retitle tabs via the standard xterm title protocol (`OSC 0
 
 ## The Context Menu
 
-![Terminal context menu](../images/terminal-context-menu.png)
+![Terminal context menu](../images/en-US/terminal-context-menu.png)
 
 Right-click a terminal pane or tab:
 
@@ -35,7 +35,7 @@ Also present: copy/paste (`Ctrl+Shift+C/V`), search (`Ctrl+Alt+F`), new/close te
 
 ## Splitting And Merging Panes
 
-![Terminal split](../images/terminal-split.png)
+![Terminal split](../images/en-US/terminal-split.png)
 
 - `向右拆分` / `向下拆分` places the new pane right of / below the selected region (① original pane, ② new pane).
 - `取消拆分` (unsplit) restores a pane to its own tab, with automatic refit.
@@ -76,7 +76,7 @@ Activation history covers main-workspace panels such as terminals, knowledge doc
 
 ## Jump Hosts And Files
 
-![Connect a host](../images/connect-host.png)
+![Connect a host](../images/en-US/connect-host.png)
 
 SSH settings are configured before a terminal opens. To create the first host:
 

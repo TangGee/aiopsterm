@@ -6,7 +6,7 @@ The Files workspace browses, edits, and transfers content between local director
 
 Use any of three entry points: click **Files** on the module rail for the full workspace; right-click a terminal pane and choose **File Management** to carry in that SSH host; or click **Add Connection** on an empty Files side and choose an asset or live session.
 
-![Files workspace](../images/files-workspace.png)
+![Files workspace](../images/en-US/files-workspace.png)
 
 ## Build The Two Sides
 
