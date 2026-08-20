@@ -105,6 +105,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
     registerCodexTerminalBridgeSession({
       id: session.id,
       kind: session.kind,
+      shell: session.shell,
       host: session.host,
       cwd: session.cwd,
       window: session.window,

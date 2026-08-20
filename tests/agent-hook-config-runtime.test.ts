@@ -94,10 +94,12 @@ describe('agentHookConfigRuntime', () => {
         `const chunks = []
 process.stdin.on('data', (chunk) => chunks.push(chunk))
 process.stdin.on('end', () => {
+  const payload = JSON.parse(Buffer.concat(chunks).toString('utf8').replace(/^\uFEFF/, ''))
   const valid = process.env.ELECTRON_RUN_AS_NODE === '1' &&
     process.env.AIOPSTERM_AGENT_HOOK_MARKER === 'aiopsterm-agent-hook-v1' &&
     process.argv.includes('codex') && process.argv.includes('SessionStart') &&
-    JSON.parse(Buffer.concat(chunks).toString('utf8')).session_id === 'shell-smoke'
+    payload.session_id === 'shell-smoke' &&
+    payload.last_assistant_message === 'Windows 中文消息以中文句号结束。'
   process.stdout.write(JSON.stringify({ received: valid }))
   process.exitCode = valid ? 0 : 7
 })
@@ -105,16 +107,20 @@ process.stdin.on('end', () => {
         'utf-8'
       )
       const command = runtime.agentHookCommandFor('codex', 'SessionStart', scriptPath, 'win32', process.execPath)
-      const input = JSON.stringify({ session_id: 'shell-smoke' })
+      const input = JSON.stringify({ session_id: 'shell-smoke', last_assistant_message: 'Windows 中文消息以中文句号结束。' })
       const invocations = [
         { shell: process.env.COMSPEC || 'cmd.exe', args: ['/D', '/S', '/C', command] },
         { shell: 'powershell.exe', args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command] }
       ]
 
       for (const invocation of invocations) {
-        const result = spawnSync(invocation.shell, invocation.args, { input, encoding: 'utf-8' })
+        const result = spawnSync(invocation.shell, invocation.args, {
+          input,
+          encoding: 'utf-8',
+          env: { ...process.env, AIOPSTERM_AGENT_HOOK_DEBUG: '1' }
+        })
         expect(result.status, result.stderr).toBe(0)
-        expect(result.stdout).toContain('{"received":true}')
+        expect(result.stdout, `${invocation.shell}: ${result.stderr}`).toContain('{"received":true}')
       }
     } finally {
       await rm(root, { recursive: true, force: true })

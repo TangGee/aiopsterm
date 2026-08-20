@@ -8,6 +8,7 @@ import { terminalClient } from '@/services/terminal/terminalClient'
 import type { I18nKey } from '@/i18n/messages'
 import { isTerminalWorkspacePanel, type TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
 import type { TerminalCommandExecutionOptions, TerminalSecurityDecision } from '@/services/terminal/terminalExecutionRuntime'
+import { resumeCommandForTerminal } from './managedAiResumeCommandRuntime'
 import type {
   AiAgentSessionSource,
   AgentHibernationConfig,
@@ -192,7 +193,8 @@ export const createWorkspaceManagedAiHibernationRuntime = (input: {
       setTopNotice(i18nText('aiSessions.notice.resumeNeedsTerminal'))
       return false
     }
-    const decision = await runTerminalCommand(panel.id, command, { source: 'agent', writeToShell: true })
+    const terminalCommand = resumeCommandForTerminal(panel, command)
+    const decision = await runTerminalCommand(panel.id, terminalCommand, { source: 'agent', writeToShell: true })
     if (decision.status === 'allow') {
       const wakeManagedAiSession = managedAiClient.wakeManagedAiSession()
       if (session.hibernated && wakeManagedAiSession) {

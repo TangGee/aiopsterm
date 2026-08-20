@@ -91,7 +91,7 @@ const startDecisionSocketServer = async (response: Record<string, unknown>) => {
   }
 }
 
-const runHelper = (args: string[], input: string, env: NodeJS.ProcessEnv) =>
+const runHelper = (args: string[], input: string | Buffer, env: NodeJS.ProcessEnv) =>
   new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
     const child = spawn(process.execPath, [helperPath, ...args], {
       env,
@@ -155,6 +155,73 @@ describe('aiopsterm agent hook helper', () => {
           transcriptPath: '/tmp/codex.jsonl',
           turnId: 'turn-1',
           turn_id: 'turn-1'
+        })
+      ])
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('recovers the real session id from Windows-style encoded hook input', async () => {
+    const server = await startSocketServer()
+    try {
+      const payload = JSON.stringify({
+        session_id: 'codex-windows-session-1',
+        cwd: 'C:\\Users\\Ops\\project',
+        tool_name: 'apply_patch',
+        tool_input: { patch: '*** Begin Patch\\n*** End Patch' }
+      })
+      const result = await runHelper(
+        ['--source', 'codex', '--event', 'Stop'],
+        Buffer.from(`hook output\n${payload}\n`, 'utf16le'),
+        {
+          ...process.env,
+          AIOPSTERM_MANAGED_TERMINAL: '1',
+          AIOPSTERM_AGENT_SOCKET_PATH: server.socketPath,
+          AIOPSTERM_AGENT_SESSION_ID: 'terminal-fallback-id',
+          AIOPSTERM_TERMINAL_SESSION_ID: 'terminal-1'
+        }
+      )
+
+      expect(result.code).toBe(0)
+      expect(server.received).toEqual([
+        expect.objectContaining({
+          source: 'codex',
+          event: 'Stop',
+          sessionId: 'codex-windows-session-1',
+          terminalSessionId: 'terminal-1'
+        })
+      ])
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('recovers identity from a malformed JSON hook payload instead of using the terminal id', async () => {
+    const server = await startSocketServer()
+    try {
+      const malformedPayload = '{"session_id":"agent-real-session-1","turn_id":"turn-1","cwd":"C:\\\\work\\\\project","last_assistant_message":"中文消息。}'
+      const result = await runHelper(
+        ['--source', 'codex', '--event', 'Stop'],
+        malformedPayload,
+        {
+          ...process.env,
+          AIOPSTERM_MANAGED_TERMINAL: '1',
+          AIOPSTERM_AGENT_SOCKET_PATH: server.socketPath,
+          AIOPSTERM_AGENT_SESSION_ID: 'terminal-fallback-id',
+          AIOPSTERM_TERMINAL_SESSION_ID: 'terminal-fallback-id'
+        }
+      )
+
+      expect(result.code).toBe(0)
+      expect(server.received).toEqual([
+        expect.objectContaining({
+          source: 'codex',
+          event: 'Stop',
+          sessionId: 'agent-real-session-1',
+          terminalSessionId: 'terminal-fallback-id',
+          cwd: 'C:\\work\\project',
+          turnId: 'turn-1'
         })
       ])
     } finally {

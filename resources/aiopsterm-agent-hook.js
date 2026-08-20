@@ -72,15 +72,84 @@ const readStdin = () =>
     process.stdin.resume()
   })
 
-const parsePayload = (rawInput) => {
-  const trimmed = cleanText(rawInput)
-  if (!trimmed) return {}
+const parseJsonObject = (value) => {
+  const text = cleanText(value).replace(/^\uFEFF/, '').replace(/\u0000/g, '')
+  if (!text) return null
   try {
-    const parsed = JSON.parse(trimmed)
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+    const parsed = JSON.parse(text)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed
+    if (typeof parsed === 'string') return parseJsonObject(parsed)
   } catch {
-    return { text: trimmed }
+    // Some Windows hook launchers can prepend/append text around the JSON.
   }
+
+  // Recover the first complete JSON object without using a greedy regex. This
+  // also handles braces inside quoted strings and escaped quotes.
+  for (let start = text.indexOf('{'); start >= 0; start = text.indexOf('{', start + 1)) {
+    let depth = 0
+    let quoted = false
+    let escaped = false
+    for (let index = start; index < text.length; index += 1) {
+      const character = text[index]
+      if (quoted) {
+        if (escaped) escaped = false
+        else if (character === '\\') escaped = true
+        else if (character === '"') quoted = false
+        continue
+      }
+      if (character === '"') {
+        quoted = true
+        continue
+      }
+      if (character === '{') depth += 1
+      else if (character === '}' && --depth === 0) {
+        try {
+          const parsed = JSON.parse(text.slice(start, index + 1))
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed
+        } catch {
+          break
+        }
+      }
+    }
+  }
+  return null
+}
+
+const recoverJsonStringField = (text, keys) => {
+  for (const key of keys) {
+    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const match = new RegExp(`"${escapedKey}"\\s*:\\s*("(?:\\\\.|[^"\\\\])*")`).exec(text)
+    if (!match) continue
+    try {
+      const value = JSON.parse(match[1])
+      if (typeof value === 'string' && value.trim()) return value
+    } catch {
+      // Continue looking for another supported spelling.
+    }
+  }
+  return ''
+}
+
+const recoverPayloadIdentity = (text) => {
+  const sessionId = recoverJsonStringField(text, ['session_id', 'sessionId', 'conversation_id', 'conversationId'])
+  const turnId = recoverJsonStringField(text, ['turn_id', 'turnId'])
+  const transcriptPath = recoverJsonStringField(text, ['transcript_path', 'transcriptPath'])
+  const cwd = recoverJsonStringField(text, ['cwd', 'working_directory', 'workingDirectory'])
+  return {
+    ...(sessionId ? { session_id: sessionId } : {}),
+    ...(turnId ? { turn_id: turnId } : {}),
+    ...(transcriptPath ? { transcript_path: transcriptPath } : {}),
+    ...(cwd ? { cwd } : {})
+  }
+}
+
+const parsePayload = (rawInput) => {
+  const trimmed = cleanText(rawInput).replace(/^\uFEFF/, '')
+  if (!trimmed) return {}
+  const parsed = parseJsonObject(trimmed)
+  if (parsed) return parsed
+  const text = trimmed.replace(/\u0000/g, '')
+  return { ...recoverPayloadIdentity(text), text }
 }
 
 const nestedRecord = (record, key) => {
