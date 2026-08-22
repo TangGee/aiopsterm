@@ -139,6 +139,7 @@ export type SshTerminalRuntimeConfig = {
   getSshControlDir?: () => string
   useBackendDouble?: boolean
   readyTimeoutMs?: number
+  shellReadyTimeoutMs?: number
   keepaliveIntervalMs?: number
 }
 

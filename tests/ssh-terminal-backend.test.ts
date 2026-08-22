@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events'
 import { basename, dirname, normalize } from 'path'
 import { PassThrough } from 'stream'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   TerminalKeyboardInteractivePrompt,
   TerminalKeyboardInteractiveRequest,
@@ -105,7 +105,13 @@ const createPtyRuntime = () => {
 }
 
 const createSshRuntime = (
-  options: { failConnect?: Error | Array<Error | null | undefined>; failShell?: Error | Array<Error | undefined>; failForwardOut?: Error; manualReady?: boolean } = {}
+  options: {
+    failConnect?: Error | Array<Error | null | undefined>
+    failShell?: Error | Array<Error | undefined>
+    failForwardOut?: Error
+    manualReady?: boolean
+    manualShell?: boolean | boolean[]
+  } = {}
 ) => {
   const clients: MockSshClient[] = []
   const connectConfigs: Array<Record<string, unknown>> = []
@@ -133,6 +139,8 @@ const createSshRuntime = (
       shellOptions.push(_options)
       const channel = new MockSshChannel()
       channels.push(channel)
+      const manualShell = Array.isArray(options.manualShell) ? options.manualShell.shift() === true : options.manualShell === true
+      if (manualShell) return
       queueMicrotask(() => {
         const failShell = Array.isArray(options.failShell) ? options.failShell.shift() : options.failShell
         callback(failShell, channel)
@@ -289,7 +297,7 @@ describe('ssh terminal backend runtime', () => {
         username: 'deploy',
         password: 'secret',
         readyTimeout: 120000,
-        keepaliveInterval: 0,
+        keepaliveInterval: 10000,
         keepaliveCountMax: 3
       })
     ])
@@ -422,6 +430,57 @@ describe('ssh terminal backend runtime', () => {
       ])
     )
     expect(secondEvents.exit).toEqual([])
+  })
+
+  it('reconnects when a reused SSH client never reports shell readiness', async () => {
+    vi.useFakeTimers()
+    try {
+      const backend = await loadSshTerminalBackend()
+      const ssh = createSshRuntime({ manualShell: [false, true, false] })
+      const firstEvents = createRecorder()
+      const secondEvents = createRecorder()
+      backend.configureSshTerminalBackendRuntime({
+        ssh2Runtime: asRuntime(ssh.runtime),
+        getAsset: () => null,
+        getAssetSecret: () => ({}),
+        getKeychainSecret: () => ({}),
+        getConfig: () => runtimeConfig(),
+        shellReadyTimeoutMs: 20
+      })
+
+      const first = backend.createSshTerminalSession(
+        'ssh-stale-pool-timeout-1',
+        { kind: 'ssh', ssh: { host: '10.71.0.8', username: 'deploy', port: 2222, password: 'secret' } },
+        createSink(firstEvents)
+      )
+      await waitForMicrotasks(4)
+      ssh.channels[0].emit('close', 0)
+      await waitForMicrotasks(1)
+
+      const second = backend.createSshTerminalSession(
+        'ssh-stale-pool-timeout-2',
+        { kind: 'ssh', ssh: { host: '10.71.0.8', username: 'deploy', port: 2222, password: 'secret' } },
+        createSink(secondEvents)
+      )
+      await waitForMicrotasks(4)
+      await vi.advanceTimersByTimeAsync(20)
+      await waitForMicrotasks(8)
+
+      expect(first.session).toBeTruthy()
+      expect(second.session).toBeTruthy()
+      expect(ssh.clients).toHaveLength(2)
+      expect(ssh.clients[0].endCalls).toBe(1)
+      expect(secondEvents.lifecycle).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ stage: 'connected', connectionReuse: 'reused' }),
+          expect.objectContaining({ stage: 'connecting', connectionReuse: 'created' }),
+          expect.objectContaining({ stage: 'shell-ready', connectionReuse: 'created' })
+        ])
+      )
+      expect(secondEvents.exit).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('reports an active SSH transport failure as a network disconnect', async () => {
@@ -1232,7 +1291,7 @@ describe('ssh terminal backend runtime', () => {
     pty.processes[0].emitData('ops@relay:~$ ')
     expect(pty.processes[0].writes).toHaveLength(1)
     const command = pty.processes[0].writes[0]
-    expect(command).toBe("ssh -tt -p 22 -- 'root@target.internal'\n")
+    expect(command).toBe("ssh -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -tt -p 22 -- 'root@target.internal'\n")
     expect(command).not.toContain('queued-before-relay')
     expect(command).not.toContain('__AIO_CTX')
     expect(command).not.toContain('printf')
@@ -1348,14 +1407,18 @@ describe('ssh terminal backend runtime', () => {
     await waitForMicrotasks(4)
     pty.processes[0].emitData('ops@relay:~$ ')
     pty.processes[0].emitData('target login banner\n[root@target.internal ~]# ')
-    expect(pty.processes[0].writes).toEqual(["ssh -tt -p 22 -- 'root@target.internal'\n"])
+    expect(pty.processes[0].writes).toEqual([
+      "ssh -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -tt -p 22 -- 'root@target.internal'\n"
+    ])
 
     const backgroundPromise = result.session!.runBackgroundCommand!({ command: 'pwd && hostname', cwd: '/root', timeoutMs: 5000 })
     expect(pty.spawnCalls).toHaveLength(2)
     const hidden = pty.processes[1]
     expect(hidden).not.toBe(pty.processes[0])
     hidden.emitData('ops@relay:~$ ')
-    expect(hidden.writes).toEqual(["ssh -tt -p 22 -- 'root@target.internal'\n"])
+    expect(hidden.writes).toEqual([
+      "ssh -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -tt -p 22 -- 'root@target.internal'\n"
+    ])
     hidden.emitData('target login banner\n[root@target.internal ~]# ')
     expect(hidden.writes).toHaveLength(2)
     const command = hidden.writes[1]
@@ -1367,7 +1430,9 @@ describe('ssh terminal backend runtime', () => {
     hidden.emitData(`__AIOPSTERM_BACKGROUND_START_${commandId}__\n/root\ntarget.internal\n__AIOPSTERM_BACKGROUND_END_${commandId}__:0\n[root@target.internal ~]# `)
     const background = await backgroundPromise
 
-    expect(pty.processes[0].writes).toEqual(["ssh -tt -p 22 -- 'root@target.internal'\n"])
+    expect(pty.processes[0].writes).toEqual([
+      "ssh -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -tt -p 22 -- 'root@target.internal'\n"
+    ])
     expect(background).toEqual(
       expect.objectContaining({
         output: '/root\ntarget.internal',

@@ -2,7 +2,7 @@ import type { TerminalCreateOptions, TerminalLifecycleEvent } from '@shared/cont
 import { shouldUseSshTerminalBackendDouble } from '@shared/runtimeSwitches'
 import { createSshProxySocketForAsset } from './sshProxy'
 import { loadSsh2 } from './ssh2Runtime'
-import { defaultSshInteractiveKeepaliveIntervalMs, defaultSshReadyTimeoutMs } from './sshDefaults'
+import { defaultSshInteractiveKeepaliveIntervalMs, defaultSshReadyTimeoutMs, defaultSshShellReadyTimeoutMs } from './sshDefaults'
 import { createTerminalErrorLifecycleEvent, createTerminalLifecycleEvent } from '../terminal/terminal'
 import type { AssetSecret, SshTerminalCreateResult, SshTerminalEventSink, SshTerminalPtyRuntime, SshTerminalRuntimeConfig, SshTerminalSsh2Runtime, SshTerminalTarget } from './sshTerminalTypes'
 
@@ -27,6 +27,7 @@ export const setSshTerminalBackendRuntimeConfig = (config: SshTerminalRuntimeCon
   runtimeConfig.getSshControlDir = config.getSshControlDir
   runtimeConfig.useBackendDouble = config.useBackendDouble
   runtimeConfig.readyTimeoutMs = config.readyTimeoutMs
+  runtimeConfig.shellReadyTimeoutMs = config.shellReadyTimeoutMs
   runtimeConfig.keepaliveIntervalMs = config.keepaliveIntervalMs
 }
 
@@ -59,6 +60,8 @@ export const getTerminalType = (options: TerminalCreateOptions) => {
 }
 
 export const getSshReadyTimeoutMs = () => runtimeConfig.readyTimeoutMs || defaultSshReadyTimeoutMs
+
+export const getSshShellReadyTimeoutMs = () => runtimeConfig.shellReadyTimeoutMs || defaultSshShellReadyTimeoutMs
 
 export const getSshKeepaliveIntervalMs = () => runtimeConfig.keepaliveIntervalMs ?? defaultSshInteractiveKeepaliveIntervalMs
 

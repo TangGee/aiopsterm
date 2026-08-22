@@ -29,6 +29,7 @@ import {
   getSsh2Runtime,
   getSshKeepaliveIntervalMs,
   getSshReadyTimeoutMs,
+  getSshShellReadyTimeoutMs,
   getTerminalType,
   isValidTarget,
   resolveKeychainSecret,
@@ -368,6 +369,7 @@ export const createSshTerminalSession = (
   let relayShellJumpTarget: SshTerminalTarget | null = null
   let detachActiveTargetClientEvents: (() => void) | null = null
   let reusedShellRetryUsed = false
+  let shellReadyTimer: ReturnType<typeof setTimeout> | null = null
   const staleTargetClients = new Set<SshTerminalClient>()
   const retiredTargetClients = new WeakSet<SshTerminalClient>()
 
@@ -428,6 +430,12 @@ export const createSshTerminalSession = (
     cleanupRelayShell()
   }
 
+  const clearShellReadyTimer = () => {
+    if (!shellReadyTimer) return
+    clearTimeout(shellReadyTimer)
+    shellReadyTimer = null
+  }
+
   const finish = (
     code: number | null,
     reason: TerminalDisconnectReason,
@@ -435,6 +443,7 @@ export const createSshTerminalSession = (
   ) => {
     if (closed) return
     closed = true
+    clearShellReadyTimer()
     detachActiveTargetClientEvents?.()
     detachActiveTargetClientEvents = null
     cleanupTransports()
@@ -467,6 +476,7 @@ export const createSshTerminalSession = (
   ) => {
     if (closed) return
     closed = true
+    clearShellReadyTimer()
     const failedClient = client
     detachActiveTargetClientEvents?.()
     detachActiveTargetClientEvents = null
@@ -598,11 +608,14 @@ export const createSshTerminalSession = (
 
   const handleShellOpenFailure = (authClient: SshTerminalClient, error: unknown) => {
     if (retryFreshClientAfterReusedShellFailure(authClient, error)) return
+    retireTargetClient(authClient)
+    if (client === authClient) client = null
     fail(error, 'SSH shell failed.', 1)
   }
 
   const openShellOnClient = (authClient: SshTerminalClient) => {
     if (closed || authClient !== client) return
+    clearShellReadyTimer()
     attachActiveTargetClientEvents(authClient)
     authRuntime.sendActiveKeyboardResult('target', { status: 'success' })
     authRuntime.commitRememberedPassword('target')
@@ -636,8 +649,26 @@ export const createSshTerminalSession = (
           ? `SSH connection reused ${target.username}@${target.host}:${target.port}`
           : `SSH connected ${target.username}@${target.host}:${target.port}`
     })
+    let shellCallbackSettled = false
+    shellReadyTimer = setTimeout(() => {
+      if (shellCallbackSettled || closed || authClient !== client) return
+      shellCallbackSettled = true
+      shellReadyTimer = null
+      handleShellOpenFailure(
+        authClient,
+        new Error(`SSH shell was not ready within ${getSshShellReadyTimeoutMs()}ms.`)
+      )
+    }, getSshShellReadyTimeoutMs())
     try {
       authClient.shell({ term: terminalType, cols, rows }, (error, channel) => {
+        if (shellCallbackSettled) {
+          try {
+            channel?.close?.()
+          } catch {}
+          return
+        }
+        shellCallbackSettled = true
+        clearShellReadyTimer()
         if (error) {
           handleShellOpenFailure(authClient, error)
           return
