@@ -64,8 +64,15 @@ export const filesWorkspaceEditorLanguage = (filePath: string) => {
   const ext = filePath.split('.').pop()?.toLowerCase() || ''
   const map: Record<string, string> = {
     js: 'javascript',
+    jsx: 'javascript',
     ts: 'typescript',
+    tsx: 'typescript',
     json: 'json',
+    html: 'html',
+    htm: 'html',
+    css: 'css',
+    scss: 'scss',
+    less: 'less',
     md: 'markdown',
     sh: 'shell',
     py: 'python',

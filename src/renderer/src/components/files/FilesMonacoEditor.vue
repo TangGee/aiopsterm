@@ -42,6 +42,7 @@ const props = defineProps<{
   modelValue: string
   language?: string
   filePath?: string
+  modelUri?: string
   minimap?: boolean
   readonly?: boolean
 }>()
@@ -58,6 +59,8 @@ const fallbackRef = ref<HTMLTextAreaElement | null>(null)
 const monacoReady = ref(false)
 let monacoApi: MonacoModule | null = null
 let editor: monaco.editor.IStandaloneCodeEditor | null = null
+let model: monaco.editor.ITextModel | null = null
+let ownsModel = false
 let editorContextMenuDisposable: { dispose(): void } | null = null
 let suppressEditorEmit = false
 let suppressFallbackEmit = false
@@ -114,11 +117,25 @@ const syncFallbackValue = (value: string) => {
   suppressFallbackEmit = false
 }
 
+const resolveModelUri = () => {
+  if (!monacoApi) return null
+  const path = props.modelUri || props.filePath
+  if (!path) return null
+  return path.includes('://') ? monacoApi.Uri.parse(path) : monacoApi.Uri.file(path)
+}
+
 const createEditor = () => {
   if (!containerRef.value || editor || !monacoApi) return
+  const uri = resolveModelUri()
+  model = uri ? monacoApi.editor.getModel(uri) : null
+  if (!model) {
+    model = monacoApi.editor.createModel(props.modelValue, resolvedLanguage.value, uri || undefined)
+    ownsModel = true
+  } else {
+    monacoApi.editor.setModelLanguage(model, resolvedLanguage.value)
+  }
   editor = monacoApi.editor.create(containerRef.value, {
-    value: props.modelValue,
-    language: resolvedLanguage.value,
+    model,
     automaticLayout: true,
     scrollBeyondLastLine: false,
     smoothScrolling: true,
@@ -228,6 +245,9 @@ onBeforeUnmount(() => {
   editorContextMenuDisposable = null
   editor?.dispose()
   editor = null
+  if (ownsModel) model?.dispose()
+  model = null
+  ownsModel = false
 })
 
 defineExpose({ focus })

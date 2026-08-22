@@ -85,6 +85,7 @@ const { mockXtermInstances, monacoMocks } = vi.hoisted(() => ({
   monacoMocks: {
     model: {
       updateOptions: vi.fn(),
+      dispose: vi.fn(),
       getOffsetAt: vi.fn(() => 0),
       getPositionAt: vi.fn(() => ({ lineNumber: 1, column: 1 })),
       getLineCount: vi.fn(() => 20),
@@ -113,7 +114,17 @@ const { mockXtermInstances, monacoMocks } = vi.hoisted(() => ({
       layout: vi.fn(),
       dispose: vi.fn()
     },
-    create: vi.fn()
+    create: vi.fn(),
+    createModel: vi.fn(),
+    getModel: vi.fn(() => null),
+    setModelLanguage: vi.fn(),
+    uri: {
+      file: vi.fn((path: string) => ({ scheme: 'file', path })),
+      parse: vi.fn((value: string) => ({ scheme: 'aiopsterm', path: value }))
+    },
+    languageServices: {
+      setEagerModelSync: vi.fn()
+    }
   }
 }))
 
@@ -402,6 +413,7 @@ vi.mock('monaco-editor/esm/vs/editor/editor.api', () => {
   monacoMocks.editorInstance.onDidChangeCursorSelection.mockReturnValue({ dispose: vi.fn() })
   monacoMocks.editorInstance.onDidScrollChange.mockReturnValue({ dispose: vi.fn() })
   monacoMocks.create.mockReturnValue(monacoMocks.editorInstance)
+  monacoMocks.createModel.mockReturnValue(monacoMocks.model)
   class Range {
     startLineNumber: number
     startColumn: number
@@ -417,7 +429,17 @@ vi.mock('monaco-editor/esm/vs/editor/editor.api', () => {
   return {
     editor: {
       create: monacoMocks.create,
-      setModelLanguage: vi.fn()
+      createModel: monacoMocks.createModel,
+      getModel: monacoMocks.getModel,
+      setModelLanguage: monacoMocks.setModelLanguage,
+    },
+    Uri: monacoMocks.uri,
+    languages: {
+      getLanguages: vi.fn(() => []),
+      typescript: {
+        typescriptDefaults: monacoMocks.languageServices,
+        javascriptDefaults: monacoMocks.languageServices
+      }
     },
     KeyMod: { CtrlCmd: 2048 },
     KeyCode: { KeyS: 49, Enter: 3 },
@@ -427,10 +449,18 @@ vi.mock('monaco-editor/esm/vs/editor/editor.api', () => {
 
 vi.mock('monaco-editor/esm/vs/editor/contrib/folding/browser/folding', () => ({}))
 vi.mock('monaco-editor/esm/vs/editor/contrib/find/browser/findController', () => ({}))
+vi.mock('monaco-editor/esm/vs/editor/editor.all', () => ({}))
 vi.mock('monaco-editor/esm/vs/basic-languages/sql/sql.contribution', () => ({}))
 vi.mock('monaco-editor/esm/vs/basic-languages/monaco.contribution', () => ({}))
+vi.mock('monaco-editor/esm/vs/language/css/monaco.contribution', () => ({}))
+vi.mock('monaco-editor/esm/vs/language/html/monaco.contribution', () => ({}))
+vi.mock('monaco-editor/esm/vs/language/json/monaco.contribution', () => ({}))
+vi.mock('monaco-editor/esm/vs/language/typescript/monaco.contribution', () => ({}))
+vi.mock('monaco-editor/esm/vs/language/css/css.worker?worker', () => ({ default: class CssWorker {} }))
 vi.mock('monaco-editor/esm/vs/editor/editor.worker?worker', () => ({ default: class EditorWorker {} }))
+vi.mock('monaco-editor/esm/vs/language/html/html.worker?worker', () => ({ default: class HtmlWorker {} }))
 vi.mock('monaco-editor/esm/vs/language/json/json.worker?worker', () => ({ default: class JsonWorker {} }))
+vi.mock('monaco-editor/esm/vs/language/typescript/ts.worker?worker', () => ({ default: class TypescriptWorker {} }))
 vi.mock('mermaid', () => ({
   default: {
     initialize: vi.fn(),

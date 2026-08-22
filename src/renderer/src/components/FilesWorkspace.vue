@@ -107,6 +107,7 @@
       <FilesMonacoEditor
         :model-value="editor.content"
         :language="editor.language"
+        :file-path="editor.filePath"
         :readonly="editor.loading"
         @update:model-value="updateFileEditorContent(editor, $event)"
         @save="saveFileEditor(editor.key, false)"

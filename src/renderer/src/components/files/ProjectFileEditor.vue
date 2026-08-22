@@ -24,6 +24,7 @@
       :model-value="content"
       language="auto"
       :file-path="editorPath"
+      :model-uri="editorModelPath"
       :minimap="false"
       :readonly="loading || !readReady"
       @update:model-value="handleEditorChange"
@@ -77,6 +78,12 @@ const projectFile = computed(() => props.panel.projectFile)
 const localFile = computed(() => props.panel.localFile)
 const editorPath = computed(() => localFile.value?.filePath || projectFile.value?.relativePath || '')
 const editorRoot = computed(() => localFile.value ? props.panel.cwd : projectFile.value?.projectRoot || '')
+const editorModelPath = computed(() => {
+  const path = editorPath.value
+  const root = editorRoot.value
+  if (!root || !path || /^(?:[a-zA-Z]:[\\/]|[\\/]{1,2})/.test(path)) return path
+  return `${root.replace(/[\\/]+$/, '')}/${path}`
+})
 const dirty = computed(() => content.value !== originContent.value)
 const statusText = computed(() => {
   if (loading.value) return t('projectFiles.editor.status.loading')

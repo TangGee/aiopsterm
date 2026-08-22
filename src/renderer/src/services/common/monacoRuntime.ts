@@ -1,5 +1,8 @@
+import cssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker'
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
+import htmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker'
 import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker'
+import typescriptWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
 import 'monaco-editor/esm/vs/base/browser/ui/codicons/codicon/codicon.css'
 
 export type MonacoModule = typeof import('monaco-editor/esm/vs/editor/editor.api')
@@ -22,12 +25,22 @@ export const ensureMonacoEnvironment = () => {
   monacoGlobal.MonacoEnvironment = {
     ...monacoGlobal.MonacoEnvironment,
     getWorker(_moduleId: string, label: string) {
-      return label === 'json' ? new jsonWorker() : new editorWorker()
+      if (label === 'json') return new jsonWorker()
+      if (label === 'css' || label === 'scss' || label === 'less') return new cssWorker()
+      if (label === 'html' || label === 'handlebars' || label === 'razor') return new htmlWorker()
+      if (label === 'typescript' || label === 'javascript') return new typescriptWorker()
+      return new editorWorker()
     }
   }
 }
 
 let monacoPromise: Promise<MonacoModule> | null = null
+
+const configureMonacoLanguageServices = (monaco: MonacoModule) => {
+  const languageServices = monaco.languages?.typescript
+  languageServices?.typescriptDefaults?.setEagerModelSync(true)
+  languageServices?.javascriptDefaults?.setEagerModelSync(true)
+}
 
 const basename = (filePath: string) => filePath.replaceAll('\\', '/').split('/').filter(Boolean).at(-1) || ''
 const escapeRegExp = (value: string) => value.replace(/[|\\{}()[\]^$+.]/g, '\\$&')
@@ -87,10 +100,15 @@ export const loadMonaco = (): Promise<MonacoModule> => {
   ensureMonacoEnvironment()
   monacoPromise = Promise.all([
     import('monaco-editor/esm/vs/editor/editor.api'),
-    import('monaco-editor/esm/vs/editor/contrib/folding/browser/folding'),
-    import('monaco-editor/esm/vs/editor/contrib/find/browser/findController'),
+    import('monaco-editor/esm/vs/editor/editor.all'),
+    import('monaco-editor/esm/vs/language/css/monaco.contribution'),
+    import('monaco-editor/esm/vs/language/html/monaco.contribution'),
     import('monaco-editor/esm/vs/language/json/monaco.contribution'),
+    import('monaco-editor/esm/vs/language/typescript/monaco.contribution'),
     import('monaco-editor/esm/vs/basic-languages/monaco.contribution')
-  ]).then(([monaco]) => monaco)
+  ]).then(([monaco]) => {
+    configureMonacoLanguageServices(monaco)
+    return monaco
+  })
   return monacoPromise
 }

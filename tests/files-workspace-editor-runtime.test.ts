@@ -64,6 +64,10 @@ describe('filesWorkspaceEditorRuntime', () => {
     })
 
     expect(filesWorkspaceEditorLanguage('/work/app.ts')).toBe('typescript')
+    expect(filesWorkspaceEditorLanguage('/work/component.tsx')).toBe('typescript')
+    expect(filesWorkspaceEditorLanguage('/work/component.jsx')).toBe('javascript')
+    expect(filesWorkspaceEditorLanguage('/work/index.html')).toBe('html')
+    expect(filesWorkspaceEditorLanguage('/work/styles.scss')).toBe('scss')
     await runtime.openFileEditor({ filePath: '/work/app.ts', sessionId: 'local', sessionLabel: 'Local', host: 'localhost' })
     await runtime.openFileEditor({ filePath: '/work/app.ts', sessionId: 'local', sessionLabel: 'Local', host: 'localhost' })
 
