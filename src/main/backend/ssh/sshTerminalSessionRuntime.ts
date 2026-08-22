@@ -42,7 +42,9 @@ import {
 import {
   createHiddenTextFilter,
   getLocalSshSpawnCwd,
+  hostLooksRelated,
   inferRelayTargetReady,
+  parsePromptEndpoint,
   pathExists,
   relayControlPath,
   relayShellCommand,
@@ -963,10 +965,12 @@ export const createSshTerminalSession = (
     let bootstrapSent = false
     let bootstrapProbeBuffer = ''
     let targetProbeBuffer = ''
+    let postTargetProbeBuffer = ''
     let targetReadyLogged = false
     let relayConnectionReuse: TerminalLifecycleEvent['connectionReuse'] = 'created'
     const markTargetReady = (endpoint: { actualUsername: string; actualHost: string }) => {
       if (targetReadyLogged || closed) return
+      clearShellReadyTimer()
       targetReadyLogged = true
       remoteHop = 'target'
       endpointConfidence = 'inferred'
@@ -1037,6 +1041,19 @@ export const createSshTerminalSession = (
       endpointConfidence,
       message: `Opening reusable SSH relay shell ${terminalAuthLabel(jumpTarget)}`
     })
+    shellReadyTimer = setTimeout(() => {
+      if (closed || targetReadyLogged) return
+      shellReadyTimer = null
+      finish(1, 'error', {
+        ...lifecycleFields,
+        authScope: 'target',
+        remoteHop,
+        endpointConfidence,
+        errorCode: 'SSH_SHELL_READY_TIMEOUT',
+        errorMessage: `SSH relay shell was not ready within ${getSshShellReadyTimeoutMs()}ms.`,
+        message: 'SSH relay shell failed to become ready.'
+      })
+    }, getSshShellReadyTimeoutMs())
     relayProcess.onData((chunk) => {
       if (!bootstrapSent) {
         bootstrapProbeBuffer = `${bootstrapProbeBuffer}${chunk}`.slice(-4096)
@@ -1045,6 +1062,22 @@ export const createSshTerminalSession = (
         targetProbeBuffer = `${targetProbeBuffer}${chunk}`.slice(-8192)
         const endpoint = inferRelayTargetReady(targetProbeBuffer, jumpTarget, target)
         if (endpoint) markTargetReady(endpoint)
+      } else {
+        postTargetProbeBuffer = `${postTargetProbeBuffer}${chunk}`.slice(-8192)
+        const endpoint = parsePromptEndpoint(postTargetProbeBuffer)
+        if (endpoint && endpoint.actualUsername === jumpTarget.username && hostLooksRelated(endpoint.actualHost, jumpTarget.host)) {
+          finish(null, 'network', {
+            ...lifecycleFields,
+            authScope: 'target',
+            remoteHop: 'target',
+            endpointConfidence,
+            isNetworkDisconnect: true,
+            errorCode: 'SSH_RELAY_TARGET_DISCONNECTED',
+            errorMessage: 'The nested SSH target returned to the relay shell.',
+            message: 'SSH target connection closed through relay shell.'
+          })
+          return
+        }
       }
       hiddenTextFilter.handle(chunk)
     })

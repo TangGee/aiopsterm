@@ -259,15 +259,15 @@ export const resetTerminalPanelToDefault = (panel: TerminalPanel) => {
   panel.status = 'ready'
   panel.lastActivityAt = Date.now()
   clearTerminalPanelSplitState(panel)
-  panel.sessionId = undefined
-  panel.classicTarget = undefined
-  panel.knowledge = undefined
-  panel.managedAiSession = undefined
-  panel.projectFile = undefined
-  panel.sshSession = undefined
-  panel.terminalLifecycle = undefined
-  panel.terminalExit = undefined
-  panel.terminalProgress = undefined
+  delete panel.sessionId
+  delete panel.classicTarget
+  delete panel.knowledge
+  delete panel.managedAiSession
+  delete panel.projectFile
+  delete panel.sshSession
+  delete panel.terminalLifecycle
+  delete panel.terminalExit
+  delete panel.terminalProgress
   setTerminalOutput(panel, '')
 }
 

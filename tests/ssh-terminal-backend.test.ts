@@ -1351,6 +1351,62 @@ describe('ssh terminal backend runtime', () => {
     expect(result.session).toBeTruthy()
   })
 
+  it('marks a relay target as disconnected when the nested ssh returns to the relay prompt', async () => {
+    const backend = await loadSshTerminalBackend()
+    const ssh = createSshRuntime({
+      manualReady: true,
+      failForwardOut: new Error('(SSH) Channel open failure: open failed')
+    })
+    const pty = createPtyRuntime()
+    const events = createRecorder()
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: asRuntime(ssh.runtime),
+      loadPty: () => pty.runtime,
+      getEnv: () => ({ PATH: '/usr/bin', HOME: '/tmp' }),
+      getSshControlDir: () => '/tmp/aiopsterm-ssh-control-vitest-disconnect',
+      getAsset: (assetId: string) => {
+        if (assetId === 'asset-relay-target') {
+          return {
+            id: 'asset-relay-target', name: 'target-relay-a', title: 'target-relay-a', host: 'target.internal',
+            username: 'root', port: 22, asset_type: 'person', auth_type: 'keyBased', jumpHostId: 'asset-relay'
+          } as never
+        }
+        if (assetId === 'asset-relay') {
+          return {
+            id: 'asset-relay', name: 'relay-b', title: 'relay-b', host: 'relay.example',
+            username: 'ops', port: 2222, asset_type: 'person', auth_type: 'password'
+          } as never
+        }
+        return null
+      },
+      getAssetSecret: (assetId: string) => (assetId === 'asset-relay' ? { password: 'relay-password' } : {}),
+      getKeychainSecret: () => ({}),
+      getConfig: () => runtimeConfig()
+    })
+
+    backend.createSshTerminalSession('ssh-relay-target-disconnect', { kind: 'ssh', assetId: 'asset-relay-target' }, createSink(events))
+    await waitForMicrotasks(2)
+    ssh.clients[0].emit('ready')
+    await waitForMicrotasks(6)
+    pty.processes[0].emitData('ops@relay.example:~$ ')
+    await waitForMicrotasks(2)
+    pty.processes[0].emitData('root@target.internal:~# ')
+    await waitForMicrotasks(2)
+    pty.processes[0].emitData('Connection closed.\nops@relay.example:~$ ')
+    await waitForMicrotasks(2)
+
+    expect(events.lifecycle.at(-1)).toEqual(
+      expect.objectContaining({
+        stage: 'error',
+        reason: 'network',
+        isNetworkDisconnect: true,
+        errorCode: 'SSH_RELAY_TARGET_DISCONNECTED',
+        message: 'SSH target connection closed through relay shell.'
+      })
+    )
+    expect(events.exit).toEqual([{ event: events.lifecycle.at(-1), code: null }])
+  })
+
   it('runs relay-shell background commands in a hidden relay pty instead of the visible terminal pty', async () => {
     const backend = await loadSshTerminalBackend()
     const ssh = createSshRuntime({
