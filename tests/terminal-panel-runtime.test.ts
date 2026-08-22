@@ -279,6 +279,16 @@ describe('terminalPanelRuntime', () => {
     expect(panels.map((panel) => panel.id)).toEqual(['root', 'plain'])
     expect(panels[0].splitGroupId).toBeUndefined()
 
+    const ordered = [
+      createEmptyTerminalPanel('left', 'Left'),
+      createEmptyTerminalPanel('middle', 'Middle'),
+      createEmptyTerminalPanel('last', 'Last')
+    ]
+    expect(closeTerminalPanelInCollection(ordered, 'last', 'last')).toBe('middle')
+    expect(ordered.map((panel) => panel.id)).toEqual(['left', 'middle'])
+    expect(closeTerminalPanelInCollection(ordered, 'left', 'left')).toBe('middle')
+    expect(ordered.map((panel) => panel.id)).toEqual(['middle'])
+
     const pending = createEmptyTerminalPanel('pending', 'Pending')
     panels.push(pending)
     expect(discardPendingTerminalPanelInCollection(panels, 'pending', 'pending', 'plain')).toEqual({

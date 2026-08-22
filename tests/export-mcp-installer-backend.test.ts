@@ -13,7 +13,7 @@ type ExportMcpInstallerBackend = {
     getJsRuntimeExecutable?: () => string
     getExportMcpToken?: () => string
     resetExportMcpToken?: () => string
-    execFile?: (file: string, args: string[], options?: { env?: NodeJS.ProcessEnv }) => Promise<{ stdout: string; stderr: string }>
+    execFile?: (file: string, args: string[], options?: { env?: NodeJS.ProcessEnv; windowsVerbatimArguments?: boolean }) => Promise<{ stdout: string; stderr: string }>
   }) => void
   listExportMcpInstallers: () => Promise<{
     clients: Array<{ source: ExportMcpClientSource; serverId: ExportMcpServerId; binaryPath: string; installed: boolean; warnings: string[] }>
@@ -38,6 +38,7 @@ vi.mock('../src/main/backend/codex/externalCodexMcpBridge', () => ({
 const cleanupDirs: string[] = []
 const tomlString = (value: string) => JSON.stringify(value)
 const tomlLiteral = (value: string) => `'${value}'`
+const quoteForTest = (value: string) => `"${value}"`
 
 const loadBackend = async () => {
   const modulePath = '../src/main/backend/codex/exportMcpInstaller'
@@ -138,6 +139,62 @@ describe('Export MCP installer backend', () => {
     expect(snapshot.clients.find((client) => client.source === 'codex' && client.serverId === 'hosts')?.binaryPath).toBe(userCodexPath)
   })
 
+  it('prefers the Windows Codex launcher over the extensionless POSIX shim', async () => {
+    const { installer, home, binDir, codexHome, scriptPath, runtimePath, token } = await prepareRuntime()
+    const windowsCodexPath = join(binDir, 'codex.cmd')
+    await writeFile(windowsCodexPath, '@echo off\r\n', 'utf-8')
+
+    installer.configureExportMcpInstallerRuntime({
+      getHomeDir: () => home,
+      getPlatform: () => 'win32',
+      getEnv: () => ({ HOME: home, CODEX_HOME: codexHome, PATH: binDir, PATHEXT: '.EXE;.CMD;.BAT' }),
+      getExportMcpScriptPath: () => scriptPath,
+      getJsRuntimeExecutable: () => runtimePath,
+      getExportMcpToken: () => token
+    })
+
+    const snapshot = await installer.listExportMcpInstallers()
+    expect(snapshot.clients.find((client) => client.source === 'codex' && client.serverId === 'hosts')?.binaryPath).toBe(windowsCodexPath)
+  })
+
+  it.each([
+    { source: 'codex' as const, binaryName: 'codex.cmd', serverId: 'hosts' as const },
+    { source: 'claude-code' as const, binaryName: 'claude.cmd', serverId: 'ai-sessions' as const }
+  ])('invokes $source Windows batch launchers through cmd.exe', async ({ source, binaryName, serverId }) => {
+    const { installer, home, binDir, codexHome, scriptPath, runtimePath, token } = await prepareRuntime()
+    const windowsClientPath = join(binDir, binaryName)
+    const calls: Array<{ file: string; args: string[]; windowsVerbatimArguments?: boolean }> = []
+    await writeFile(windowsClientPath, '@echo off\r\n', 'utf-8')
+
+    installer.configureExportMcpInstallerRuntime({
+      getHomeDir: () => home,
+      getPlatform: () => 'win32',
+      getEnv: () => ({
+        HOME: home,
+        CODEX_HOME: codexHome,
+        PATH: binDir,
+        PATHEXT: '.EXE;.CMD;.BAT',
+        ComSpec: 'C:\\Windows\\System32\\cmd.exe'
+      }),
+      getExportMcpScriptPath: () => scriptPath,
+      getJsRuntimeExecutable: () => runtimePath,
+      getExportMcpToken: () => token,
+      execFile: async (file, args, options) => {
+        calls.push({ file, args, windowsVerbatimArguments: options?.windowsVerbatimArguments })
+        return { stdout: '', stderr: '' }
+      }
+    })
+
+    await expect(installer.installExportMcp({ source, serverId })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    expect(calls).toHaveLength(2)
+    expect(calls[1]).toEqual(expect.objectContaining({
+      file: 'C:\\Windows\\System32\\cmd.exe',
+      windowsVerbatimArguments: true,
+      args: ['/d', '/s', '/c', expect.stringContaining(quoteForTest(windowsClientPath))]
+    }))
+    expect(calls[1].args[3]).toContain(quoteForTest(`AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN=${token}`))
+  })
+
   it('augments a macOS GUI PATH before invoking a user-installed npm Codex CLI', async () => {
     const { installer, home, codexHome, scriptPath, runtimePath, socketPath, token } = await prepareRuntime()
     const npmBinDir = join(home, '.npm-global', 'bin')
@@ -199,7 +256,7 @@ describe('Export MCP installer backend', () => {
     await writeFile(
       join(codexHome, 'config.toml'),
       `[mcp_servers.aiopsterm_hosts]
-command = ${tomlString(runtimePath)}
+command = ${tomlLiteral(runtimePath)}
 args = [${tomlLiteral(scriptPath)}]
 
 [mcp_servers.aiopsterm_hosts.env]

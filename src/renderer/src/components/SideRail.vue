@@ -42,7 +42,7 @@
         :key="item.key"
       >
         <button
-          v-if="item.key === 'user'"
+          v-if="item.key === 'user' && !workspace.userProfile.skippedLogin"
           class="rail-button user-rail-trigger"
           :class="{
             active: workspace.mode === 'terminal' && workspace.activeModule === item.key,
@@ -65,7 +65,7 @@
           <em v-if="isVipUser">VIP</em>
         </button>
         <button
-          v-else
+          v-else-if="item.key !== 'user'"
           class="rail-button"
           :class="{ active: workspace.mode === 'terminal' && workspace.activeModule === item.key }"
           :data-module-key="item.key"

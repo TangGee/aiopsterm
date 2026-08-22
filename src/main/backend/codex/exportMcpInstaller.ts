@@ -14,7 +14,7 @@ import type {
   ExportMcpInstallerSnapshot,
   ExportMcpTokenResetResult
 } from '@shared/contracts/exportMcp'
-import { executableCandidateNames, type PlatformRuntime } from '../app/platformRuntime'
+import { executableCandidateNames, executableInvocationForPlatform, type PlatformRuntime } from '../app/platformRuntime'
 import { logRuntimeEvent } from '../app/runtimeLog'
 import { getExternalCodexMcpBridgeRuntimeStatus } from './externalCodexMcpBridge'
 import { getEffectiveExportMcpToken, rotateStoredExportMcpToken } from './exportMcpTokenRuntime'
@@ -36,6 +36,7 @@ type ExecFileOptions = {
   cwd?: string
   timeout?: number
   windowsHide?: boolean
+  windowsVerbatimArguments?: boolean
 }
 
 type ExecFileRuntime = (file: string, args: string[], options?: ExecFileOptions) => Promise<{ stdout: string; stderr: string }>
@@ -275,6 +276,22 @@ const extractTomlTable = (content: string, tableName: string) => {
   return lines.slice(start, end).join('\n')
 }
 
+const tomlStringAssignment = (content: string, key: string) => {
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const assignment = content.split(/\r?\n/).find((line) => new RegExp(`^\\s*${escapedKey}\\s*=`).test(line))
+  if (!assignment) return ''
+  const raw = assignment.slice(assignment.indexOf('=') + 1).trim()
+  const literal = raw.match(/^'([^']*)'\s*(?:#.*)?$/)
+  if (literal) return literal[1]
+  const basic = raw.match(/^("(?:[^"\\]|\\.)*")\s*(?:#.*)?$/)
+  if (!basic) return ''
+  try {
+    return JSON.parse(basic[1])
+  } catch {
+    return ''
+  }
+}
+
 const codexConfigHasExportMcp = async (
   configPath: string,
   scriptPath: string,
@@ -290,7 +307,7 @@ const codexConfigHasExportMcp = async (
   const scriptNamePresent = block.includes(externalMcpScriptName) || Boolean(scriptPath && block.includes(scriptPath))
   const socketPathPresent = !socketPath || block.includes(socketPath)
   const tokenPresent = Boolean(token) && block.includes(token)
-  const runtimePathPresent = Boolean(runtimePath) && block.includes(`command = ${tomlString(runtimePath)}`)
+  const runtimePathPresent = Boolean(runtimePath) && tomlStringAssignment(block, 'command') === runtimePath
   const installed =
     runtimePathPresent &&
     scriptNamePresent &&
@@ -406,11 +423,13 @@ const runClientCommand = async (binaryPath: string, args: string[], options: { i
     ...env,
     [pathKey]: [...new Set([dirname(binaryPath), ...binarySearchDirectories(env)])].join(delimiter)
   }
+  const invocation = executableInvocationForPlatform(binaryPath, args, commandEnv, getPlatform())
   try {
-    await getExecFile()(binaryPath, args, {
+    await getExecFile()(invocation.file, invocation.args, {
       env: commandEnv,
       timeout: 30000,
-      windowsHide: true
+      windowsHide: true,
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments
     })
   } catch (error) {
     if (options.ignoreFailure) return

@@ -3,6 +3,11 @@ import { describe, expect, it } from 'vitest'
 type PlatformRuntimeBackend = {
   defaultShellForPlatform: (env: NodeJS.ProcessEnv, platform: NodeJS.Platform) => string
   executableCandidateNames: (binaryName: string, env: NodeJS.ProcessEnv, platform: NodeJS.Platform) => string[]
+  executableInvocationForPlatform: (binaryPath: string, args: string[], env: NodeJS.ProcessEnv, platform: NodeJS.Platform) => {
+    file: string
+    args: string[]
+    windowsVerbatimArguments: boolean
+  }
   localShellArgsForPlatform: (shell: string, platform: NodeJS.Platform) => string[]
   platformSocketPath: (userDataPath: string, namespace: string, options?: { platform?: NodeJS.Platform; pid?: number; directory?: string; uid?: number; stable?: boolean }) => string
 }
@@ -34,8 +39,27 @@ describe('platform runtime helpers', () => {
   it('expands Windows executable names using PATHEXT while preserving explicit extensions', async () => {
     const { executableCandidateNames } = await loadBackend()
     expect(executableCandidateNames('codex', {}, 'linux')).toEqual(['codex'])
-    expect(executableCandidateNames('codex', { PATHEXT: '.EXE;.CMD' }, 'win32')).toEqual(['codex', 'codex.exe', 'codex.cmd'])
+    expect(executableCandidateNames('codex', { PATHEXT: '.EXE;.CMD' }, 'win32')).toEqual(['codex.exe', 'codex.cmd', 'codex'])
     expect(executableCandidateNames('codex.exe', { PATHEXT: '.EXE;.CMD' }, 'win32')).toEqual(['codex.exe'])
+  })
+
+  it('runs Windows batch launchers through cmd.exe without changing native or POSIX executables', async () => {
+    const { executableInvocationForPlatform } = await loadBackend()
+    expect(executableInvocationForPlatform('C:\\Program Files\\nodejs\\codex.cmd', ['--version'], { ComSpec: 'C:\\Windows\\cmd.exe' }, 'win32')).toEqual({
+      file: 'C:\\Windows\\cmd.exe',
+      args: ['/d', '/s', '/c', '""C:\\Program Files\\nodejs\\codex.cmd" "--version""'],
+      windowsVerbatimArguments: true
+    })
+    expect(executableInvocationForPlatform('C:\\tools\\codex.exe', ['--version'], {}, 'win32')).toEqual({
+      file: 'C:\\tools\\codex.exe',
+      args: ['--version'],
+      windowsVerbatimArguments: false
+    })
+    expect(executableInvocationForPlatform('/usr/local/bin/codex', ['--version'], {}, 'darwin')).toEqual({
+      file: '/usr/local/bin/codex',
+      args: ['--version'],
+      windowsVerbatimArguments: false
+    })
   })
 
   it('generates Unix socket paths and Windows named pipes from the same thin helper', async () => {

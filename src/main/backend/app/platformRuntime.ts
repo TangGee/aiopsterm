@@ -28,7 +28,29 @@ export const executableCandidateNames = (binaryName: string, env: NodeJS.Process
     .split(';')
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean)
-  return [cleanName, ...extensions.map((extension) => `${cleanName}${extension}`)]
+  // npm installs a POSIX shell shim without an extension alongside the
+  // Windows .cmd/.ps1 launchers. Prefer a PATHEXT entry so execFile does not
+  // select the shell script and fail with ENOENT on Windows.
+  return [...extensions.map((extension) => `${cleanName}${extension}`), cleanName]
+}
+
+const quoteWindowsCommandArgument = (value: string) => `"${value.replace(/"/g, '""')}"`
+
+export const executableInvocationForPlatform = (
+  binaryPath: string,
+  args: string[],
+  env: NodeJS.ProcessEnv = process.env,
+  platform: PlatformRuntime = process.platform
+) => {
+  if (!isWindowsPlatform(platform) || !/\.(?:cmd|bat)$/i.test(binaryPath)) {
+    return { file: binaryPath, args, windowsVerbatimArguments: false }
+  }
+  const command = `"${[binaryPath, ...args].map(quoteWindowsCommandArgument).join(' ')}"`
+  return {
+    file: String(env.ComSpec || env.COMSPEC || '').trim() || 'cmd.exe',
+    args: ['/d', '/s', '/c', command],
+    windowsVerbatimArguments: true
+  }
 }
 
 export const platformSocketPath = (

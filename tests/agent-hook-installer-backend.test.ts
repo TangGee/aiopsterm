@@ -195,6 +195,7 @@ describe('agent hook installer backend', () => {
     cleanupDirs.push(home)
     backend.configureAgentHookInstallerRuntime({
       getHomeDir: () => home,
+      getPlatform: () => 'linux',
       getEnv: () => ({ HOME: home, PATH: process.env.PATH || '' }),
       getAgentHookScriptPath: () => '/opt/aiopsterm/aiopsterm-agent-hook.js',
       getJsRuntimeExecutable: () => '/opt/aiopsterm/aiopsterm'
@@ -222,6 +223,7 @@ describe('agent hook installer backend', () => {
     const commands: string[] = []
     backend.configureAgentHookInstallerRuntime({
       getHomeDir: () => home,
+      getPlatform: () => 'linux',
       getEnv: () => ({ HOME: home, PATH: binDir }),
       getAgentHookScriptPath: () => '/opt/aiopsterm/aiopsterm-agent-hook.js',
       getJsRuntimeExecutable: () => '/opt/aiopsterm/aiopsterm',
@@ -235,6 +237,46 @@ describe('agent hook installer backend', () => {
       expect(await readFile(join(home, '.dsh/aiopsterm/hooks.json'), 'utf-8')).toContain("--source 'deepseek-harness'")
       expect(await readFile(join(home, '.dsh/profiles/web/cordis.patch.yml'), 'utf-8')).toContain('aiopsterm-hooks')
       expect(await readFile(join(home, '.dsh/profiles/headless/cordis.patch.yml'), 'utf-8')).toContain('aiopsterm-hooks')
+    } finally {
+      backend.configureAgentHookInstallerRuntime()
+    }
+  })
+
+  it('invokes a Windows DeepSeek Harness batch launcher through cmd.exe', async () => {
+    const backend = await loadBackend()
+    const home = await mkdtemp(join(tmpdir(), 'aiopsterm-deepseek-windows-hooks-'))
+    cleanupDirs.push(home)
+    const binDir = join(home, 'bin')
+    await import('node:fs/promises').then(async ({ mkdir, writeFile }) => {
+      await mkdir(binDir, { recursive: true })
+      await writeFile(join(binDir, 'dsh.cmd'), '@echo off\r\n', 'utf-8')
+      await writeFile(join(binDir, 'pnpm.cmd'), '@echo off\r\n', 'utf-8')
+    })
+    const commands: Array<{ command: string; args: string[] }> = []
+    backend.configureAgentHookInstallerRuntime({
+      getHomeDir: () => home,
+      getPlatform: () => 'win32',
+      getEnv: () => ({
+        HOME: home,
+        PATH: binDir,
+        PATHEXT: '.EXE;.CMD',
+        ComSpec: 'C:\\Windows\\System32\\cmd.exe'
+      }),
+      getAgentHookScriptPath: () => 'C:\\Program Files\\aiopsterm\\aiopsterm-agent-hook.js',
+      getJsRuntimeExecutable: () => 'C:\\Program Files\\aiopsterm\\aiopsterm.exe',
+      runCommand: async (command, args) => { commands.push({ command, args }) }
+    })
+    try {
+      const result = await backend.installAgentHook({ source: 'deepseek-harness' })
+      expect(result).toEqual(expect.objectContaining({ ok: true }))
+      expect(commands).toHaveLength(2)
+      expect(commands.every(({ command, args }) =>
+        command === 'C:\\Windows\\System32\\cmd.exe' &&
+        args[0] === '/d' &&
+        args[1] === '/s' &&
+        args[2] === '/c' &&
+        args[3].includes(`"${join(binDir, 'dsh.cmd')}"`)
+      )).toBe(true)
     } finally {
       backend.configureAgentHookInstallerRuntime()
     }

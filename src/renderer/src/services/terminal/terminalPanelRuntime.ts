@@ -432,9 +432,17 @@ export const closeTerminalPanelInCollection = (panels: TerminalPanel[], panelId:
     resetTerminalPanelToDefault(panels[0])
     return panels[0].id
   }
+  const closingIndex = panels.findIndex((panel) => panel.id === panelId)
+  const wasActive = activePanelId === panelId
+  const fallbackPanelId = closingIndex > 0
+    ? panels[closingIndex - 1]?.id
+    : panels[closingIndex + 1]?.id
   panels.splice(0, panels.length, ...panels.filter((panel) => panel.id !== panelId))
   normalizeTerminalPanelSplitState(panels)
-  return panels.some((panel) => panel.id === activePanelId) ? activePanelId : panels[0]?.id || activePanelId
+  if (!wasActive && panels.some((panel) => panel.id === activePanelId)) return activePanelId
+  return fallbackPanelId && panels.some((panel) => panel.id === fallbackPanelId)
+    ? fallbackPanelId
+    : panels[0]?.id || activePanelId
 }
 
 export const discardPendingTerminalPanelInCollection = (

@@ -48,7 +48,7 @@ import {
   uninstallRovoDevYaml,
   windowsHookCommandPrefix
 } from './agentHookConfigRuntime'
-import { executableCandidateNames, type PlatformRuntime } from '../app/platformRuntime'
+import { executableCandidateNames, executableInvocationForPlatform, type PlatformRuntime } from '../app/platformRuntime'
 
 export {
   codexHookHash,
@@ -102,8 +102,13 @@ const getRm = () => runtimeConfig.rm || rm
 const getMkdir = () => runtimeConfig.mkdir || mkdir
 const getAccess = () => runtimeConfig.access || access
 const getStat = () => runtimeConfig.stat || stat
-const runCommand = (command: string, args: string[], env: NodeJS.ProcessEnv) =>
-  runtimeConfig.runCommand?.(command, args, env) || promisify(execFile)(command, args, { env }).then(() => undefined)
+const runCommand = (command: string, args: string[], env: NodeJS.ProcessEnv) => {
+  const invocation = executableInvocationForPlatform(command, args, env, getPlatform())
+  return runtimeConfig.runCommand?.(invocation.file, invocation.args, env) || promisify(execFile)(invocation.file, invocation.args, {
+    env,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments
+  }).then(() => undefined)
+}
 const getJsRuntimeExecutable = () => cleanText(runtimeConfig.getJsRuntimeExecutable?.()) || cleanText(getEnv().APPIMAGE) || process.execPath
 
 const definitionFor = (source: AgentHookInstallerSource) => hookDefinitions.find((definition) => definition.source === source)
