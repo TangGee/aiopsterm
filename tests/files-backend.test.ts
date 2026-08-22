@@ -1052,7 +1052,7 @@ describe('files backend content boundary', () => {
           username: 'ops',
           password: 'backend-secret',
           keepaliveInterval: 10000,
-          keepaliveCountMax: 3
+          keepaliveCountMax: 5
         })
       ])
     )

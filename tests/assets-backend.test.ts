@@ -489,7 +489,7 @@ describe('assets backend boundary', () => {
         username: 'deploy',
         password: 'backend-secret',
         keepaliveInterval: 10000,
-        keepaliveCountMax: 3
+        keepaliveCountMax: 5
       })
     )
     expect(ssh.clients.at(-1)?.ended).toBe(true)
