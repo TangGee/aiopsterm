@@ -227,6 +227,84 @@ describe('Codex terminal bridge runtime', () => {
     }
   })
 
+  it('preserves completion markers between OSC sequences terminated by C1 ST and ESC ST', async () => {
+    const bridge = await loadBridge()
+    const writes: string[] = []
+    bridge.registerCodexTerminalBridgeSession({
+      id: 'terminal-osc-completion',
+      kind: 'ssh',
+      shell: 'ssh',
+      host: '10.0.0.8',
+      cwd: '/root',
+      window: {} as never,
+      write: (data: string | Buffer) => writes.push(String(data))
+    })
+
+    const responsePromise = bridge.callCodexTerminalBridgeTool('run_command', {
+      sessionId: 'terminal-osc-completion',
+      commandId: 'cmd-osc-completion',
+      command: 'uptime',
+      timeoutMs: 5000,
+      mode: 'wait',
+      execution: 'terminal'
+    })
+    await waitFor(() => writes.length === 1)
+
+    bridge.appendCodexTerminalBridgeData(
+      'terminal-osc-completion',
+      '\u001b]3008;start=command\u009c\r\n__AIOPSTERM_CODEX_START_cmd-osc-completion__\r\nload average: 0.10'
+    )
+    bridge.appendCodexTerminalBridgeData(
+      'terminal-osc-completion',
+      '\r\n__AIOPSTERM_CODEX_END_cmd-osc-completion__:0\r\n\u001b]3008;end=command;exit=success\u001b\\'
+    )
+
+    await expect(responsePromise).resolves.toMatchObject({
+      ok: true,
+      data: {
+        output: 'load average: 0.10',
+        exitCode: 0
+      }
+    })
+  })
+
+  it('does not let adjacent OSC sequences hide the completion marker', async () => {
+    const bridge = await loadBridge()
+    const writes: string[] = []
+    bridge.registerCodexTerminalBridgeSession({
+      id: 'terminal-osc-marker-boundary',
+      kind: 'ssh',
+      shell: 'ssh',
+      host: '10.0.0.9',
+      cwd: '/root',
+      window: {} as never,
+      write: (data: string | Buffer) => writes.push(String(data))
+    })
+
+    const responsePromise = bridge.callCodexTerminalBridgeTool('run_command', {
+      sessionId: 'terminal-osc-marker-boundary',
+      commandId: 'cmd-osc-marker-boundary',
+      command: 'uptime',
+      timeoutMs: 5000,
+      mode: 'wait',
+      execution: 'terminal'
+    })
+    await waitFor(() => writes.length === 1)
+
+    bridge.appendCodexTerminalBridgeData(
+      'terminal-osc-marker-boundary',
+      '\u001b]3008;start=command;metadata=\u001b\\\r\n__AIOPSTERM_CODEX_START_cmd-osc-marker-boundary__\r\nload average: 0.10\r\n__AIOPSTERM_CODEX_END_cmd-osc-marker-boundary__:0\r\n\u001b]3008;end=command;exit=success\u001b\\\u001b]3008;start=next;metadata=\u001b\\'
+    )
+
+    await expect(responsePromise).resolves.toMatchObject({
+      ok: true,
+      data: {
+        output: 'load average: 0.10',
+        exitCode: 0
+      }
+    })
+  })
+
   it('uses a PowerShell wrapper for local PowerShell sessions and exposes pre-marker errors', async () => {
     const bridge = await loadBridge()
     const writes: string[] = []

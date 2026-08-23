@@ -127,11 +127,11 @@ const getExecFile = (): CodexBinaryHealthCheckRunner => runtimeConfig.execFile |
 
 const codexTerminalEnv = (baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
   const env: NodeJS.ProcessEnv = {
-    ...baseEnv,
-    TERM: 'xterm-256color',
-    COLORTERM: 'truecolor',
-    CLICOLOR: '1'
+    ...baseEnv
   }
+  if (env.TERM === undefined) env.TERM = 'xterm-256color'
+  if (env.COLORTERM === undefined) env.COLORTERM = 'truecolor'
+  if (env.CLICOLOR === undefined) env.CLICOLOR = '1'
   delete env.NO_COLOR
   return env
 }

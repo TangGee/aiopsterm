@@ -76,6 +76,10 @@ Avoid adding new root-level service files unless the file is intentionally a cro
 
 ## Verification
 
+### Release Runtime Environment
+
+Terminal color variables use app defaults. A packaged launch gets `TERM=xterm-256color` when no terminal type is configured, truecolor, and `CLICOLOR=1`; the app removes inherited `NO_COLOR` because it is a launcher/debug opt-out that would otherwise make the published terminal appear uncolored. Configured terminal type and color settings remain respected. Build-tool mirror variables affect packaging only and are not runtime configuration.
+
 For structural TypeScript or import-path changes, run:
 
 ```bash

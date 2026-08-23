@@ -243,6 +243,9 @@ export const managedLocalTerminalEnvironment = (id: string, options: TerminalCre
     AIOPSTERM_MANAGED_TERMINAL: '1'
   }
   if (getPlatform() === 'darwin') {
+    // NO_COLOR is a launcher-level opt-out. aiopsterm's terminal defaults are
+    // color-capable, so do not let an inherited test/debug flag disable them.
+    delete env.NO_COLOR
     if (env.COLORTERM === undefined) env.COLORTERM = 'truecolor'
     if (env.CLICOLOR === undefined) env.CLICOLOR = '1'
     if (env.LSCOLORS === undefined) env.LSCOLORS = 'GxFxCxDxBxegedabagaced'

@@ -257,7 +257,7 @@ describe('local terminal backend runtime', () => {
     const backend = await loadBackend()
     backend.configureLocalTerminalBackendRuntime({ getPlatform: () => 'darwin' })
 
-    expect(backend.managedLocalTerminalEnvironment('local-mac-colors', {}, { HOME: '/Users/ops' })).toEqual(
+    expect(backend.managedLocalTerminalEnvironment('local-mac-colors', {}, { HOME: '/Users/ops', NO_COLOR: '1' })).toEqual(
       expect.objectContaining({
         COLORTERM: 'truecolor',
         CLICOLOR: '1',
@@ -265,6 +265,7 @@ describe('local terminal backend runtime', () => {
         TERM_PROGRAM: 'aiopsterm'
       })
     )
+    expect(backend.managedLocalTerminalEnvironment('local-mac-colors', {}, { HOME: '/Users/ops', NO_COLOR: '1' })).not.toHaveProperty('NO_COLOR')
     expect(
       backend.managedLocalTerminalEnvironment('local-mac-custom-colors', {}, {
         HOME: '/Users/ops',

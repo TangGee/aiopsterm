@@ -4,6 +4,7 @@ import { basename, dirname, join } from 'path'
 import { mkdir } from 'fs/promises'
 import type { BrowserWindow } from 'electron'
 import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
+import { shouldUseTerminalDebugLogs } from '@shared/runtimeSwitches'
 import { platformSocketPath } from '../app/platformRuntime'
 import { logRuntimeEvent } from '../app/runtimeLog'
 import type { TerminalBackgroundCommandOptions, TerminalBackgroundCommandResult } from '../terminal/terminal'
@@ -85,6 +86,25 @@ const pendingCommands = new Map<string, PendingCommand>()
 const terminalCommandQueues = new Map<string, TerminalCommandQueue>()
 const terminalOutputHistories = new Map<string, TerminalOutputHistory>()
 const runtimeTargetSelections = new Map<string, { sessionId: string; strict: boolean }>()
+
+const terminalBridgeDebugEnabled = () => shouldUseTerminalDebugLogs()
+
+const escapedPtyTail = (value: string) => {
+  const tail = value.slice(-384)
+  return JSON.stringify(tail).slice(1, -1)
+}
+
+const terminalBridgeDebugFields = (pending: PendingCommand) => ({
+  operationId: pending.id,
+  sessionId: pending.sessionId,
+  state: pending.state,
+  displayPhase: pending.displayPhase,
+  outputBytes: Buffer.byteLength(pending.output, 'utf8'),
+  containsStartMarker: pending.output.includes(pending.markerStart),
+  containsEndMarker: pending.output.includes(pending.markerEnd),
+  containsEndPrefix: pending.output.includes(pending.markerEndPrefix),
+  ptyTail: escapedPtyTail(pending.output)
+})
 
 let server: Server | null = null
 let serverClosePromise: Promise<void> | null = null
@@ -272,6 +292,13 @@ export const appendCodexTerminalBridgeData = (sessionId: string, chunk: string |
   pending.output += text
   const completed = extractCompletedMarkedOutput(pending.output, pending.markerStart, pending.markerEndPrefix)
   if (completed) {
+    if (terminalBridgeDebugEnabled()) {
+      logRuntimeEvent('info', 'terminal.command-bridge.completed', {
+        ...terminalBridgeDebugFields(pending),
+        exitCode: completed.exitCode,
+        durationMs: pendingCommandDuration(pending)
+      })
+    }
     if (!pending.responseSettled) {
       settlePendingCommandResponse(pending, {
         ok: true,
@@ -439,7 +466,10 @@ export const filterCodexTerminalBridgeDisplayData = (sessionId: string, chunk: s
 const stripTerminalControlKeepingCarriageReturns = (value: string) =>
   value
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
-    .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, '')
+    // OSC payloads cannot contain an unescaped ESC. Excluding it prevents a
+    // malformed or concatenated OSC sequence from consuming command markers
+    // until a later ESC-ST terminator.
+    .replace(/(?:\u001b\]|\u009d)[^\u0007\u009c\u001b]*(?:\u0007|\u009c|\u001b\\)/g, '')
 
 const stripTerminalControl = (value: string) => stripTerminalControlKeepingCarriageReturns(value).replace(/\r/g, '')
 
@@ -649,8 +679,26 @@ function dispatchNextTerminalCommand(sessionId: string) {
     queue.activeCommandId = commandId
     pending.state = 'active'
     pending.startedAt = Date.now()
+    if (terminalBridgeDebugEnabled()) {
+      logRuntimeEvent('info', 'terminal.command-bridge.started', {
+        operationId: pending.id,
+        sessionId: pending.sessionId,
+        terminalKind: session.kind,
+        timeoutMs: pending.timeoutMs,
+        wrappedBytes: Buffer.byteLength(pending.wrappedCommand, 'utf8'),
+        markerStartBytes: Buffer.byteLength(pending.markerStart, 'utf8'),
+        markerEndBytes: Buffer.byteLength(pending.markerEnd, 'utf8')
+      })
+    }
     pending.timer = setTimeout(() => {
       if (pendingCommands.get(commandId) !== pending || pending.state !== 'active') return
+      if (terminalBridgeDebugEnabled()) {
+        logRuntimeEvent('warn', 'terminal.command-bridge.timeout', {
+          ...terminalBridgeDebugFields(pending),
+          timeoutMs: pending.timeoutMs,
+          durationMs: pendingCommandDuration(pending)
+        })
+      }
       beginActiveTerminalCommandInterrupt(pending, {
         ok: false,
         errorCode: 'COMMAND_TIMEOUT',

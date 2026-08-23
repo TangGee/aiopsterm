@@ -527,7 +527,7 @@ describe('Codex CLI backend runtime', () => {
     expect(execFile).not.toHaveBeenCalled()
   })
 
-  it('starts embedded Codex with a color-capable terminal environment', async () => {
+  it('starts embedded Codex with color defaults and ignores inherited NO_COLOR', async () => {
     const backend = await loadBackend()
     const pty = new MockPtyProcess()
     const spawnCalls: Array<Record<string, unknown>> = []
@@ -562,9 +562,9 @@ describe('Codex CLI backend runtime', () => {
       expect.objectContaining({
         name: 'xterm-256color',
         env: expect.objectContaining({
-          TERM: 'xterm-256color',
-          COLORTERM: 'truecolor',
-          CLICOLOR: '1'
+          TERM: 'dumb',
+          COLORTERM: '',
+          CLICOLOR: '1',
         })
       })
     )
