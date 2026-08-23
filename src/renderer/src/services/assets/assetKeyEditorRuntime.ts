@@ -155,9 +155,12 @@ export const createAssetKeyEditorRuntime = ({
       keyImportNotice.value = '密钥文件为空。'
       return
     }
-    const isPublicKey =
+    const isPrivateKey = /^-----BEGIN (?:OPENSSH )?PRIVATE KEY-----/i.test(text) ||
+      /^-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----/i.test(text)
+    const isPublicKey = !isPrivateKey && (
       /^-----BEGIN (?:OPENSSH )?PUBLIC KEY-----/i.test(text) ||
       text.split(/\s+/).some((token) => /^(?:ssh-|ecdsa-|sk-)/i.test(token))
+    )
     if (isPublicKey) keyForm.publicKey = text
     else keyForm.privateKey = text
     if (!keyForm.name.trim()) keyForm.name = fileName
@@ -194,7 +197,11 @@ export const createAssetKeyEditorRuntime = ({
     try {
       const result = await showOpenDialog({
         defaultPath: '~/.ssh',
-        properties: ['openFile', 'showHiddenFiles']
+        properties: ['openFile', 'showHiddenFiles'],
+        filters: [
+          { name: 'Key Files', extensions: ['pem', 'key', 'txt', 'pub', 'asc', 'crt', 'cer', 'der', 'p12', 'pfx', 'ssh', 'ppk', 'gpg'] },
+          { name: 'All Files', extensions: ['*'] }
+        ]
       })
       if (result?.canceled) {
         keyImportNotice.value = '已取消导入密钥。'

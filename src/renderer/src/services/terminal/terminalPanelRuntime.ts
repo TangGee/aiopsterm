@@ -259,7 +259,7 @@ export const resetTerminalPanelToDefault = (panel: TerminalPanel) => {
   panel.status = 'ready'
   panel.lastActivityAt = Date.now()
   clearTerminalPanelSplitState(panel)
-  delete panel.sessionId
+  panel.sessionId = undefined
   delete panel.classicTarget
   delete panel.knowledge
   delete panel.managedAiSession

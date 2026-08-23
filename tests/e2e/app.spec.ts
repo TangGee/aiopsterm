@@ -1051,7 +1051,7 @@ test('control socket and external Codex MCP expose automation without browser co
     )
 
     const aiTools = await aiMcp.request({ jsonrpc: '2.0', id: 'mcp-ai-tools', method: 'tools/list', params: {} })
-    expect(aiTools.result?.tools).toHaveLength(17)
+    expect(aiTools.result?.tools).toHaveLength(18)
     expect((aiTools.result?.tools || []).map((tool: JsonObject) => tool.name)).toEqual(
       expect.arrayContaining(['list_ai_sessions', 'list_ai_notifications'])
     )
