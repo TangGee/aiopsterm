@@ -424,6 +424,7 @@ export const deDE = completeLocaleMessages({
   'settings.nav.shortcuts': 'Tastenkürzel',
   'settings.nav.trustedDevices': 'Vertrauensgeräte',
   'settings.nav.privacy': 'Datenschutz',
+  'settings.privacy.telemetryDescription': 'Anonyme Installations- und tägliche Aktivitätsdaten werden standardmäßig gesendet. Terminalinhalte, Befehle, Pfade und Protokolle sind niemals enthalten. Sie können dies jederzeit deaktivieren.',
   'settings.nav.about': 'Über',
   'settings.nav.docs': 'Dokumentation',
   'settings.help.open': 'Hilfedokument zu dieser Einstellungsseite öffnen',

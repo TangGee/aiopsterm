@@ -859,7 +859,7 @@ export const createSettingsWorkspaceAdvancedPages = (
               { label: '启用', checked: workspace.privacySettings.telemetry === 'enabled', onChange: () => workspace.updatePrivacySettings({ telemetry: 'enabled' }) },
               { label: '禁用', checked: workspace.privacySettings.telemetry === 'disabled', onChange: () => workspace.updatePrivacySettings({ telemetry: 'disabled' }) }
             ]),
-            h('p', { class: 'settings-description' }, '默认发送匿名安装和每日活跃信息，不包含终端内容、命令、路径或日志。可随时关闭。'),
+            h('p', { class: 'settings-description' }, t('settings.privacy.telemetryDescription')),
             radioRow('Secret Redaction', 'secretRedaction', [
               { label: '启用', checked: workspace.privacySettings.secretRedaction === 'enabled', onChange: () => workspace.updatePrivacySettings({ secretRedaction: 'enabled' }) },
               { label: '禁用', checked: workspace.privacySettings.secretRedaction === 'disabled', onChange: () => workspace.updatePrivacySettings({ secretRedaction: 'disabled' }) }

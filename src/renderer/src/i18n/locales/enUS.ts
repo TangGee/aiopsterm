@@ -425,6 +425,7 @@ export const enUS: LocaleMessages = {
   'settings.nav.shortcuts': 'Shortcuts',
   'settings.nav.trustedDevices': 'Trusted Devices',
   'settings.nav.privacy': 'Privacy',
+  'settings.privacy.telemetryDescription': 'Anonymous installation and daily activity statistics are sent by default. Terminal content, commands, paths, and logs are never included. You can turn this off at any time.',
   'settings.nav.about': 'About',
   'settings.nav.docs': 'Docs',
   'settings.help.open': 'Open this settings page help document',

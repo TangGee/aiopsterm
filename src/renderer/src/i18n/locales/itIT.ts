@@ -424,6 +424,7 @@ export const itIT = completeLocaleMessages({
   'settings.nav.shortcuts': 'Scorciatoie',
   'settings.nav.trustedDevices': 'Dispositivi attendibili',
   'settings.nav.privacy': 'Privacy',
+  'settings.privacy.telemetryDescription': 'Le informazioni anonime sull’installazione e sull’attività giornaliera vengono inviate per impostazione predefinita. Contenuti del terminale, comandi, percorsi e log non vengono mai inclusi. Puoi disattivare questa opzione in qualsiasi momento.',
   'settings.nav.about': 'Informazioni',
   'settings.nav.docs': 'Documenti',
   'settings.help.open': 'Apri il documento di aiuto di questa pagina di impostazioni',

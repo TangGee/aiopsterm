@@ -423,6 +423,7 @@ export const zhCN = {
   'settings.nav.shortcuts': '快捷键',
   'settings.nav.trustedDevices': '可信设备',
   'settings.nav.privacy': '隐私',
+  'settings.privacy.telemetryDescription': '默认发送匿名安装和每日活跃信息，不包含终端内容、命令、路径或日志。可随时关闭。',
   'settings.nav.about': '关于',
   'settings.nav.docs': '文档',
   'settings.help.open': '打开本页帮助文档',

@@ -424,6 +424,7 @@ export const ruRU = completeLocaleMessages({
   'settings.nav.shortcuts': 'Горячие клавиши',
   'settings.nav.trustedDevices': 'Доверенные устройства',
   'settings.nav.privacy': 'Конфиденциальность',
+  'settings.privacy.telemetryDescription': 'Анонимные данные об установке и ежедневной активности отправляются по умолчанию. Содержимое терминала, команды, пути и журналы никогда не включаются. Вы можете отключить это в любое время.',
   'settings.nav.about': 'О программе',
   'settings.nav.docs': 'Документация',
   'settings.help.open': 'Открыть справку по этой странице настроек',

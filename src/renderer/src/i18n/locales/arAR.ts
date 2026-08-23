@@ -424,6 +424,7 @@ export const arAR = completeLocaleMessages({
   'settings.nav.shortcuts': 'الاختصارات',
   'settings.nav.trustedDevices': 'الأجهزة الموثوقة',
   'settings.nav.privacy': 'الخصوصية',
+  'settings.privacy.telemetryDescription': 'يتم إرسال معلومات التثبيت والنشاط اليومي المجهولة بشكل افتراضي. لا يتم تضمين محتوى الطرفية أو الأوامر أو المسارات أو السجلات، ويمكنك إيقاف ذلك في أي وقت.',
   'settings.nav.about': 'حول',
   'settings.nav.docs': 'الوثائق',
   'settings.help.open': 'فتح مستند المساعدة لصفحة الإعدادات هذه',

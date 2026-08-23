@@ -424,6 +424,7 @@ export const koKR = completeLocaleMessages({
   'settings.nav.shortcuts': '단축키',
   'settings.nav.trustedDevices': '신뢰 기기',
   'settings.nav.privacy': '개인정보',
+  'settings.privacy.telemetryDescription': '익명 설치 및 일일 활동 정보를 기본으로 전송합니다. 터미널 내용, 명령, 경로, 로그는 포함하지 않으며 언제든지 끌 수 있습니다.',
   'settings.nav.about': '정보',
   'settings.nav.docs': '문서',
   'settings.help.open': '이 설정 페이지의 도움말 문서 열기',

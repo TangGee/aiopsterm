@@ -424,6 +424,7 @@ export const jaJP = completeLocaleMessages({
   'settings.nav.shortcuts': 'ショートカット',
   'settings.nav.trustedDevices': '信頼済みデバイス',
   'settings.nav.privacy': 'プライバシー',
+  'settings.privacy.telemetryDescription': '匿名のインストール情報と日次アクティビティをデフォルトで送信します。端末内容、コマンド、パス、ログは含まれません。いつでも無効にできます。',
   'settings.nav.about': '情報',
   'settings.nav.docs': 'ドキュメント',
   'settings.help.open': 'この設定ページのヘルプドキュメントを開く',

@@ -424,6 +424,7 @@ export const ptPT = completeLocaleMessages({
   'settings.nav.shortcuts': 'Atalhos',
   'settings.nav.trustedDevices': 'Dispositivos fiáveis',
   'settings.nav.privacy': 'Privacidade',
+  'settings.privacy.telemetryDescription': 'As informações anónimas de instalação e atividade diária são enviadas por predefinição. O conteúdo do terminal, comandos, caminhos e registos nunca são incluídos. Pode desativar esta opção a qualquer momento.',
   'settings.nav.about': 'Sobre',
   'settings.nav.docs': 'Documentação',
   'settings.help.open': 'Abrir o documento de ajuda desta página de definições',

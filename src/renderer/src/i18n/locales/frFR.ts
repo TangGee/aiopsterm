@@ -424,6 +424,7 @@ export const frFR = completeLocaleMessages({
   'settings.nav.shortcuts': 'Raccourcis',
   'settings.nav.trustedDevices': 'Appareils de confiance',
   'settings.nav.privacy': 'Confidentialité',
+  'settings.privacy.telemetryDescription': 'Les informations anonymes d’installation et d’activité quotidienne sont envoyées par défaut. Le contenu du terminal, les commandes, les chemins et les journaux ne sont jamais inclus. Vous pouvez désactiver cette option à tout moment.',
   'settings.nav.about': 'À propos',
   'settings.nav.docs': 'Documentation',
   'settings.help.open': 'Ouvrir le document d’aide de cette page de paramètres',
