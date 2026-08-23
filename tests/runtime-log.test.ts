@@ -6,7 +6,13 @@ type RuntimeLogBackend = {
     getLogDir?: () => string
     mkdir?: (...args: any[]) => Promise<unknown>
     appendFile?: (...args: any[]) => Promise<unknown>
+    stat?: (...args: any[]) => Promise<{ size: number }>
+    rename?: (...args: any[]) => Promise<unknown>
+    rm?: (...args: any[]) => Promise<unknown>
     now?: () => Date
+    isDebugEnabled?: () => boolean
+    maxFileBytes?: number
+    maxBackupFiles?: number
   }) => void
   runtimeLogPath: () => string
   writeRuntimeLog: (level: 'debug' | 'info' | 'warn' | 'error', event: string, fields?: Record<string, unknown>) => Promise<void>
@@ -82,5 +88,59 @@ describe('runtime log backend', () => {
 
     expect(runtimeLog.runtimeLogPath()).toBe('')
     expect(appendFile).not.toHaveBeenCalled()
+  })
+
+  it('filters debug entries unless diagnostics are enabled', async () => {
+    vi.resetModules()
+    const runtimeLog = await loadRuntimeLogBackend()
+    const appendFile = vi.fn(async () => undefined)
+    runtimeLog.configureRuntimeLog({
+      getLogDir: () => '/tmp/aiopsterm/logs',
+      mkdir: vi.fn(async () => undefined) as any,
+      appendFile: appendFile as any,
+      isDebugEnabled: () => false
+    })
+
+    await runtimeLog.writeRuntimeLog('debug', 'terminal.data.summary', { bytes: 10 })
+    expect(appendFile).not.toHaveBeenCalled()
+
+    runtimeLog.configureRuntimeLog({
+      getLogDir: () => '/tmp/aiopsterm/logs',
+      mkdir: vi.fn(async () => undefined) as any,
+      appendFile: appendFile as any,
+      isDebugEnabled: () => true
+    })
+    await runtimeLog.writeRuntimeLog('debug', 'terminal.data.summary', { bytes: 10 })
+    expect(appendFile).toHaveBeenCalledTimes(1)
+  })
+
+  it('rotates an oversized log before appending', async () => {
+    vi.resetModules()
+    const runtimeLog = await loadRuntimeLogBackend()
+    const appendFile = vi.fn(async () => undefined)
+    const renamed: string[][] = []
+    const removed: string[] = []
+    const logDir = '/tmp/aiopsterm/logs'
+    runtimeLog.configureRuntimeLog({
+      getLogDir: () => logDir,
+      mkdir: vi.fn(async () => undefined) as any,
+      appendFile: appendFile as any,
+      stat: vi.fn(async () => ({ size: 101 })) as any,
+      rename: vi.fn(async (from: string, to: string) => renamed.push([from, to])) as any,
+      rm: vi.fn(async (path: string) => removed.push(path)) as any,
+      maxFileBytes: 100,
+      maxBackupFiles: 2
+    })
+
+    await runtimeLog.writeRuntimeLog('info', 'terminal.lifecycle', { stage: 'connected' })
+    expect(removed).toEqual([
+      join(logDir, 'aiopsterm-runtime.log.2'),
+      join(logDir, 'aiopsterm-runtime.log.1')
+    ])
+    expect(renamed).toEqual([
+      [join(logDir, 'aiopsterm-runtime.log.1'), join(logDir, 'aiopsterm-runtime.log.2')],
+      [join(logDir, 'aiopsterm-runtime.log'), join(logDir, 'aiopsterm-runtime.log.1')]
+    ])
+    expect(appendFile).toHaveBeenCalledTimes(1)
   })
 })

@@ -472,6 +472,7 @@ export const enUS: LocaleMessages = {
   'settings.terminal.pinchZoom': 'Pinch Zoom',
   'settings.terminal.showCloseButton': 'Show close button',
   'settings.terminal.sshAgents': 'SSH Agents',
+  'settings.terminal.debugLogs': 'Enable debug logs',
   'settings.terminal.sshAgentSettings': 'SSH Agent Settings',
   'settings.terminal.mouseEvents': 'Mouse Events',
   'settings.terminal.middleMouse': 'Middle:',

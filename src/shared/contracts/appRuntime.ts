@@ -46,6 +46,8 @@ export type TerminalUserConfig = {
   sshAgentsStatus: boolean
   middleMouseEvent: TerminalMouseEventAction
   rightMouseEvent: Exclude<TerminalMouseEventAction, 'closeTab'>
+  /** Enables detailed runtime diagnostics for troubleshooting. */
+  debugLogs?: boolean
 }
 
 export type WorkspaceUserConfig = {

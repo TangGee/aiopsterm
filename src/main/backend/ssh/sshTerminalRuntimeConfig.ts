@@ -97,7 +97,7 @@ export const resolveSshTerminalTarget = (options: TerminalCreateOptions): SshTer
   }
 }
 
-export const createLifecycleBase = (id: string, target: SshTerminalTarget) => {
+export const createLifecycleBase = (id: string, target: SshTerminalTarget, panelId?: string) => {
   const username = cleanText(target.username)
   const cwd = username ? (username === 'root' ? '/root' : `/home/${username}`) : '~'
   return {
@@ -109,7 +109,8 @@ export const createLifecycleBase = (id: string, target: SshTerminalTarget) => {
       host: target.host,
       port: target.port,
       username: target.username,
-      connectionId: `ssh-${id}`
+      connectionId: `ssh-${id}`,
+      ...(cleanText(panelId) ? { panelId: cleanText(panelId) } : {})
     }
   }
 }
@@ -137,9 +138,10 @@ export const failBeforeSession = (
   sink: SshTerminalEventSink,
   error: unknown,
   message: string,
-  code = 1
+  code = 1,
+  panelId?: string
 ): SshTerminalCreateResult => {
-  const { cwd, lifecycleBase } = createLifecycleBase(id, target)
+  const { cwd, lifecycleBase } = createLifecycleBase(id, target, panelId)
   const lifecycle = sendErrorLifecycle(id, sink, error, {
     ...lifecycleBase,
     code,

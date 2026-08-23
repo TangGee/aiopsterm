@@ -83,6 +83,7 @@ export const openSshTerminalLaunch = async (
   try {
     const session = await createTerminal({
       kind: 'ssh',
+      panelId: context.panelId,
       assetId: asset.id,
       title: options.title,
       cols: context.cols ?? 100,

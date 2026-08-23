@@ -471,6 +471,7 @@ export const ruRU = completeLocaleMessages({
   'settings.terminal.pinchZoom': 'Масштабирование жестом',
   'settings.terminal.showCloseButton': 'Показывать кнопку закрытия',
   'settings.terminal.sshAgents': 'SSH-агенты',
+  'settings.terminal.debugLogs': 'Включить журналы отладки',
   'settings.terminal.sshAgentSettings': 'Настройки SSH-агента',
   'settings.terminal.mouseEvents': 'События мыши',
   'settings.terminal.middleMouse': 'Средняя:',

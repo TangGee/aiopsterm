@@ -471,6 +471,7 @@ export const frFR = completeLocaleMessages({
   'settings.terminal.pinchZoom': 'Zoom par pincement',
   'settings.terminal.showCloseButton': 'Afficher le bouton de fermeture',
   'settings.terminal.sshAgents': 'Agents SSH',
+  'settings.terminal.debugLogs': 'Activer les journaux de débogage',
   'settings.terminal.sshAgentSettings': 'Paramètres de l’agent SSH',
   'settings.terminal.mouseEvents': 'Événements souris',
   'settings.terminal.middleMouse': 'Milieu :',

@@ -134,6 +134,7 @@ describe('terminalWorkspaceSessionRuntime', () => {
     })
     expect(createTerminal).toHaveBeenNthCalledWith(2, {
       kind: 'ssh',
+      panelId: 'panel-ssh',
       assetId: 'asset-prod',
       title: 'Prod SSH',
       cols: 132,

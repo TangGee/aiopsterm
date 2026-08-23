@@ -342,7 +342,7 @@ describe('Codex sessions IPC registrar', () => {
         registered: true
       }
     })
-    expect(input.logRuntimeEvent).toHaveBeenCalledWith('info', 'codex.target.updated', {
+    expect(input.logRuntimeEvent).toHaveBeenCalledWith('debug', 'codex.target.updated', {
       id: 'codex-runtime-1',
       sessionId: 'terminal-1',
       targetKind: 'ssh',

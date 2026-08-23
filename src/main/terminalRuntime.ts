@@ -521,6 +521,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
         logRuntimeEvent(event.stage === 'error' ? 'error' : 'info', 'terminal.lifecycle', {
           id: event.id,
           kind: event.kind,
+          panelId: event.panelId,
           stage: event.stage,
           reason: event.reason,
           errorCode: event.errorCode,

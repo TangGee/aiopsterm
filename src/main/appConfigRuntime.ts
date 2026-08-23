@@ -102,7 +102,8 @@ export const defaultConfig: UserConfig = {
     showCloseButton: true,
     sshAgentsStatus: false,
     middleMouseEvent: 'paste',
-    rightMouseEvent: 'contextMenu'
+    rightMouseEvent: 'contextMenu',
+    debugLogs: false
   },
   workspacePreferences: defaultWorkspacePreferencesUserConfig,
   workspaceIdleCleanup: defaultWorkspaceIdleCleanup,

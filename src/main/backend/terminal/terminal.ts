@@ -233,6 +233,7 @@ export const createTerminalLifecycleEvent = (
   const endpointConfidence = cleanTerminalEndpointConfidence(event.endpointConfidence)
   return {
     id: sessionId,
+    ...(cleanOptional(event.panelId) ? { panelId: cleanOptional(event.panelId) } : {}),
     kind: event.kind,
     stage: event.stage,
     at: Number.isFinite(event.at) ? Number(event.at) : at,

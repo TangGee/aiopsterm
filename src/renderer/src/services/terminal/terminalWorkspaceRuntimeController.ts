@@ -22,7 +22,7 @@ import { createTerminalWorkspaceSessionRuntime } from '@/services/terminal/termi
 import { createTerminalWorkspaceShellRuntime, createTerminalWorkspaceShellState } from '@/services/terminal/terminalWorkspaceShellRuntime'
 import { createTerminalWorkspaceViewRuntime } from '@/services/terminal/terminalWorkspaceViewRuntime'
 import { createTerminalWorkspaceZmodemShellRuntime } from '@/services/terminal/terminalWorkspaceZmodemShellRuntime'
-import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
+import { isTerminalWorkspacePanel, terminalLifecycleErrorNotice } from '@/services/terminal/terminalPanelRuntime'
 import { isThreadedTerminalHost, setThreadedTerminalDataConsumedSink } from '@/services/terminal/threadedTerminalRuntime'
 import { useI18n } from '@/i18n'
 import type { TerminalStressQueueSample } from '@/services/terminal/terminalStressHarness'
@@ -539,6 +539,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     terminalViews,
     terminalFontSizeForPanel,
     terminalOutputMirrorText,
+    writeTerminalNotice,
     syncThreadedKeywordHighlight,
     syncThreadedTerminalPriorities,
     tryFocusPanel,
@@ -921,7 +922,10 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     setThreadedTerminalDataConsumedSink((sessionId, bytes) => {
       terminalClient.ackTerminalData()?.(sessionId, bytes)
     })
-    offLifecycle = terminalClient.onTerminalLifecycle()?.((event) => workspace.applyTerminalLifecycle(event)) || null
+    offLifecycle = terminalClient.onTerminalLifecycle()?.((event) => {
+      const panel = workspace.applyTerminalLifecycle(event)
+      if (panel && event.stage === 'error') writeTerminalNotice(panel.id, terminalLifecycleErrorNotice(event))
+    }) || null
     offExit = terminalClient.onTerminalExit()?.((event) => workspace.applyTerminalExit(event)) || null
     offControlRequest = controlClient.onControlRequest()?.(handleControlRequest) || null
     document.addEventListener('click', closeTerminalMenusFromDocument)

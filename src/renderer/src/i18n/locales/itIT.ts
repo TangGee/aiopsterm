@@ -471,6 +471,7 @@ export const itIT = completeLocaleMessages({
   'settings.terminal.pinchZoom': 'Zoom con pizzico',
   'settings.terminal.showCloseButton': 'Mostra pulsante di chiusura',
   'settings.terminal.sshAgents': 'Agent SSH',
+  'settings.terminal.debugLogs': 'Abilita i log di debug',
   'settings.terminal.sshAgentSettings': 'Impostazioni agent SSH',
   'settings.terminal.mouseEvents': 'Eventi del mouse',
   'settings.terminal.middleMouse': 'Centrale:',

@@ -84,7 +84,10 @@ const getChatAttachmentsPath = () => join(app.getPath('userData'), 'chat-attachm
 const getCustomBackgroundsPath = () => join(app.getPath('userData'), 'backgrounds')
 const getCustomNotificationSoundsPath = () => join(app.getPath('userData'), 'notification-sounds')
 const getLogDirPath = () => join(app.getPath('userData'), 'logs')
-configureRuntimeLog({ getLogDir: getLogDirPath })
+configureRuntimeLog({
+  getLogDir: getLogDirPath,
+  isDebugEnabled: () => getConfig().terminal?.debugLogs === true
+})
 
 const productTelemetryRuntime = createProductTelemetryRuntime({
   stateFilePath: join(app.getPath('userData'), 'product-telemetry-state.json'),

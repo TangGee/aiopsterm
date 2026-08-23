@@ -1,5 +1,6 @@
 import { type Ref } from 'vue'
 import { appRuntimeClient } from '@/services/app/appRuntimeClient'
+import { setRendererDebugLogsEnabled } from '@/services/app/rendererRuntimeEnv'
 import { applyDocumentLocale, resolveLocale } from '@/i18n/runtime'
 import { applyThemeToDocument, isThemeId, resolveLegacyThemeId, type ThemeId } from '@/services/app/themeRuntime'
 import { applyEditorSettingsToDocument } from '@/services/common/editorRuntime'
@@ -362,6 +363,7 @@ export const createWorkspaceAppearanceSettingsController = (
         terminal: cloneTerminalSettingsSnapshot(savedSettings)
       })
       terminalSettings.value = cloneTerminalSettingsSnapshot(savedSettings)
+      setRendererDebugLogsEnabled(savedSettings.debugLogs === true)
       return true
     } catch (error) {
       setSettingsNotice(error instanceof Error ? error.message : '终端设置保存失败')

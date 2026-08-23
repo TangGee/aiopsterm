@@ -239,12 +239,12 @@ export const createTerminalWorkspaceViewRuntime = ({
   const FitConstructor = fitConstructor || FitAddon
   const SearchConstructor = searchConstructor || SearchAddon
   let threadedTerminalAvailable: boolean | null = null
-  const terminalDebugLogs = shouldUseTerminalDebugLogs()
-  const terminalOutputSummaryIntervalMs = terminalDebugLogs ? terminalOutputSummaryDebugIntervalMs : terminalOutputSummaryFormalIntervalMs
-  const terminalOutputSummaryChunkThreshold = terminalDebugLogs ? terminalOutputSummaryDebugChunkThreshold : terminalOutputSummaryFormalChunkThreshold
-  const terminalOutputSummaryByteThreshold = terminalDebugLogs ? terminalOutputSummaryDebugByteThreshold : terminalOutputSummaryFormalByteThreshold
+  const terminalDebugLogs = () => shouldUseTerminalDebugLogs()
+  const terminalOutputSummaryIntervalMs = terminalOutputSummaryFormalIntervalMs
+  const terminalOutputSummaryChunkThreshold = terminalOutputSummaryFormalChunkThreshold
+  const terminalOutputSummaryByteThreshold = terminalOutputSummaryFormalByteThreshold
   const writeTerminalDebugLog = (event: string, fields?: Record<string, unknown>) => {
-    if (terminalDebugLogs) writeRuntimeLog('debug', event, fields)
+    if (terminalDebugLogs()) writeRuntimeLog('debug', event, fields)
   }
   const canUseThreadedTerminal = () => {
     if (terminalConstructor || fitConstructor || searchConstructor) return false
@@ -355,7 +355,7 @@ export const createTerminalWorkspaceViewRuntime = ({
     summary.maxPendingChunks = Math.max(summary.maxPendingChunks, metrics.pendingChunks)
     if (metrics.reset) summary.resets += 1
     view.outputPerf = summary
-    if (terminalDebugLogs && (metrics.writeMs >= terminalOutputSlowThresholdMs || metrics.highlightMs >= terminalOutputSlowThresholdMs)) {
+    if (terminalDebugLogs() && (metrics.writeMs >= terminalOutputSlowThresholdMs || metrics.highlightMs >= terminalOutputSlowThresholdMs)) {
       writeRuntimeLog('warn', 'renderer.terminal-output.slow-write', {
         panelId,
         chunks: metrics.chunks,
@@ -1068,7 +1068,7 @@ export const createTerminalWorkspaceViewRuntime = ({
       }
       view.lastOutput = displayOutput
       wroteOutput = true
-    } else if (terminalDebugLogs && highlightMs >= terminalOutputSlowThresholdMs) {
+    } else if (terminalDebugLogs() && highlightMs >= terminalOutputSlowThresholdMs) {
       writeRuntimeLog('warn', 'renderer.terminal-output.slow-highlight', {
         panelId: panel.id,
         highlightMs: Math.round(highlightMs * 10) / 10,
@@ -1086,6 +1086,19 @@ export const createTerminalWorkspaceViewRuntime = ({
       }
     }
     return true
+  }
+
+  const writeTerminalNotice = (panelId: string, text: string) => {
+    if (!text) return false
+    const view = terminalViews.get(panelId)
+    if (!view || !isTerminalPanelRenderable(panelId)) return false
+    if (isThreadedTerminalHost(view.terminal)) {
+      view.terminal.setSessionId(undefined)
+      view.terminal.write(text)
+      return true
+    }
+    const panel = workspace.panels.find((item) => item.id === panelId)
+    return panel ? syncTerminalView(panel, { suppressInputReplies: true }) : false
   }
 
   const writeLiveTerminalData = (panelId: string, sessionId: string, data: string) => {
@@ -1421,6 +1434,7 @@ export const createTerminalWorkspaceViewRuntime = ({
     terminalViews,
     terminalFontSizeForPanel,
     terminalOutputMirrorText,
+    writeTerminalNotice,
     tryFocusPanel,
     updateFontSize,
     writeLiveTerminalData,

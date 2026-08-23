@@ -111,7 +111,6 @@ export const createAssetKeyEditorRuntime = ({
     if (!name) return '请输入名称。'
     if (!keyForm.privateKey.trim()) return '请输入私钥。'
     if (keyForm.name.includes(' ')) return '名称不能包含空格。'
-    if (keyForm.publicKey.includes(' ')) return '公钥不能包含空格。'
     if (keyForm.passphrase.includes(' ')) return 'Passphrase 不能包含空格。'
     if (keychains.value.some((key) => key.name === name && key.id !== keyForm.id)) return `密钥 ${name} 已存在。`
     return ''
@@ -156,7 +155,12 @@ export const createAssetKeyEditorRuntime = ({
       keyImportNotice.value = '密钥文件为空。'
       return
     }
-    keyForm.privateKey = text
+    const isPublicKey =
+      /^-----BEGIN (?:OPENSSH )?PUBLIC KEY-----/i.test(text) ||
+      text.split(/\s+/).some((token) => /^(?:ssh-|ecdsa-|sk-)/i.test(token))
+    if (isPublicKey) keyForm.publicKey = text
+    else keyForm.privateKey = text
+    if (!keyForm.name.trim()) keyForm.name = fileName
     keyFormError.value = ''
     keyImportNotice.value = `已导入 ${fileName}，识别为 ${detectKeyType(keyForm.privateKey, keyForm.publicKey).toUpperCase()}。`
   }
@@ -181,7 +185,7 @@ export const createAssetKeyEditorRuntime = ({
   }
 
   const openKeyImportDialog = async () => {
-    keyImportNotice.value = '请选择 .pem、.key、.pub、.ppk 等密钥文件。'
+    keyImportNotice.value = '请选择密钥文件，包括无扩展名的 OpenSSH 私钥、.pem、.key、.pub、.ppk 等格式。'
     const showOpenDialog = localFilesClient.showOpenDialog()
     if (!showOpenDialog) {
       keyImportNotice.value = '密钥文件选择服务不可用。'
@@ -190,11 +194,7 @@ export const createAssetKeyEditorRuntime = ({
     try {
       const result = await showOpenDialog({
         defaultPath: '~/.ssh',
-        properties: ['openFile', 'showHiddenFiles'],
-        filters: [
-          { name: 'Key Files', extensions: ['pem', 'key', 'txt', 'pub', 'asc', 'crt', 'cer', 'der', 'p12', 'pfx', 'ssh', 'ppk', 'gpg'] },
-          { name: 'All Files', extensions: ['*'] }
-        ]
+        properties: ['openFile', 'showHiddenFiles']
       })
       if (result?.canceled) {
         keyImportNotice.value = '已取消导入密钥。'

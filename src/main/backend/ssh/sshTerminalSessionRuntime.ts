@@ -326,14 +326,14 @@ export const createSshTerminalSession = (
   sink: SshTerminalEventSink
 ): SshTerminalCreateResult => {
   const target = resolveSshTerminalTarget(options)
-  const { cwd, lifecycleBase } = createLifecycleBase(id, target)
+  const { cwd, lifecycleBase } = createLifecycleBase(id, target, options.panelId)
 
   if (!isValidTarget(target)) {
-    return failBeforeSession(id, target, sink, new Error('SSH target requires host, username, and a valid port.'), 'SSH target is invalid.')
+    return failBeforeSession(id, target, sink, new Error('SSH target requires host, username, and a valid port.'), 'SSH target is invalid.', 1, options.panelId)
   }
 
   if (shouldUseBackendDouble()) {
-    return createBackendDoubleSession(id, target, sink)
+    return createBackendDoubleSession(id, target, sink, options.panelId)
   }
 
   const ssh2 = getSsh2Runtime()
@@ -343,7 +343,9 @@ export const createSshTerminalSession = (
       target,
       sink,
       new Error('ssh2 runtime is not available. Run npm install and rebuild native modules if needed.'),
-      'SSH runtime is not available.'
+      'SSH runtime is not available.',
+      1,
+      options.panelId
     )
   }
 

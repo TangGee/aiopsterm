@@ -278,6 +278,7 @@ export const createSettingsWorkspaceGeneralTerminalPages = (
             switchRow(t('settings.terminal.pinchZoom'), workspace.terminalSettings.pinchZoomStatus, (checked) => workspace.updateTerminalSettings({ pinchZoomStatus: checked })),
             switchRow(t('settings.terminal.showCloseButton'), workspace.terminalSettings.showCloseButton, (checked) => workspace.updateTerminalSettings({ showCloseButton: checked })),
             switchRow(t('settings.terminal.sshAgents'), workspace.terminalSettings.sshAgentsStatus, (checked) => workspace.updateTerminalSettings({ sshAgentsStatus: checked })),
+            switchRow(t('settings.terminal.debugLogs'), workspace.terminalSettings.debugLogs === true, (checked) => workspace.updateTerminalSettings({ debugLogs: checked })),
             workspace.terminalSettings.sshAgentsStatus
               ? h('div', { class: 'settings-form-row' }, [
                   h('label', t('settings.terminal.sshAgentSettings')),

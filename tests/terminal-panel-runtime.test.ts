@@ -566,6 +566,7 @@ describe('terminalPanelRuntime', () => {
     expect(ssh.status).toBe('error')
     expect(ssh.sessionId).toBeUndefined()
     expect(ssh.sshSession).toEqual(expect.objectContaining({ connectionId: 'ssh-connection-1', assetId: 'asset-1' }))
+    expect(ssh.output).toContain('read ECONNRESET')
   })
 
   it('applies terminal exit events and finds panels by session, panel, or lifecycle id', () => {
@@ -579,6 +580,7 @@ describe('terminalPanelRuntime', () => {
     const panels = [panel]
     expect(findTerminalPanelBySessionOrId(panels, 'terminal-exit-1')).toBe(panel)
     expect(findTerminalPanelBySessionOrId(panels, 'panel-exit')).toBe(panel)
+    expect(findTerminalPanelBySessionOrId(panels, 'missing-session', 'panel-exit')).toBe(panel)
 
     expect(applyTerminalExitToPanel(panel, { id: 'terminal-exit-1', kind: 'local', code: 1, reason: 'error', errorMessage: 'boom' })).toBe(panel)
     expect(panel).toEqual(expect.objectContaining({ status: 'error', sessionId: undefined }))

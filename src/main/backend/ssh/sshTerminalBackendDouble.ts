@@ -6,9 +6,10 @@ import type { SshTerminalCreateResult, SshTerminalEventSink, SshTerminalSession,
 export const createBackendDoubleSession = (
   id: string,
   target: SshTerminalTarget,
-  sink: SshTerminalEventSink
+  sink: SshTerminalEventSink,
+  panelId?: string
 ): SshTerminalCreateResult => {
-  const { cwd, lifecycleBase } = createLifecycleBase(id, target)
+  const { cwd, lifecycleBase } = createLifecycleBase(id, target, panelId)
   let closed = false
   const session: SshTerminalSession = {
     write: () => undefined,

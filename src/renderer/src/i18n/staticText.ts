@@ -252,6 +252,7 @@ const exactEnUS: Record<string, string> = {
   'Passphrase（选填）': 'Passphrase (optional)',
   '* 为必填项。公钥可选；仅当私钥受密码保护时填写 Passphrase。': '* Required. Public key is optional; enter a passphrase only when the private key is protected.',
   '拖拽或点击导入密钥文件': 'Drag or click to import a key file',
+  '请选择密钥文件，包括无扩展名的 OpenSSH 私钥、.pem、.key、.pub、.ppk 等格式。': 'Select a key file, including extensionless OpenSSH private keys, .pem, .key, .pub, and .ppk files.',
   '文件管理': 'File management',
   '文件夹名称 *': 'Folder name *',
   '文件夹描述': 'Folder description',

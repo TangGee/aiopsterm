@@ -36,9 +36,8 @@ export const createTerminalWorkspaceSessionRuntime = ({
   client = terminalClient,
   writeRuntimeLog = writeRendererRuntimeLog
 }: TerminalWorkspaceSessionRuntimeOptions) => {
-  const terminalDebugLogs = shouldUseTerminalDebugLogs()
   const writeTerminalDebugLog = (event: string, details?: Record<string, unknown>) => {
-    if (terminalDebugLogs) writeRuntimeLog('debug', event, details)
+    if (shouldUseTerminalDebugLogs()) writeRuntimeLog('debug', event, details)
   }
   const panelById = (panelId: string) => workspace.panels.find((panel) => panel.id === panelId || panel.sessionId === panelId)
 
@@ -143,6 +142,7 @@ export const createTerminalWorkspaceSessionRuntime = ({
     try {
       const session = await createTerminal({
         kind: 'ssh',
+        panelId: panel.id,
         assetId: ssh.assetId,
         title: panel.title,
         cols: size.cols,

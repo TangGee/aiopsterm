@@ -471,6 +471,7 @@ export const deDE = completeLocaleMessages({
   'settings.terminal.pinchZoom': 'Pinch-Zoom',
   'settings.terminal.showCloseButton': 'Schließen-Schaltfläche anzeigen',
   'settings.terminal.sshAgents': 'SSH-Agents',
+  'settings.terminal.debugLogs': 'Debug-Protokolle aktivieren',
   'settings.terminal.sshAgentSettings': 'SSH-Agent-Einstellungen',
   'settings.terminal.mouseEvents': 'Mausereignisse',
   'settings.terminal.middleMouse': 'Mitte:',

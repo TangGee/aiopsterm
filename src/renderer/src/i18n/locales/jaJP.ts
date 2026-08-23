@@ -471,6 +471,7 @@ export const jaJP = completeLocaleMessages({
   'settings.terminal.pinchZoom': 'ピンチズーム',
   'settings.terminal.showCloseButton': '閉じるボタンを表示',
   'settings.terminal.sshAgents': 'SSH エージェント',
+  'settings.terminal.debugLogs': 'デバッグログを有効にする',
   'settings.terminal.sshAgentSettings': 'SSH エージェント設定',
   'settings.terminal.mouseEvents': 'マウスイベント',
   'settings.terminal.middleMouse': '中ボタン:',

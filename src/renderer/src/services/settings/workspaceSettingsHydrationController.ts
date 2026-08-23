@@ -2,6 +2,7 @@ import { type Ref } from 'vue'
 import { applyDocumentLocale, resolveLocale } from '@/i18n/runtime'
 import { readStoredAiPanelMode } from '@/services/ai/aiPanelModeRuntime'
 import { appRuntimeClient } from '@/services/app/appRuntimeClient'
+import { setRendererDebugLogsEnabled } from '@/services/app/rendererRuntimeEnv'
 import { cloneKnowledgeNodes } from '@/services/knowledge/knowledgeRuntime'
 import { isQuickCommandsSnapshotData, malformedQuickCommandsBackendResultMessage } from '@/services/quick-commands/quickCommandsBackendGuards'
 import { quickCommandsClient } from '@/services/quick-commands/quickCommandsClient'
@@ -211,6 +212,7 @@ export const createWorkspaceSettingsHydrationController = (
     setupThemeBridge()
     const { normalized: normalizedTerminal, changed: terminalChanged } = normalizeTerminalConfig(config.value.terminal)
     terminalSettings.value = normalizedTerminal
+    setRendererDebugLogsEnabled(normalizedTerminal.debugLogs === true)
     const { normalized: normalizedWorkspacePreferences, changed: workspacePreferencesChanged } = normalizeWorkspacePreferences(config.value.workspacePreferences)
     workspacePreferences.value = normalizedWorkspacePreferences
     const { normalized: normalizedWorkspaceIdleCleanup, changed: workspaceIdleCleanupChanged } = normalizeWorkspaceIdleCleanupConfig(

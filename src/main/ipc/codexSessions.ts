@@ -69,7 +69,7 @@ const logTargetUpdate = (
   target?: CodexSessionTargetContext,
   details: Record<string, unknown> = {}
 ) => {
-  input.logRuntimeEvent(result.registered ? 'info' : 'warn', result.registered ? event : missingEvent, {
+  input.logRuntimeEvent(result.registered ? 'debug' : 'warn', result.registered ? event : missingEvent, {
     ...details,
     sessionId: result.sessionId || target?.sessionId,
     targetKind: result.target?.kind || target?.kind,
@@ -79,9 +79,8 @@ const logTargetUpdate = (
 }
 
 export const registerCodexSessionsIpc = (ipcMain: IpcMain, input: RegisterCodexSessionsIpcInput) => {
-  const terminalDebugLogs = shouldUseTerminalDebugLogs()
   const logCodexDebug = (event: string, details?: Record<string, unknown>) => {
-    if (terminalDebugLogs) input.logRuntimeEvent('debug', event, details)
+    if (shouldUseTerminalDebugLogs()) input.logRuntimeEvent('debug', event, details)
   }
 
   ipcMain.handle('codex:create', async (event, options: CodexSessionCreateOptions = {}) => {

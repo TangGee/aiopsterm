@@ -471,6 +471,7 @@ export const ptPT = completeLocaleMessages({
   'settings.terminal.pinchZoom': 'Zoom por gesto',
   'settings.terminal.showCloseButton': 'Mostrar botão de fecho',
   'settings.terminal.sshAgents': 'Agentes SSH',
+  'settings.terminal.debugLogs': 'Ativar registos de depuração',
   'settings.terminal.sshAgentSettings': 'Definições do agente SSH',
   'settings.terminal.mouseEvents': 'Eventos do rato',
   'settings.terminal.middleMouse': 'Meio:',

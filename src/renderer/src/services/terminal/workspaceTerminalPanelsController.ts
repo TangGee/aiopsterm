@@ -394,7 +394,7 @@ export const createWorkspaceTerminalPanelsController = (
 
   const applyTerminalLifecycle = (event: TerminalLifecycleEvent) => {
     if (!isTerminalLifecycleEvent(event)) return null
-    const panel = findTerminalPanelBySessionOrId(panels.value, event.id)
+    const panel = findTerminalPanelBySessionOrId(panels.value, event.id, event.panelId)
     if (!panel) {
       applyManagedAiTerminalLifecycle(null, event)
       return null
@@ -497,6 +497,7 @@ export const createWorkspaceTerminalPanelsController = (
     try {
       const session = await createTerminal({
         kind: 'ssh',
+        panelId,
         assetId: host.id,
         title: label,
         cols: 100,

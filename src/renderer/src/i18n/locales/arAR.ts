@@ -471,6 +471,7 @@ export const arAR = completeLocaleMessages({
   'settings.terminal.pinchZoom': 'التكبير بالقرص',
   'settings.terminal.showCloseButton': 'إظهار زر الإغلاق',
   'settings.terminal.sshAgents': 'وكلاء SSH',
+  'settings.terminal.debugLogs': 'تمكين سجلات التصحيح',
   'settings.terminal.sshAgentSettings': 'إعدادات وكيل SSH',
   'settings.terminal.mouseEvents': 'أحداث الفأرة',
   'settings.terminal.middleMouse': 'الأوسط:',

@@ -484,8 +484,8 @@ export const terminalShellTitle = (shell: string) => shell.replace(/\\/g, '/').s
 export const findTerminalPanelByIdOrSession = (panels: TerminalPanel[], id: string) =>
   panels.find((item) => item.id === id || item.sessionId === id) || null
 
-export const findTerminalPanelBySessionOrId = (panels: TerminalPanel[], id: string) =>
-  panels.find((item) => item.sessionId === id || item.id === id || item.terminalLifecycle?.id === id) || null
+export const findTerminalPanelBySessionOrId = (panels: TerminalPanel[], id: string, panelId?: string) =>
+  panels.find((item) => item.id === panelId || item.sessionId === id || item.id === id || item.terminalLifecycle?.id === id) || null
 
 export const renameTerminalPanelInCollection = (
   panels: TerminalPanel[],
@@ -722,6 +722,13 @@ export const terminalExitMatchesPanel = (panel: TerminalPanel, event: TerminalEx
   return true
 }
 
+export const terminalLifecycleErrorNotice = (event: TerminalLifecycleEvent) => {
+  if (event.stage !== 'error') return ''
+  const message = event.message?.trim() || 'Terminal connection failed.'
+  const detail = event.errorMessage?.trim()
+  return `\r\n[aiopsterm] ${message}${detail && detail !== message ? `: ${detail}` : ''}\r\n`
+}
+
 export const terminalSshSessionFromLifecycle = (panel: TerminalPanel, event: TerminalLifecycleEvent): TerminalSshSession | null => {
   const previous = panel.sshSession
   const connectionId = event.connectionId || previous?.connectionId
@@ -751,9 +758,17 @@ export const terminalSshSessionFromLifecycle = (panel: TerminalPanel, event: Ter
 
 export const applyTerminalLifecycleToPanel = (panel: TerminalPanel, event: TerminalLifecycleEvent) => {
   if (!terminalLifecycleMatchesPanel(panel, event)) return null
+  const previousLifecycle = panel.terminalLifecycle
+  const errorNotice = terminalLifecycleErrorNotice(event)
   const nextSshSession = event.kind === 'ssh' ? terminalSshSessionFromLifecycle(panel, event) : null
   if (event.kind === 'ssh' && !nextSshSession) return null
   panel.terminalLifecycle = event
+  if (
+    errorNotice &&
+    !(previousLifecycle?.stage === 'error' && previousLifecycle.message === event.message && previousLifecycle.errorMessage === event.errorMessage)
+  ) {
+    appendTerminalSegment(panel, errorNotice, 'output')
+  }
   panel.kind = 'terminal'
   if (event.cwd) panel.cwd = event.cwd
   if (nextSshSession) panel.sshSession = nextSshSession
@@ -786,6 +801,9 @@ export const applyTerminalLifecycleToPanel = (panel: TerminalPanel, event: Termi
 export const applyTerminalExitToPanel = (panel: TerminalPanel, event: TerminalExitEvent) => {
   if (!terminalExitMatchesPanel(panel, event)) return null
   panel.terminalExit = event
+  if (event.errorMessage && !(panel.terminalLifecycle?.stage === 'error' && panel.terminalLifecycle.errorMessage === event.errorMessage)) {
+    appendTerminalSegment(panel, `\r\n[aiopsterm] ${event.errorMessage}\r\n`, 'output')
+  }
   if (panel.sessionId === event.id) {
     panel.sessionId = undefined
     panel.classicTarget = undefined

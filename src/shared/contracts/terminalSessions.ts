@@ -80,6 +80,7 @@ export type TerminalDisconnectReason = 'manual' | 'network' | 'process' | 'error
 
 export type TerminalLifecycleEvent = {
   id: string
+  panelId?: string
   kind: 'local' | 'ssh'
   stage: TerminalLifecycleStage
   at: number

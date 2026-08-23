@@ -80,6 +80,7 @@ export const isTerminalLifecycleEvent = (value: unknown, expectedId?: string, ex
     return false
   }
   return (
+    isOptionalNonEmptyString(value, 'panelId') &&
     isOptionalField(value, 'processId', isPositiveInteger) &&
     isOptionalField(value, 'processGroupId', isPositiveInteger) &&
     isOptionalNonEmptyString(value, 'shell') &&

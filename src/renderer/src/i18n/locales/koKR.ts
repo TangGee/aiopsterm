@@ -471,6 +471,7 @@ export const koKR = completeLocaleMessages({
   'settings.terminal.pinchZoom': '핀치 줌',
   'settings.terminal.showCloseButton': '닫기 버튼 표시',
   'settings.terminal.sshAgents': 'SSH 에이전트',
+  'settings.terminal.debugLogs': '디버그 로그 사용',
   'settings.terminal.sshAgentSettings': 'SSH 에이전트 설정',
   'settings.terminal.mouseEvents': '마우스 이벤트',
   'settings.terminal.middleMouse': '가운데:',

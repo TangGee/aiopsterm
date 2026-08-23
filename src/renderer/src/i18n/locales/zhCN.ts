@@ -470,6 +470,7 @@ export const zhCN = {
   'settings.terminal.pinchZoom': 'Pinch Zoom',
   'settings.terminal.showCloseButton': '显示关闭按钮',
   'settings.terminal.sshAgents': 'SSH Agents',
+  'settings.terminal.debugLogs': '开启 Debug 日志',
   'settings.terminal.sshAgentSettings': 'SSH Agent 设置',
   'settings.terminal.mouseEvents': '鼠标事件',
   'settings.terminal.middleMouse': '中键:',

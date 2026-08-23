@@ -3491,8 +3491,7 @@ describe('AppShell', () => {
       expect(window.aiops.showOpenDialog).toHaveBeenCalledWith(
         expect.objectContaining({
           defaultPath: '~/.ssh',
-          properties: ['openFile', 'showHiddenFiles'],
-          filters: expect.arrayContaining([expect.objectContaining({ name: 'Key Files' })])
+          properties: ['openFile', 'showHiddenFiles']
         })
       )
       expect(window.aiops.readLocalFile).toHaveBeenCalledWith('/tmp/unit-rsa.pem')

@@ -338,7 +338,10 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
       }
     }
   })
-  configureRuntimeLog({ getLogDir: input.getLogDirPath })
+  configureRuntimeLog({
+    getLogDir: input.getLogDirPath,
+    isDebugEnabled: () => input.getConfig().terminal?.debugLogs === true
+  })
   configureAiContextBackendRuntime({
     listKnowledgeTree: () => input.buildKnowledgeTreeFromDisk(),
     listSkills: () => input.loadSkillsFromDisk()
