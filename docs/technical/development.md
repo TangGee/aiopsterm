@@ -76,6 +76,10 @@ Avoid adding new root-level service files unless the file is intentionally a cro
 
 ## Verification
 
+### Product Telemetry Default
+
+Product telemetry is enabled by default and does not block first launch with a consent dialog. The Privacy settings page remains the opt-out control. Only anonymous installation and daily-active signals are sent; terminal content, commands, paths, host names, accounts, and logs are excluded. The consent dialog implementation remains in the main process so the policy can be changed without redesigning the runtime.
+
 ### Release Runtime Environment
 
 Terminal color variables use app defaults. A packaged launch gets `TERM=xterm-256color` when no terminal type is configured, truecolor, and `CLICOLOR=1`; the app removes inherited `NO_COLOR` because it is a launcher/debug opt-out that would otherwise make the published terminal appear uncolored. Configured terminal type and color settings remain respected. Build-tool mirror variables affect packaging only and are not runtime configuration.

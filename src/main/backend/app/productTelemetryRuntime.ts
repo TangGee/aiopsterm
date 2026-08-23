@@ -196,9 +196,9 @@ export const createProductTelemetryRuntime = (options: ProductTelemetryRuntimeOp
     try {
       let privacy = options.getPrivacy()
       if (privacy.telemetry === 'undecided' || privacy.telemetryConsentVersion !== 1) {
-        const decision = await options.requestConsent()
-        if (!decision || stopped) return
-        privacy = { ...privacy, telemetry: decision, telemetryConsentVersion: 1 }
+        // Keep the consent dialog implementation available for a future
+        // policy change, but use opt-out defaults for the current release.
+        privacy = { ...privacy, telemetry: privacy.telemetry === 'disabled' ? 'disabled' : 'enabled', telemetryConsentVersion: 1 }
         options.savePrivacy(privacy)
       }
       const state = await readState()

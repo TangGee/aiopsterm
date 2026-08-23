@@ -93,15 +93,22 @@ const createHarness = async (input: {
 }
 
 describe('product telemetry runtime', () => {
-  it('sends nothing until the user makes a choice', async () => {
+  it('starts enabled without showing a consent prompt', async () => {
     const harness = await createHarness()
     await expect(harness.runtime.runNowForTests()).resolves.toBeUndefined()
-    expect(harness.requests).toEqual([])
-    expect(harness.privacy().telemetry).toBe('undecided')
+    expect(harness.requests).toHaveLength(1)
+    expect(harness.privacy()).toMatchObject({ telemetry: 'enabled', telemetryConsentVersion: 1 })
   })
 
-  it('persists explicit refusal without creating an installation id', async () => {
-    const harness = await createHarness({ consent: 'disabled' })
+  it('keeps an explicitly disabled setting without creating an installation id', async () => {
+    const harness = await createHarness({
+      privacy: {
+        telemetry: 'disabled',
+        telemetryConsentVersion: 1,
+        secretRedaction: 'disabled',
+        dataSync: 'disabled'
+      }
+    })
     await expect(harness.runtime.runNowForTests()).resolves.toBeUndefined()
     expect(harness.privacy()).toMatchObject({ telemetry: 'disabled', telemetryConsentVersion: 1 })
     expect(harness.requests).toEqual([])

@@ -188,8 +188,8 @@ export const defaultConfig: UserConfig = {
     }
   },
   privacy: {
-    telemetry: 'undecided',
-    telemetryConsentVersion: 0,
+    telemetry: 'enabled',
+    telemetryConsentVersion: 1,
     secretRedaction: 'disabled',
     dataSync: 'disabled'
   },

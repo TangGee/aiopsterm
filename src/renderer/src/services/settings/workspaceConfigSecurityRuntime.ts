@@ -229,13 +229,12 @@ export const normalizePrivacyConfig = (source?: Partial<PrivacyUserConfig>) => {
   const legacyTelemetry = telemetryStatusFromOptions(incoming.telemetry, defaultPrivacySettings.telemetry)
   const telemetryConsentVersion = incoming.telemetryConsentVersion === 1 ? 1 : 0
   const normalized: PrivacyUserConfig = {
-    telemetry: telemetryConsentVersion === 1 || legacyTelemetry === 'disabled' ? legacyTelemetry : 'undecided',
-    telemetryConsentVersion: legacyTelemetry === 'disabled' || telemetryConsentVersion === 1 ? 1 : 0,
+    telemetry: legacyTelemetry === 'disabled' ? 'disabled' : 'enabled',
+    telemetryConsentVersion: 1,
     secretRedaction: privacyStatusFromOptions(incoming.secretRedaction, defaultPrivacySettings.secretRedaction),
     dataSync: privacyStatusFromOptions(incoming.dataSync, defaultPrivacySettings.dataSync)
   }
-  const legacyEnabledWithoutConsent = incoming.telemetry === 'enabled' && incoming.telemetryConsentVersion !== 1
-  const telemetryChanged = incoming.telemetry !== normalized.telemetry && !legacyEnabledWithoutConsent
+  const telemetryChanged = incoming.telemetry !== normalized.telemetry
   const consentChanged = incoming.telemetryConsentVersion !== undefined && incoming.telemetryConsentVersion !== normalized.telemetryConsentVersion
   const changed =
     !isRecord(source) ||

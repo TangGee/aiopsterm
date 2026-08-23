@@ -39,7 +39,7 @@ let runtimeConfig: PrivacyRuntimeConfig = {
 }
 
 let runtimeSnapshot: PrivacyRuntimeSnapshot = {
-  telemetry: 'undecided',
+  telemetry: 'enabled',
   dataSync: 'disabled',
   dataSyncRuntime: 'disabled',
   syncStatus: 'disabled',
@@ -119,7 +119,7 @@ const createSyncRunId = () => `sync-${Date.now().toString(36)}-${Math.random().t
 
 const normalizeRuntimeState = (value: unknown): DataSyncRuntimeState | null => {
   if (!isRecord(value)) return null
-  const telemetry = isTelemetryStatus(value.telemetry) ? value.telemetry : 'undecided'
+  const telemetry = value.telemetry === 'disabled' ? 'disabled' : 'enabled'
   const dataSync = isPrivacyStatus(value.dataSync) ? value.dataSync : 'disabled'
   const runtime =
     value.runtime === 'backend-double' || value.runtime === 'service' || value.runtime === 'local-file'
@@ -136,7 +136,7 @@ const normalizeRuntimeState = (value: unknown): DataSyncRuntimeState | null => {
     syncRunId: dataSync === 'enabled' && typeof value.syncRunId === 'string' ? value.syncRunId.trim() : '',
     syncedScopes: dataSync === 'enabled' ? syncedScopesFromState(value.syncedScopes) : [],
     telemetry,
-    telemetryConsentVersion: value.telemetryConsentVersion === 1 ? 1 : 0,
+    telemetryConsentVersion: 1,
     dataSync,
     updatedAt: typeof value.updatedAt === 'string' && value.updatedAt.trim() ? value.updatedAt : new Date(0).toISOString(),
     lastSyncAt: dataSync === 'enabled' && typeof value.lastSyncAt === 'string' && value.lastSyncAt.trim() ? value.lastSyncAt : '',
@@ -238,7 +238,7 @@ export const configurePrivacyRuntime = (config: PrivacyRuntimeConfig = {}) => {
 
 export const resetPrivacyRuntimeForTests = () => {
   runtimeSnapshot = {
-    telemetry: 'undecided',
+    telemetry: 'enabled',
     dataSync: 'disabled',
     dataSyncRuntime: 'disabled',
     syncStatus: 'disabled',
