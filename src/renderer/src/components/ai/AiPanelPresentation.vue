@@ -38,6 +38,7 @@
       <ProjectFilesPanel
         v-if="projectFilesActive"
         class="project-files-drawer"
+        :class="{ 'project-files-drawer-codex': aiPanelMode === 'codex' }"
         :session="projectFilesSession"
         @close="$emit('closeProjectFiles')"
       />

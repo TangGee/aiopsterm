@@ -67,6 +67,9 @@ const selectManagedSession = (sessionId: string, cwd: string) => {
     receivedAt: Date.now()
   })
   workspace.selectPanelForLifecycle(panel.id)
+  // Existing interaction tests start from an explicitly selected AI surface;
+  // the default-surface behavior is covered separately below.
+  workspace.setRightAssistantSurfaceForTerminal(`terminal-${sessionId}`, 'ai')
 }
 
 describe('RightAssistantPanel', () => {
@@ -74,6 +77,19 @@ describe('RightAssistantPanel', () => {
     localStorage.clear()
     getProjectFileContext.mockReset()
     Object.assign(window.aiops, { getProjectFileContext })
+  })
+
+  it('opens eligible AI-linked terminals on project files by default', async () => {
+    getProjectFileContext.mockResolvedValue({
+      ok: true,
+      data: { source: 'codex', sessionId: 'default-files', projectRoot: '/work/default-files', capability: 'adapter', recent: [] }
+    })
+    const wrapper = mountPanel()
+    selectManagedSession('default-files', '/work/default-files')
+    const workspace = useWorkspaceStore()
+    workspace.releaseRightAssistantSurfaceForTerminal('terminal-default-files')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="project-files-drawer"]').exists()).toBe(true)
   })
 
   it('keeps project files hidden without a managed AI session bound to the active terminal', async () => {
@@ -106,6 +122,7 @@ describe('RightAssistantPanel', () => {
     selectManagedSession('eligible', '/work/eligible')
     await flushPromises()
 
+    expect(wrapper.find('[data-testid="project-files-drawer"]').exists()).toBe(false)
     await wrapper.get('[data-testid="project-files-toggle"]').trigger('click')
     expect(wrapper.find('[data-testid="project-files-drawer"]').exists()).toBe(true)
 
@@ -186,7 +203,7 @@ describe('RightAssistantPanel', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-testid="project-files-toggle"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="project-files-drawer"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="project-files-drawer"]').exists()).toBe(true)
 
     workspace.selectPanelForLifecycle(firstPanelId)
     await flushPromises()
