@@ -18,6 +18,7 @@ For supported third-party boundaries and examples, start with the [Developer Int
 - [SSH Terminal Runtime](ssh-terminal.md)
 - [Threaded Terminal Renderer](terminal-renderer-architecture.md)
 - [Theme System](theme-system.md)
+- [Official Website](official-website.md)
 - [xterm Fork](xterm-fork.md)
 - [Architecture Design Principles](architecture-principles.md)
 - [Resource, Data, and Platform Plan](resource-data-platform-plan.md)
