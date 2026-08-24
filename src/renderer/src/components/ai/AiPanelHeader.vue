@@ -25,7 +25,7 @@
           type="button"
           :class="{ active: aiPanelMode === 'codex' }"
           data-testid="ai-mode-codex"
-          @click.stop="selectAiPanelMode('codex')"
+          @click.stop="selectPanelMode('codex')"
         >
           <Code2 />
           <span>{{ t('ai.codexCliMode') }}</span>
@@ -34,7 +34,7 @@
           type="button"
           :class="{ active: aiPanelMode === 'classic' }"
           data-testid="ai-mode-classic"
-          @click.stop="selectAiPanelMode('classic')"
+          @click.stop="selectPanelMode('classic')"
         >
           <Bot />
           <span>{{ t('ai.classicChatMode') }}</span>
@@ -60,9 +60,9 @@
         :title="conversationTabTooltip(conversation)"
         data-testid="ai-conversation-tab"
         :data-conversation-id="conversation.id"
-        @click.stop="restoreConversationFromTab(conversation.id)"
-        @keydown.enter.prevent="restoreConversationFromTab(conversation.id)"
-        @keydown.space.prevent="restoreConversationFromTab(conversation.id)"
+        @click.stop="activateClassicConversation(conversation.id)"
+        @keydown.enter.prevent="activateClassicConversation(conversation.id)"
+        @keydown.space.prevent="activateClassicConversation(conversation.id)"
         @keydown.delete.prevent="closeConversationTab(conversation.id)"
         @keydown.backspace.prevent="closeConversationTab(conversation.id)"
       >
@@ -101,9 +101,9 @@
         :title="codexConversationTitle(conversation)"
         data-testid="ai-codex-tab"
         :data-codex-conversation-id="conversation.id"
-        @click.stop="selectCodexConversation(conversation.id)"
-        @keydown.enter.prevent="selectCodexConversation(conversation.id)"
-        @keydown.space.prevent="selectCodexConversation(conversation.id)"
+        @click.stop="activateCodexConversation(conversation.id)"
+        @keydown.enter.prevent="activateCodexConversation(conversation.id)"
+        @keydown.space.prevent="activateCodexConversation(conversation.id)"
         @keydown.delete.prevent="closeCodexConversation(conversation.id)"
         @keydown.backspace.prevent="closeCodexConversation(conversation.id)"
       >
@@ -128,7 +128,7 @@
         class="ai-header-icon-button"
         :title="t('ai.newChat')"
         data-testid="ai-new-chat"
-        @click.stop="createNewAiConversation()"
+        @click.stop="createClassicConversation"
       >
         <Plus />
       </button>
@@ -138,7 +138,7 @@
         class="ai-header-icon-button"
         :title="t('ai.newChat')"
         data-testid="ai-codex-new"
-        @click.stop="createNewCodexConversation()"
+        @click.stop="createCodexConversation"
       >
         <Plus />
       </button>
@@ -246,12 +246,13 @@ import {
 } from 'lucide-vue-next'
 import { useAiPanelRuntimeContext } from '@/services/ai/aiPanelContext'
 
-defineProps<{
+const props = defineProps<{
   projectFilesAvailable?: boolean
   projectFilesActive?: boolean
 }>()
-defineEmits<{
+const emit = defineEmits<{
   toggleProjectFiles: []
+  activateAiSurface: []
 }>()
 
 const {
@@ -283,6 +284,35 @@ const {
   visibleConversationTabs,
   workspace
 } = useAiPanelRuntimeContext()
+
+const activateAiSurface = () => {
+  if (props.projectFilesActive) emit('activateAiSurface')
+}
+
+const selectPanelMode = async (mode: 'classic' | 'codex') => {
+  const selected = await selectAiPanelMode(mode)
+  if (selected !== false) activateAiSurface()
+}
+
+const activateClassicConversation = (conversationId: string) => {
+  activateAiSurface()
+  restoreConversationFromTab(conversationId)
+}
+
+const activateCodexConversation = (conversationId: string) => {
+  activateAiSurface()
+  selectCodexConversation(conversationId)
+}
+
+const createClassicConversation = () => {
+  activateAiSurface()
+  createNewAiConversation()
+}
+
+const createCodexConversation = () => {
+  activateAiSurface()
+  createNewCodexConversation()
+}
 
 const codexTabRefs = new Map<string, HTMLElement>()
 const moreActionsTriggerRef = ref<HTMLElement | null>(null)

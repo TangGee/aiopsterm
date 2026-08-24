@@ -1,7 +1,13 @@
 <template>
   <aside
     class="ai-panel"
-    :class="[{ 'agent-mode': agentMode }, `mode-${aiPanelMode}`]"
+    :class="[
+      {
+        'agent-mode': agentMode,
+        'project-files-active': projectFilesActive
+      },
+      `mode-${aiPanelMode}`
+    ]"
     tabindex="-1"
     @click="closePopups()"
     @dragenter.prevent="handleDragEnter"
@@ -15,22 +21,23 @@
         :project-files-available="projectFilesAvailable"
         :project-files-active="projectFilesActive"
         @toggle-project-files="$emit('toggleProjectFiles')"
+        @activate-ai-surface="$emit('closeProjectFiles')"
       />
     </div>
 
-    <AiPanelCodexShell />
+    <AiPanelCodexShell v-show="!projectFilesActive" />
 
-    <AiPanelClassicConversation />
+    <AiPanelClassicConversation v-show="!projectFilesActive" />
 
     <span
-      v-if="aiPanelMode === 'classic' && chatExportNotice"
+      v-if="!projectFilesActive && aiPanelMode === 'classic' && chatExportNotice"
       class="ai-operation-notice"
       data-testid="ai-chat-export-notice"
     >
       {{ chatExportNotice }}
     </span>
 
-    <AiPanelClassicComposer />
+    <AiPanelClassicComposer v-show="!projectFilesActive" />
 
     <AiPanelCommandAuditDialog />
 
@@ -38,7 +45,6 @@
       <ProjectFilesPanel
         v-if="projectFilesActive"
         class="project-files-drawer"
-        :class="{ 'project-files-drawer-codex': aiPanelMode === 'codex' }"
         :session="projectFilesSession"
         @close="$emit('closeProjectFiles')"
       />

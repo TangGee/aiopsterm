@@ -124,6 +124,52 @@ describe('AiPanelHeader compact controls', () => {
     expect(wrapper.get('[data-testid="ai-project-files-toggle"]').attributes('aria-pressed')).toBe('true')
   })
 
+  it('returns to the AI surface when a conversation action is selected from project files', async () => {
+    context.runtime.visibleConversationTabs.value = [{ id: 'classic-1', title: 'Audit', favorite: false }]
+    context.runtime.workspace.selectedConversationId = 'classic-1'
+    context.runtime.selectAiPanelMode.mockResolvedValue(true)
+    const wrapper = mount(AiPanelHeader, {
+      props: {
+        projectFilesAvailable: true,
+        projectFilesActive: true
+      }
+    })
+
+    await wrapper.get('[data-testid="ai-conversation-tab"]').trigger('click')
+    expect(context.runtime.restoreConversationFromTab).toHaveBeenCalledWith('classic-1')
+    expect(wrapper.emitted('activateAiSurface')).toHaveLength(1)
+
+    context.runtime.panelModeMenuOpen.value = true
+    await wrapper.vm.$nextTick()
+    await wrapper.get('[data-testid="ai-mode-codex"]').trigger('click')
+    expect(context.runtime.selectAiPanelMode).toHaveBeenCalledWith('codex')
+    expect(wrapper.emitted('activateAiSurface')).toHaveLength(2)
+
+    await wrapper.get('[data-testid="ai-new-chat"]').trigger('click')
+    expect(context.runtime.createNewAiConversation).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('activateAiSurface')).toHaveLength(3)
+  })
+
+  it('returns to the AI surface when a Codex conversation is selected from project files', async () => {
+    context.runtime.aiPanelMode.value = 'codex'
+    context.runtime.activeCodexConversationId.value = 'codex-1'
+    context.runtime.codexConversations.value = [{ id: 'codex-1', title: 'Codex CLI' }]
+    const wrapper = mount(AiPanelHeader, {
+      props: {
+        projectFilesAvailable: true,
+        projectFilesActive: true
+      }
+    })
+
+    await wrapper.get('[data-testid="ai-codex-tab"]').trigger('click')
+    expect(context.runtime.selectCodexConversation).toHaveBeenCalledWith('codex-1')
+    expect(wrapper.emitted('activateAiSurface')).toHaveLength(1)
+
+    await wrapper.get('[data-testid="ai-codex-new"]').trigger('click')
+    expect(context.runtime.createNewCodexConversation).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('activateAiSurface')).toHaveLength(2)
+  })
+
   it('puts Codex target-link and restart actions under More and supports zero tabs', async () => {
     context.runtime.aiPanelMode.value = 'codex'
     context.runtime.currentAiPanelModeLabel.value = 'Codex CLI'

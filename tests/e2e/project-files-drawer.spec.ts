@@ -3,7 +3,7 @@ import { mkdir, readFile, rm, writeFile } from 'fs/promises'
 import os from 'os'
 import path from 'path'
 
-test('project files uses a contextual drawer inside the persistent AI panel', async () => {
+test('project files switches the persistent AI panel content surface', async () => {
   test.setTimeout(120_000)
   const runId = Date.now()
   const userDataDir = path.join(os.tmpdir(), `aiopsterm-e2e-project-files-user-${runId}`)
@@ -16,7 +16,7 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
   await writeFile(path.join(secondProjectRoot, 'lib', 'index.ts'), 'export const second = true\n', 'utf8')
 
   const app = await electron.launch({
-    args: ['.'],
+    args: ['.', '--lang=zh-CN'],
     env: {
       ...process.env,
       NODE_ENV: 'test',
@@ -37,7 +37,7 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
       content: '*, *::before, *::after { animation-duration: 0s !important; transition-duration: 0s !important; }'
     })
 
-    await page.locator('.side-rail .rail-button[title="设置"]').click()
+    await page.locator('.side-rail .rail-button[data-module-key="settings"]').click()
     await expect(page.locator('.settings-bg-tile.preset').first()).toBeVisible()
     await page.locator('.settings-bg-tile.preset').nth(1).click()
     await expect(page.locator('.app-shell')).toHaveClass(/has-app-background/)
@@ -85,7 +85,7 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
       throw new Error(restoredSessionResult.errorMessage || 'Unable to publish restorable managed AI session.')
     }
 
-    await page.locator('.side-rail .rail-button[title="AI 会话"]').click()
+    await page.locator('.side-rail .rail-button[data-module-key="aiSessions"]').click()
     const restoredSessionRow = page.locator('.ai-session-row').filter({
       has: page.locator('.ai-session-row-title').getByText('Restored project files E2E', { exact: true })
     })
@@ -94,10 +94,10 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
     await expect(page.locator('.terminal-pane.active .xterm-host')).toBeVisible()
     const restoredToggle = page.getByTestId('ai-project-files-toggle')
     await expect(restoredToggle).toBeVisible()
-    await restoredToggle.click()
+    if (await restoredToggle.getAttribute('aria-pressed') !== 'true') await restoredToggle.click()
+    await expect(restoredToggle).toHaveAttribute('aria-pressed', 'true')
     const restoredDrawer = page.locator('.project-files-drawer')
     await expect(restoredDrawer.locator('.project-files-header-title strong')).toHaveText(path.basename(projectRoot))
-    await restoredDrawer.getByTestId('project-files-close').click()
 
     await page.locator('.side-rail .rail-button[data-module-key="workspace"]').click()
     await page.locator('.workspace-search input').fill('127.0.0.1')
@@ -132,7 +132,7 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
     }, { projectRoot, runId, terminal: firstTerminal })
     if (!firstResult.ok) throw new Error(firstResult.errorMessage || 'Unable to publish managed AI session.')
 
-    await page.locator('.side-rail .rail-button[title="AI 会话"]').click()
+    await page.locator('.side-rail .rail-button[data-module-key="aiSessions"]').click()
     const sessionRow = page.locator('.ai-session-row').filter({
       has: page.locator('.ai-session-row-title').getByText('Project files E2E', { exact: true })
     })
@@ -143,7 +143,7 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
 
     const toggle = page.getByTestId('ai-project-files-toggle')
     await expect(toggle).toBeVisible()
-    await toggle.click()
+    if (await toggle.getAttribute('aria-pressed') !== 'true') await toggle.click()
     await expect(toggle).toHaveAttribute('aria-pressed', 'true')
 
     const drawer = page.locator('.project-files-drawer')
@@ -165,8 +165,17 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
     })
     expect(drawerSurface.alpha).toBe(1)
     await expect(page.locator('.ai-header')).toBeVisible()
+    await expect(page.getByTestId('ai-codex-shell')).toBeHidden()
     await expect(drawer.locator('.project-files-header-title strong')).toHaveText(path.basename(projectRoot))
     await expect(drawer.locator('.project-files-tree-row').filter({ hasText: 'src' })).toBeVisible()
+
+    await toggle.click()
+    await expect(drawer).toHaveCount(0)
+    await expect(page.getByTestId('ai-codex-shell')).toBeVisible()
+    await expect(page.getByTestId('ai-codex-target-bar')).toBeVisible()
+    await toggle.click()
+    await expect(drawer).toBeVisible()
+    await expect(page.getByTestId('ai-codex-shell')).toBeHidden()
 
     await page.locator('.side-rail .rail-button[data-module-key="assets"]').click()
     await expect(page.locator('.right-assistant-panel')).toHaveCount(0)
@@ -180,7 +189,7 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
     const headerBox = await page.locator('.ai-header').boundingBox()
     const drawerBox = await drawer.boundingBox()
     expect(panelBox?.y).toBe(aiBox?.y)
-    expect(drawerBox!.y).toBeGreaterThan(headerBox!.y + headerBox!.height)
+    expect(drawerBox!.y).toBeCloseTo(headerBox!.y + headerBox!.height + 10, 0)
 
     await drawer.locator('.project-files-tree-row').filter({ hasText: 'src' }).click()
     const mainFileRow = drawer.locator('.project-files-tree-row').filter({ hasText: 'main.ts' })
