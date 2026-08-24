@@ -424,6 +424,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const normalized = normalizedRightAssistantTerminalId(terminalSessionId)
     return normalized ? rightAssistantSurfaceByTerminal.value[normalized] || 'ai' : 'ai'
   }
+  const hasRightAssistantSurfaceForTerminal = (terminalSessionId: string) => {
+    const normalized = normalizedRightAssistantTerminalId(terminalSessionId)
+    return Boolean(normalized && normalized in rightAssistantSurfaceByTerminal.value)
+  }
   const setRightAssistantSurfaceForTerminal = (
     terminalSessionId: string,
     surface: RightAssistantSurface
@@ -1479,6 +1483,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     closeIdlePanels,
     rightAssistantSurfaceByTerminal,
     rightAssistantSurfaceForTerminal,
+    hasRightAssistantSurfaceForTerminal,
     setRightAssistantSurfaceForTerminal,
     releaseRightAssistantSurfaceForTerminal,
     isLeftVisible,

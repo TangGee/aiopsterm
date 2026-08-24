@@ -70,10 +70,20 @@ const activeSessionSignature = computed(() => {
 })
 
 const activeTerminalSessionId = computed(() => activeManagedAiSession.value?.terminalSessionId || '')
+const rightAssistantSurface = computed(() => {
+  const terminalSessionId = activeTerminalSessionId.value
+  if (!terminalSessionId) return 'ai' as const
+  if (workspace.hasRightAssistantSurfaceForTerminal(terminalSessionId)) {
+    return workspace.rightAssistantSurfaceForTerminal(terminalSessionId)
+  }
+  // AI-linked terminals open on their project files by default. An explicit
+  // per-terminal choice remains authoritative after the user switches views.
+  return 'files' as const
+})
 const projectFilesActive = computed(() =>
   projectFilesAvailable.value &&
   projectFilesAvailableTerminalSessionId.value === activeTerminalSessionId.value &&
-  workspace.rightAssistantSurfaceForTerminal(activeTerminalSessionId.value) === 'files'
+  rightAssistantSurface.value === 'files'
 )
 
 const refreshProjectFilesAvailability = async (contextSignature: string) => {
