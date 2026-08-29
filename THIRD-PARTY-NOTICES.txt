@@ -1,0 +1,3 @@
+aiopsterm includes third-party software under their original licenses.
+
+License materials are included under resources/licenses/, vendor/xterm/, and the separately maintained codex/ repository. Release builds generate the exact dependency inventory and license evidence; run npm run build:cline-sidecar, npm run audit:cline-sidecar, and npm run audit:package-config.

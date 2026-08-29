@@ -9,8 +9,11 @@
     "email": "support@aiopsterm.com"
   },
   "homepage": "https://aiopsterm.com",
-  "license": "UNLICENSED",
-  "private": true,
+  "repository": { "type": "git", "url": "git+ssh://git@gitee.com/tanggee2/aiopsterm.git" },
+  "bugs": { "url": "https://gitee.com/tanggee2/aiopsterm/issues" },
+  "keywords": ["terminal", "ssh", "devops", "ai", "mcp", "electron"],
+  "license": "Apache-2.0",
+  "private": false,
   "scripts": {
     "dev": "npm run native:ensure:electron && electron-vite dev",
     "start": "npm run native:ensure:electron && electron-vite preview",
