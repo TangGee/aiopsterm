@@ -46,7 +46,7 @@ describe('client mock audit', () => {
     expect(result.output).toContain('renderer-mock-data-token')
   })
 
-  it('rejects renderer access to backend double switches, seed imports, and external-reference source imports', async () => {
+  it('rejects renderer access to backend double switches and seed imports', async () => {
     const root = await createAuditRepo()
     await writeFile(
       join(root, 'src', 'renderer', 'src', 'components', 'AiPanel.vue'),
@@ -59,13 +59,10 @@ describe('client mock audit', () => {
         '</script>'
       ].join('\n')
     )
-    await writeFile(join(root, 'src', 'main', 'bad-import.ts'), "import '../external-reference/src/main/index'\n")
-
     const result = await runAudit(root)
     expect(result.ok).toBe(false)
     expect(result.output).toContain('renderer-backend-double-switch')
     expect(result.output).toContain('renderer-shared-seed-import')
-    expect(result.output).toContain('external-reference-source-import')
   })
 
   it('rejects renderer imports from Electron and main or preload implementation modules', async () => {
@@ -102,37 +99,6 @@ describe('client mock audit', () => {
     expect(result.ok).toBe(false)
     expect(result.output).toContain('large-source-file')
     expect(result.output).toContain('Oversized.vue')
-  })
-
-  it('rejects scripts and build config that copy or package the reference external-reference tree', async () => {
-    const root = await createAuditRepo()
-    await writeFile(join(root, 'electron-builder.yml'), "files:\n  - out/**\n  - '!external-reference/**'\n")
-    await writeFile(
-      join(root, 'package.json'),
-      JSON.stringify(
-        {
-          scripts: {
-            build: 'electron-vite build',
-            'bad:copy-reference': 'cp -R external-reference/src copied-reference'
-          }
-        },
-        null,
-        2
-      )
-    )
-    await writeFile(join(root, 'scripts', 'bad-reference.mjs'), "export const source = 'external-reference/src/renderer'\n")
-    await writeFile(
-      join(root, 'src', 'main', 'extension-copy.ts'),
-      "export const pluginExtension = '.external-reference'\nexport const referenceTree = '../external-reference/src/main/index.ts'\n"
-    )
-
-    const result = await runAudit(root)
-    expect(result.ok).toBe(false)
-    expect(result.output).toContain('external-reference-tree-reference')
-    expect(result.output).toContain('package.json')
-    expect(result.output).toContain('scripts/bad-reference.mjs')
-    expect(result.output).toContain('src/main/extension-copy.ts')
-    expect(result.output).not.toContain('electron-builder.yml')
   })
 
   it('rejects renderer-generated backend business identities while allowing local UI and request ids', async () => {

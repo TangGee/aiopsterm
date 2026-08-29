@@ -272,7 +272,7 @@ type AssetExportWriteResult = Awaited<ReturnType<NonNullable<AssetExportRuntime[
 const isAssetExportWriteMetadata = (value: AssetExportWriteResult): value is Exclude<AssetExportWriteResult, void> =>
   Boolean(value && typeof value === 'object' && !Array.isArray(value))
 
-export const assetExportFileName = (now = new Date()) => `external-reference-assets-${now.toISOString().slice(0, 10)}.json`
+export const assetExportFileName = (now = new Date()) => `aiopsterm-assets-${now.toISOString().slice(0, 10)}.json`
 
 export const assetExportPayload = (asset: AiopsAssetRecord): AiopsAssetExportPayload => ({
   username: asset.username,

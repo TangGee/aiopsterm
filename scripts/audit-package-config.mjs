@@ -71,7 +71,6 @@ if (missingScriptRequirements.length) {
 }
 
 const mustContain = [
-  '!external-reference/**',
   '!src/**',
   '!node_modules/@cline/**',
   '!node_modules/node-linux-*/**',

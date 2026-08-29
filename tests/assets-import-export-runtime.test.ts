@@ -103,10 +103,10 @@ describe('assetsImportExportRuntime', () => {
     ])
     const { runtime, saveAsset } = createRuntime([localAsset, asset({})], content)
 
-    const preview = await runtimeModule.previewAssetImportRuntime({ filePath: '/tmp/external-reference-assets.json' }, runtime)
+    const preview = await runtimeModule.previewAssetImportRuntime({ filePath: '/tmp/aiopsterm-assets.json' }, runtime)
 
     expect(preview.ok).toBe(true)
-    expect(preview.data).toMatchObject({ fileName: 'external-reference-assets.json', duplicateCount: 1 })
+    expect(preview.data).toMatchObject({ fileName: 'aiopsterm-assets.json', duplicateCount: 1 })
     expect(preview.data?.assets).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ duplicateId: 'asset-1', title: 'prod-bastion-imported' }),
@@ -114,12 +114,12 @@ describe('assetsImportExportRuntime', () => {
       ])
     )
 
-    const skipped = await runtimeModule.confirmAssetImportRuntime({ filePath: '/tmp/external-reference-assets.json', overwrite: false }, runtime)
+    const skipped = await runtimeModule.confirmAssetImportRuntime({ filePath: '/tmp/aiopsterm-assets.json', overwrite: false }, runtime)
     expect(skipped.ok).toBe(true)
     expect(skipped.data).toMatchObject({ imported: 1, skipped: 1, created: 1, updated: 0 })
     expect(saveAsset).toHaveBeenCalledTimes(1)
 
-    const overwritten = await runtimeModule.confirmAssetImportRuntime({ filePath: '/tmp/external-reference-assets.json', overwrite: true }, runtime)
+    const overwritten = await runtimeModule.confirmAssetImportRuntime({ filePath: '/tmp/aiopsterm-assets.json', overwrite: true }, runtime)
     expect(overwritten.ok).toBe(true)
     expect(overwritten.data).toMatchObject({ imported: 2, skipped: 0, created: 0, updated: 2 })
   })
@@ -168,7 +168,7 @@ describe('assetsImportExportRuntime', () => {
     const selected = runtimeModule.resolveAssetExportSelection({ assetIds: ['local-127-1', 'asset-1', 'org-1'] }, [localAsset, asset({}), asset({ id: 'org-1', asset_type: 'organization' })])
 
     expect(selected).toHaveLength(1)
-    expect(runtimeModule.assetExportFileName(new Date('2026-06-10T00:00:00.000Z'))).toBe('external-reference-assets-2026-06-10.json')
+    expect(runtimeModule.assetExportFileName(new Date('2026-06-10T00:00:00.000Z'))).toBe('aiopsterm-assets-2026-06-10.json')
     expect(runtimeModule.assetExportPayload(selected[0])).toEqual({
       username: 'ops',
       password: '',
@@ -210,7 +210,7 @@ describe('assetsImportExportRuntime', () => {
       ok: true,
       data: {
         exported: 1,
-        fileName: 'external-reference-assets-2026-06-10.json',
+        fileName: 'aiopsterm-assets-2026-06-10.json',
         filePath,
         bytes: expect.any(Number)
       }

@@ -16,7 +16,7 @@ This plan covers:
 - transient IPC sockets and named pipes;
 - macOS and Windows packaging/readiness gaps.
 
-`external-reference/` remains reference-only and must not be imported, copied, built from, or packaged into aiopsterm.
+Reference-only source trees must not be imported, copied, built from, or packaged into aiopsterm.
 
 ## Current Ownership
 
@@ -100,7 +100,7 @@ The exact `electron-store` filename can vary by Electron Store behavior, but the
 - Control socket, Codex bridge, external Codex MCP bridge, and AI agent socket already distinguish Windows named pipes from Unix socket files.
 - Local terminal shell defaults, executable lookup, socket path construction, and renderer file-browser path rules are routed through small platform helpers instead of broad compatibility branches.
 - File browser paths use native local Windows paths only for local sessions; remote and SFTP paths keep POSIX semantics even when the app runs on Windows.
-- Packaged helper scripts are explicit `extraResources`, and `electron-builder.yml` excludes `external-reference/**`.
+- Packaged helper scripts are explicit `extraResources`, and `electron-builder.yml` excludes reference-only source trees.
 - The Codex runtime has target triples for Linux, macOS, and Windows. The npm `build:codex` entrypoint is a Node dispatcher: Linux/macOS continue through the existing shell build path, while Windows invokes Codex's Python package builder from Node against the MSVC target and keeps `AIOPSTERM_CODEX_PACKAGE_DIR` / `AIOPSTERM_CODEX_BIN` as cache/custom-package overrides.
 - Linux package auditing checks Codex binary presence, node-pty pruning, desktop protocol registration, and artifact shape.
 - `audit:packaged-app` provides a cross-platform unpacked-app resource audit for Linux, macOS, and Windows; `audit:linux-package` remains the deeper Linux installer/artifact audit.
@@ -250,7 +250,7 @@ This is not a critical data bug, but for macOS/Windows polish the target should 
 - Treat `safeStorage` ciphertext as device/user-bound unless a dedicated export flow says otherwise.
 - Never decrypt saved credentials while hydrating asset, KeyChain, SSH Agent option, or database catalog lists. A saved system credential may request OS authorization only when the user connects or opens its secret-bearing edit detail.
 - `AIOPSTERM_CREDENTIAL_STORAGE=local|system` overrides the default for both asset and database credentials. `AIOPSTERM_ASSETS_CREDENTIAL_STORAGE` and `AIOPSTERM_DATABASE_CREDENTIAL_STORAGE` provide domain-specific overrides. Existing `as1:`/`ds1:` system ciphertext remains readable after selecting local storage and is migrated only after an intentional secret access and subsequent save.
-- Keep `external-reference/` excluded from imports, packaging, and build inputs.
+- Keep reference-only source trees excluded from imports, packaging, and build inputs.
 
 ## Recommended Next Implementation Order
 

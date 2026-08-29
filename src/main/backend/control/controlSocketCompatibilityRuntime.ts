@@ -58,8 +58,8 @@ const fail = (errorCode: string, errorMessage: string, data?: Record<string, unk
 const cloudUnsupportedData = (method: string, extra: Record<string, unknown> = {}) => ({
   ...extra,
   unsupported: true,
-  unsupportedReason: 'aiopsterm does not implement control_compat Cloud VM or remote device registry services.',
-  unsupported_reason: 'aiopsterm does not implement control_compat Cloud VM or remote device registry services.',
+  unsupportedReason: 'Cloud VM and remote device registry services are not supported.',
+  unsupported_reason: 'Cloud VM and remote device registry services are not supported.',
   method
 })
 
@@ -71,7 +71,7 @@ export const authStatusPayload = () => ({
   configured: false,
   local_control_socket: true,
   unsupported: true,
-  unsupported_reason: 'aiopsterm does not use control_compat Stack Auth for the local control socket.'
+  unsupported_reason: 'Cloud authentication is not used by the local control socket.'
 })
 
 export const unsupportedAuthStatusPayload = (action: 'begin_sign_in' | 'sign_out') => ({
@@ -80,8 +80,8 @@ export const unsupportedAuthStatusPayload = (action: 'begin_sign_in' | 'sign_out
   completed: false,
   unsupported_reason:
     action === 'begin_sign_in'
-      ? 'aiopsterm does not use control_compat Stack Auth for the local control socket.'
-      : 'aiopsterm has no control_compat Stack Auth session to sign out from.'
+      ? 'Cloud authentication is not used by the local control socket.'
+      : 'The local control socket has no cloud authentication session to sign out from.'
 })
 
 export const feedbackSubmitPayload = (params: Record<string, unknown>) => {
@@ -203,7 +203,7 @@ const validateCustomSidebarFile = async (file: { name: string; path: string; kin
     return {
       ...file,
       ok: false,
-      error: 'aiopsterm does not execute or interpret control_compat custom Swift sidebars through the control socket.'
+      error: 'Custom Swift sidebars are not executed or interpreted through the control socket.'
     }
   }
   try {
@@ -235,8 +235,8 @@ const customSidebarReport = async (name?: string) => {
     error_count: entries.filter((entry) => !entry.ok).length,
     sidebars: entries,
     unsupported: true,
-    unsupportedReason: 'aiopsterm does not implement control_compat custom sidebar rendering or selection.',
-    unsupported_reason: 'aiopsterm does not implement control_compat custom sidebar rendering or selection.'
+    unsupportedReason: 'Custom sidebar rendering and selection are not supported.',
+    unsupported_reason: 'Custom sidebar rendering and selection are not supported.'
   }
 }
 

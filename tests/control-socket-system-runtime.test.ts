@@ -116,7 +116,7 @@ describe('controlSocketSystemRuntime', () => {
         data: expect.objectContaining({
           sample: expect.objectContaining({ source: 'node.process.memoryUsage+os' }),
           memory_diagnostic: expect.objectContaining({ children: expect.objectContaining({ groups: expect.any(Array) }) }),
-          compatibility: expect.objectContaining({ control_compat_shape: true }),
+          compatibility: expect.objectContaining({ cmux_shape: true }),
           snapshot
         })
       })

@@ -239,7 +239,7 @@ describe('settings preferences backend boundary', () => {
     })
   })
 
-  it('migrates External reference-shaped flat shortcuts and legacy custom instructions behind the backend boundary', async () => {
+  it('migrates flat shortcuts and legacy custom instructions behind the backend boundary', async () => {
     const backend = await loadBackend()
     const result = backend.getSettingsPreferences({
       shortcuts: {

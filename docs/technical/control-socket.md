@@ -1,6 +1,6 @@
 # aiopsterm Control Socket
 
-aiopsterm exposes a local newline-delimited JSON control socket for automation that needs to operate on terminal panels opened by aiopsterm. This is the control_compat-style automation layer: scripts talk to a socket, the main process handles routing, and renderer windows provide UI-only state such as terminal panels and xterm screen text.
+aiopsterm exposes a local newline-delimited JSON control socket for automation that needs to operate on terminal panels opened by aiopsterm. This is the compatibility automation layer: scripts talk to a socket, the main process handles routing, and renderer windows provide UI-only state such as terminal panels and xterm screen text.
 
 ## Scope
 
@@ -26,7 +26,7 @@ The bundled CLI helper also has a no-socket discovery command:
 The notification slice adds these generic notification primitives:
 
 - `notification.create`: create an unread notification.
-- `notification.create_for_caller`: create an unread notification targeted from a control_compat-style `caller` object when it includes a surface/panel id, otherwise fall back to the normal notification target.
+- `notification.create_for_caller`: create an unread notification targeted from a compatibility `caller` object when it includes a surface/panel id, otherwise fall back to the normal notification target.
 - `notification.create_for_surface`: create an unread notification targeted at a visible surface id.
 - `notification.create_for_target`: create an unread notification targeted at a workspace id plus visible surface id.
 - `notification.list`: list queued notifications.
@@ -64,14 +64,14 @@ The workspace metadata slice adds read-only model snapshots:
 - `surface.report_shell_state`: record whether a surface shell is at `prompt`, `running`, or `unknown`.
 - `surface.ports_kick`: record that automation requested a port-scan refresh for a surface. aiopsterm currently stores the kick metadata but does not synthesize listening-port results.
 
-The control_compat system/window/settings compatibility slice adds local app automation:
+The system/window/settings compatibility slice adds local app automation:
 
 - `auth.login`: acknowledge the local control socket auth handshake. aiopsterm currently returns `authenticated=true` and `required=false` because access is scoped to the local per-process socket.
-- `auth.status`: return a control_compat-shaped auth status for automation probes. aiopsterm marks it unauthenticated/unconfigured because the local control socket does not use control_compat Stack Auth.
-- `auth.sign_in_url`: return an explicit unsupported local response with `url=null`; aiopsterm does not expose a control_compat Stack Auth sign-in flow.
-- `auth.begin_sign_in` and `auth.sign_out`: recognized control_compat auth-flow controls that return the same unauthenticated local status plus `unsupported=true`. aiopsterm does not mutate cloud auth state through the control socket.
-- `system.tree`: build a control_compat-style window/workspace/pane/surface tree from the renderer `workspace.snapshot` read model. aiopsterm maps the shared main work panel to one selected workspace named `main`.
-- `system.top`: return a control_compat-shaped task-manager payload with `sample`, `totals`, `memory_diagnostic`, `program_totals`, `coding_agents`, and `windows`. aiopsterm samples the main Node/Electron process and OS memory through Node APIs; it does not claim control_compat's macOS `proc_pidinfo` process tree attribution.
+- `auth.status`: return a protocol-shaped auth status for automation probes. aiopsterm marks it unauthenticated/unconfigured because the local control socket does not use cloud authentication.
+- `auth.sign_in_url`: return an explicit unsupported local response with `url=null`; aiopsterm does not expose a cloud authentication sign-in flow.
+- `auth.begin_sign_in` and `auth.sign_out`: recognized auth-flow controls that return the same unauthenticated local status plus `unsupported=true`. aiopsterm does not mutate cloud auth state through the control socket.
+- `system.tree`: build a compatibility window/workspace/pane/surface tree from the renderer `workspace.snapshot` read model. aiopsterm maps the shared main work panel to one selected workspace named `main`.
+- `system.top`: return a protocol-shaped task-manager payload with `sample`, `totals`, `memory_diagnostic`, `program_totals`, `coding_agents`, and `windows`. aiopsterm samples the main Node/Electron process and OS memory through Node APIs; it does not claim the compatibility protocol's macOS `proc_pidinfo` process tree attribution.
 - `system.memory`: return the memory-focused subset of `system.top`, including the same renderer tree when available and a Node/OS memory diagnostic.
 - `window.list`, `window.current`, and `window.focus`: inspect and focus existing Electron windows through the main-process runtime.
 - `window.create`, `window.close`, and `window.display`: recognized compatibility controls that return `unsupported=true` rather than creating, closing, or moving native windows unexpectedly.
@@ -80,26 +80,26 @@ The control_compat system/window/settings compatibility slice adds local app aut
 - `settings.get`: read a config value by a dot-separated path such as `terminal.fontSize`.
 - `settings.put`: save one config value by a dot-separated path. The renderer converts the path into a structured `Partial<UserConfig>` patch and persists it through the normal settings save bridge.
 - `feedback.open`: reuse the existing local feedback report action.
-- `feedback.submit`: validate control_compat-style feedback fields (`email`, `body`, optional image paths) and return a local-only accepted response. aiopsterm does not submit to an external feedback service through the control socket.
-- `vm.list`, `vm.create`, `vm.destroy`, `vm.exec`, `vm.ssh_info`, and `vm.attach_info`: recognized control_compat Cloud VM controls. aiopsterm validates the same required identifiers/commands where useful, then returns `unsupported=true` instead of contacting control_compat's Cloud VM API or creating hidden infrastructure.
-- `remotes.list`, `remotes.add`, and `remotes.remove`: recognized control_compat remote-device registry controls. aiopsterm returns an empty unsupported registry or validates `name` / `routes` / `target` before returning `unsupported=true`; this is separate from aiopsterm's normal SSH host inventory.
-- `sidebar.custom.validate`, `sidebar.custom.reload`, and `sidebar.custom.select`: recognized control_compat custom-sidebar controls. aiopsterm looks under `<userData>/custom-sidebars` for `<name>.json` / `<name>.swift` files (`.swift` preferred when both exist), parses JSON syntax, and returns `unsupported=true` because aiopsterm does not implement control_compat's custom sidebar renderer. Swift files are never executed or interpreted.
-- `extension.sidebar.snapshot`: expose a control_compat-style sidebar feed derived from `workspace.snapshot`.
+- `feedback.submit`: validate compatibility feedback fields (`email`, `body`, optional image paths) and return a local-only accepted response. aiopsterm does not submit to an external feedback service through the control socket.
+- `vm.list`, `vm.create`, `vm.destroy`, `vm.exec`, `vm.ssh_info`, and `vm.attach_info`: recognized Cloud VM controls. aiopsterm validates the same required identifiers/commands where useful, then returns `unsupported=true` instead of contacting the compatibility protocol's Cloud VM API or creating hidden infrastructure.
+- `remotes.list`, `remotes.add`, and `remotes.remove`: recognized compatibility protocol remote-device registry controls. aiopsterm returns an empty unsupported registry or validates `name` / `routes` / `target` before returning `unsupported=true`; this is separate from aiopsterm's normal SSH host inventory.
+- `sidebar.custom.validate`, `sidebar.custom.reload`, and `sidebar.custom.select`: recognized custom-sidebar controls. aiopsterm looks under `<userData>/custom-sidebars` for `<name>.json` / `<name>.swift` files (`.swift` preferred when both exist), parses JSON syntax, and returns `unsupported=true` because aiopsterm does not implement the compatibility protocol's custom sidebar renderer. Swift files are never executed or interpreted.
+- `extension.sidebar.snapshot`: expose a compatibility sidebar feed derived from `workspace.snapshot`.
 - `app.focus_override.set` and `app.simulate_active`: accepted app-focus compatibility controls. They update control metadata and focus the active aiopsterm window where applicable.
 
-The mobile terminal compatibility slice maps control_compat's mobile-host data-plane verbs onto aiopsterm's shared terminal panel model:
+The mobile terminal compatibility slice maps the compatibility protocol's mobile-host data-plane verbs onto aiopsterm's shared terminal panel model:
 
 - `mobile.host.status`: return local app/process identity, advertised mobile-terminal capability tokens, visible workspace/terminal counts, active surface id, and the current renderer snapshot when available.
 - `mobile.workspace.list`: return the same shared main workspace and visible terminal/surface list in a mobile-friendly shape. The bare `workspace.list` continues to use the normal workspace list payload.
 - `mobile.terminal.create` / `terminal.create`: create a visible local terminal surface through the existing `surface.create` path.
 - `mobile.terminal.input` / `terminal.input`: write raw typed text to the resolved aiopsterm terminal session. Targets may use `surface_id`, `terminal_id`, `panelId`, or `session_id` style selectors.
 - `mobile.terminal.paste` / `terminal.paste`: send bracketed paste text to the resolved terminal and optionally submit it. Supported `submit_key` values are `return`, `enter`, `ctrl+enter`, and `none`.
-- `mobile.terminal.replay` / `terminal.replay`: return a cold-attach text snapshot from the xterm buffer, plus the effective terminal `columns` and `rows`. aiopsterm uses `snapshot_format=aiopsterm.text` instead of control_compat's Ghostty render-grid payload.
+- `mobile.terminal.replay` / `terminal.replay`: return a cold-attach text snapshot from the xterm buffer, plus the effective terminal `columns` and `rows`. aiopsterm uses `snapshot_format=aiopsterm.text` instead of the compatibility protocol's Ghostty render-grid payload.
 - `mobile.terminal.viewport` / `terminal.viewport`: echo the selected terminal's effective grid and the caller's reported viewport size. This is currently observational; aiopsterm does not resize shared terminals to the smallest mobile viewport.
 - `mobile.terminal.scroll` / `terminal.scroll` and `mobile.terminal.mouse` / `terminal.mouse`: recognized compatibility probes that return `unsupported=true`, because aiopsterm does not expose xterm scroll/mouse gesture injection through the control socket yet.
 - `mobile.terminal.paste_image` / `terminal.paste_image`: recognized compatibility probe that returns `unsupported=true`; image payload materialization is not implemented in aiopsterm's control socket.
 
-The mobile chat compatibility slice maps control_compat's agent-chat RPC names onto aiopsterm's managed AI sessions discovered from aiopsterm-owned local connection terminals:
+The mobile chat compatibility slice maps the compatibility protocol's agent-chat RPC names onto aiopsterm's managed AI sessions discovered from aiopsterm-owned local connection terminals:
 
 - `mobile.chat.sessions`: list chat-capable managed AI sessions, optionally filtered by `workspace_id`, `source` / `agent_kind`, and `include_ended`.
 - `mobile.chat.history`: return a `ChatHistoryPage`-style page synthesized from safe managed-session event summaries. It does not expose raw hook payloads, terminal screen text, or typed input.
@@ -107,20 +107,20 @@ The mobile chat compatibility slice maps control_compat's agent-chat RPC names o
 - `mobile.chat.interrupt`: send Escape for a soft interrupt or Ctrl-C when `hard=true`.
 - `mobile.chat.answer`: send the 1-based digit corresponding to the requested zero-based `option_index`.
 - `chat.sessions.dump`: return debug-safe managed session summaries plus the mobile chat descriptor for each record.
-- `mobile.attach_ticket.create`: return a control_compat-shaped short-lived attach ticket for the local aiopsterm control socket. aiopsterm marks the response `unsupported_remote=true` because it does not run control_compat's mobile network listener.
+- `mobile.attach_ticket.create`: return a protocol-shaped short-lived attach ticket for the local aiopsterm control socket. aiopsterm marks the response `unsupported_remote=true` because it does not run the compatibility protocol's mobile network listener.
 
-The project/file compatibility slice maps control_compat project openers onto aiopsterm's shared main work panel:
+The project/file compatibility slice maps project openers onto aiopsterm's shared main work panel:
 
 - `markdown.open`: open a Knowledge file as a knowledge surface in the shared main work panel, with optional `line` / `startLine` and `endLine` jump metadata.
 - `file.open`: open one or more Knowledge files through `path` or `paths`.
 - `file.editor.open`: validate and open one or more existing absolute local text files as `local-file` surfaces in the shared main work panel. The main process canonicalizes paths, rejects directories, missing files, binary files, and files larger than 2 MiB, then dispatches valid paths to the renderer. Mixed valid and invalid input returns `LOCAL_EDITOR_FILE_OPEN_PARTIAL`: valid files remain open while the response and CLI exit status report failure.
 - `project.open`: create or focus a project compatibility surface. If `path` points to a Knowledge file, the file is opened; otherwise aiopsterm records project metadata on a terminal surface without creating an Xcode-style project navigator.
-- `project.set_tab`, `project.set_scheme`, `project.set_configuration`, `project.set_selected_target`, `project.set_selected_file`, and `project.set_settings_filter`: update renderer-owned project compatibility metadata for automation scripts that expect these control_compat methods.
+- `project.set_tab`, `project.set_scheme`, `project.set_configuration`, `project.set_selected_target`, `project.set_selected_file`, and `project.set_settings_filter`: update renderer-owned project compatibility metadata for automation scripts that expect these protocol methods.
 - `project.get_state`: return the stored project compatibility state. Xcode-only concepts such as schemes, targets, and build settings are marked with `unsupported=true` until aiopsterm has a native equivalent.
 
 The bundled `aiopen <path>...` shim resolves relative paths against the caller's current working directory and sends canonical absolute candidates through `file.editor.open`. Renderer local-file surfaces reuse the project-file editor's autosave and close-flush registry. Reads include a content hash, size, and modification time; writes use those values for optimistic conflict detection. Parent-directory watchers report external modification or deletion events so dirty editor content is never silently overwritten.
 
-The workspace group slice adds control_compat-style group metadata for the shared main work panel:
+The workspace group slice adds compatibility group metadata for the shared main work panel:
 
 - `workspace.group.list`: list automation-visible surface groups.
 - `workspace.group.create`: create a group over one or more current surfaces.
@@ -131,16 +131,16 @@ The workspace group slice adds control_compat-style group metadata for the share
 - `workspace.group.new_workspace`: create a new local terminal panel and add it to the group.
 - `workspace.group.focus`: focus the group anchor surface.
 
-The workspace remote compatibility slice maps control_compat remote-workspace controls to aiopsterm's visible SSH terminal panels:
+The workspace remote compatibility slice maps compatibility protocol remote-workspace controls to aiopsterm's visible SSH terminal panels:
 
 - `workspace.remote.status`: return the current remote summary for the shared main workspace.
 - `workspace.remote.configure`: register SSH metadata on a visible terminal surface. It does not connect by default; pass `auto_connect=true` or CLI `--connect` when the caller intentionally wants to open the SSH session.
 - `workspace.remote.reconnect`: start or restart the selected visible SSH terminal surface.
 - `workspace.remote.disconnect`: disconnect the selected visible SSH terminal surface. `clear=true` also removes the stored remote metadata from that surface.
 - `workspace.remote.foreground_auth_ready`: record foreground authentication readiness metadata without echoing auth tokens into events.
-- `workspace.remote.pty_sessions`: list visible aiopsterm SSH terminal panels in a control_compat-compatible session shape.
-- `workspace.remote.pty_close`, `workspace.remote.pty_detach`, `workspace.remote.pty_bridge`, and `workspace.remote.pty_resize`: recognized as compatibility commands but return `unsupported=true`, because aiopsterm does not expose control_compat's hidden remote PTY daemon. `pty_bridge` still validates `session_id` and returns an `attachment_id`; `pty_resize` validates `session_id`, `attachment_id`, `attachment_token`, `cols`, and `rows`, then returns `resized=false`.
-- `remote.tmux.sessions`, `remote.tmux.attach`, `remote.tmux.detach`, `remote.tmux.state`, `remote.tmux.mirror`, and `remote.tmux.window`: recognized as compatibility commands but return `unsupported=true`, because aiopsterm does not implement control_compat remote tmux control-mode mirroring in the control socket.
+- `workspace.remote.pty_sessions`: list visible aiopsterm SSH terminal panels in a protocol-compatible session shape.
+- `workspace.remote.pty_close`, `workspace.remote.pty_detach`, `workspace.remote.pty_bridge`, and `workspace.remote.pty_resize`: recognized as compatibility commands but return `unsupported=true`, because aiopsterm does not expose the compatibility protocol's hidden remote PTY daemon. `pty_bridge` still validates `session_id` and returns an `attachment_id`; `pty_resize` validates `session_id`, `attachment_id`, `attachment_token`, `cols`, and `rows`, then returns `resized=false`.
+- `remote.tmux.sessions`, `remote.tmux.attach`, `remote.tmux.detach`, `remote.tmux.state`, `remote.tmux.mirror`, and `remote.tmux.window`: recognized as compatibility commands but return `unsupported=true`, because aiopsterm does not implement compatibility protocol remote tmux control-mode mirroring in the control socket.
 
 This slice deliberately keeps remote execution visible. It does not create hidden SSH control streams, remote daemons, or background tmux mirrors. Automation that needs a remote shell should configure/reconnect a visible SSH panel and then use normal terminal controls against that panel.
 
@@ -153,7 +153,7 @@ The managed asset host slice adds aiopsterm-native SSH shortcuts over the same v
 
 The CLI alias `aiossh <managed-host>` maps to `asset.ssh.connect`. It is deliberately separate from `asset.save` so connection and host creation remain distinct workflows.
 
-The session restore slice adds control_compat-style saved layouts for the shared main work panel:
+The session restore slice adds compatibility saved layouts for the shared main work panel:
 
 - `session.save`: ask the active renderer to export the current work-panel layout and persist it.
 - `session.list`: list saved session snapshots.
@@ -171,13 +171,13 @@ The Agent Hibernation slice adds explicit managed-agent lifecycle controls:
 - `agent.hibernate`: hibernate one managed AI session by `sessionId`, with optional `source` when ids are ambiguous.
 - `agent.resume`: focus one managed AI session and write its stored resume command into the owning local terminal.
 
-The Agent Teams slice adds control_compat-style multi-agent launch primitives for aiopsterm local connection terminals:
+The Agent Teams slice adds compatibility multi-agent launch primitives for aiopsterm local connection terminals:
 
 - `agent.team.launch`: create one or more visible local terminal surfaces, start local shells, write each agent launch command through terminal command security, and group the created surfaces.
 
 This starts agents in terminals owned by aiopsterm's main work panel. It does not manage the embedded right-side Codex panel and does not use external OS terminals.
 
-The Agent Session slice adds control_compat-style local socket primitives for AI session manager records:
+The Agent Session slice adds compatibility local socket primitives for AI session manager records:
 
 - `agent.session.list`: list managed AI sessions, optionally filtered by `source`, `state`, `query`, or `needsInput`.
 - `agent.session.show` / `agent.session.get`: inspect one session by `sessionId`, with optional `source` when ids are ambiguous.
@@ -187,11 +187,11 @@ The Agent Session slice adds control_compat-style local socket primitives for AI
 - `agent.session.clear`: remove the managed AI session record.
 - `agent.session.bulk`: run `mark-handled`, `clear-ended`, or `clear-all` over managed AI session records, optionally filtered by source/session id.
 
-The Feed aliases expose the same managed AI queue with control_compat-style names:
+The Feed aliases expose the same managed AI queue with compatibility names:
 
 - `feed.list`: list sessions that currently need input. Passing `pending_only=false` over the raw socket lists all managed AI sessions, while the CLI keeps `feed list` focused on pending items unless `--all` is used.
-- `feed.jump`: resolve a control_compat-style `workstream_id` to a managed AI session, matching session id, request id, event id, panel id, terminal session id, or workspace id when present.
-- `feed.push`: accept a control_compat-style feed event and record it in the managed AI session store. aiopsterm returns immediately with `waited=false`; blocking hook decisions should be completed with the reply methods instead of keeping the control socket open.
+- `feed.jump`: resolve a compatibility `workstream_id` to a managed AI session, matching session id, request id, event id, panel id, terminal session id, or workspace id when present.
+- `feed.push`: accept a compatibility feed event and record it in the managed AI session store. aiopsterm returns immediately with `waited=false`; blocking hook decisions should be completed with the reply methods instead of keeping the control socket open.
 - `feed.permission.reply`: resolve a pending managed AI request by `request_id` and record a permission decision. Supported modes map to managed decisions: `once` -> `allow`, `always`/`all` -> `always`, `bypass` -> `bypass`, and `deny` -> `deny`.
 - `feed.question.reply`: resolve a pending question by `request_id` and record a text or selection reply.
 - `feed.exit_plan.reply`: resolve a pending plan request by `request_id` and record the selected mode. `bypassPermissions` maps to `bypass`, `deny` maps to `deny`, and accepted plan modes map to `allow`.
@@ -201,7 +201,7 @@ The Feed aliases expose the same managed AI queue with control_compat-style name
 
 `agent.sessions.*` and `ai.session.*` are accepted aliases for scripts that group these methods differently.
 
-The surface resume slice adds control_compat-style resume bindings for visible work-panel surfaces:
+The surface resume slice adds compatibility resume bindings for visible work-panel surfaces:
 
 - `surface.resume.set`: attach a resume command to the current or selected surface.
 - `surface.resume.get` / `surface.resume.show`: read the selected surface's resume binding.
@@ -211,23 +211,23 @@ The surface resume slice adds control_compat-style resume bindings for visible w
 - `surface.resume.clear`: remove a binding, optionally guarded by checkpoint/source.
 - `surface.resume.run`: explicitly write the stored command into the selected terminal through aiopsterm terminal command security.
 
-The surface action slice adds control_compat-style action dispatch for shared work-panel terminal surfaces:
+The surface action slice adds compatibility action dispatch for shared work-panel terminal surfaces:
 
 - `surface.action`, `tab.action`, and `workspace.action`: run supported actions against the selected surface or workspace. Implemented actions include `rename`, `clear_name`, `new_terminal_right`, `close_left`, `close_right`, `close_others`, and the detach-to-workspace aliases, which map to aiopsterm's visible terminal panel model.
 - `pin`, `unpin`, `mark_read`, and `mark_unread` currently return structured unsupported responses; aiopsterm has workspace-group pinning and AI/notification unread state, but not per-surface pin/unread state.
 
-The events slice adds a control_compat-style local JSONL stream for automation:
+The events slice adds a compatibility local JSONL stream for automation:
 
 - `events.stream` / `event.subscribe`: take over the socket connection and stream `ack`, replayed `event`, live `event`, and `heartbeat` frames.
 - `events.list`: list retained events for simple polling and tests.
-- `mobile.events.subscribe`: accept control_compat mobile-event subscription probes using `stream_id` plus `topics`, returning `already_subscribed` with idempotent replace semantics.
+- `mobile.events.subscribe`: accept mobile-event subscription probes using `stream_id` plus `topics`, returning `already_subscribed` with idempotent replace semantics.
 - `mobile.events.unsubscribe`: remove a registered mobile event subscription and return `removed`.
 
-The synchronization slice adds control_compat-style automation rendezvous:
+The synchronization slice adds compatibility automation rendezvous:
 
 - `sync.wait_for`: wait for or signal a named local token. `wait-for` and `wait_for` are aliases.
 
-The terminal buffer slice adds tmux/control_compat-style runtime text buffers:
+The terminal buffer slice adds tmux-compatible runtime text buffers:
 
 - `terminal.buffer.set`, `terminal.buffer.list`, `terminal.buffer.show`, `terminal.buffer.save`, `terminal.buffer.paste`: set, list, read, export, and paste named text buffers.
 
@@ -242,35 +242,35 @@ The terminal history slice adds renderer-owned scrollback cleanup:
 
 - `terminal.clear_history` / `surface.clear_history`: clear a selected terminal surface's visible buffer and retained panel output.
 
-The terminal respawn slice adds a control_compat-compatible restart-command bridge:
+The terminal respawn slice adds a protocol-compatible restart-command bridge:
 
 - `terminal.respawn` / `surface.respawn`: send a restart command to a selected terminal surface through terminal command security.
 
-The pane layout slice adds control_compat/tmux-style structural controls over the shared main work panel:
+The pane layout slice adds tmux-compatible structural controls over the shared main work panel:
 
 - `pane.break`: detach a surface from its current split group and keep it as a normal tab.
 - `pane.join`: attach a source surface next to a target surface, using `direction=right` or `direction=below`.
 - `pane.swap`: swap two surfaces' split placement metadata without swapping their terminal sessions or xterm buffers.
 - `pane.resize`: accepted as a compatibility command, but currently returns `unsupported=true` because aiopsterm split panes use an equal-size layout and do not store per-pane dimensions.
-- `workspace.next`, `workspace.previous`, `workspace.last`, `workspace.select`, `pane.focus`, `pane.last`, and `workspace.find`: control_compat/tmux-style navigation and lookup over the same shared main work panel.
+- `workspace.next`, `workspace.previous`, `workspace.last`, `workspace.select`, `pane.focus`, `pane.last`, and `workspace.find`: tmux-compatible navigation and lookup over the same shared main work panel.
 - `pane.list`, `workspace.create`, `surface.split`, `workspace.rename`, `workspace.close`, `surface.close`, `workspace.has_session`, and `workspace.select_layout`: tmux-compatible list/create/rename/close/layout verbs over the shared main work panel.
 - `pane.surfaces`: return the surface hosted by a selected shared-work-panel pane. In aiopsterm's current model a pane maps to one visible terminal/knowledge surface.
-- `new-workspace`, `current-workspace`, `select-workspace`, `close-workspace`, `list-panels`, `list-pane-surfaces`, `close-surface`, `new-split`, and `new-pane`: control_compat legacy aliases accepted by the CLI/backend and routed to the structured workspace, surface, and pane methods above. `new-pane` currently creates a split-compatible shared work-panel surface rather than a separate hidden pane container.
-- `surface.focus`, `surface.create`, and `pane.create`: structured control_compat primitives accepted by the CLI/backend and implemented by the existing shared main work panel. They create or focus aiopsterm-owned visible local terminal surfaces only.
+- `new-workspace`, `current-workspace`, `select-workspace`, `close-workspace`, `list-panels`, `list-pane-surfaces`, `close-surface`, `new-split`, and `new-pane`: legacy aliases accepted by the CLI/backend and routed to the structured workspace, surface, and pane methods above. `new-pane` currently creates a split-compatible shared work-panel surface rather than a separate hidden pane container.
+- `surface.focus`, `surface.create`, and `pane.create`: structured protocol primitives accepted by the CLI/backend and implemented by the existing shared main work panel. They create or focus aiopsterm-owned visible local terminal surfaces only.
 - `surface.report_tty`, `surface.report_shell_state`, and `surface.ports_kick`: terminal-side telemetry primitives. They update renderer-owned surface metadata and are exposed through `surface.list`, `surface.current`, and `workspace.snapshot`.
-- `surface.move`, `surface.reorder`, `surface.split_off`, and `surface.drag_to_split`: reorder visible surfaces or detach a split surface inside the shared main work panel. `surface.drag_to_split` is a control_compat-compatible alias that routes through the same renderer path as `surface.split_off`.
+- `surface.move`, `surface.reorder`, `surface.split_off`, and `surface.drag_to_split`: reorder visible surfaces or detach a split surface inside the shared main work panel. `surface.drag_to_split` is a protocol-compatible alias that routes through the same renderer path as `surface.split_off`.
 - `surface.refresh`, `surface.health`, and `surface.trigger_flash`: refit visible terminal surfaces, report surface render readiness, and visually flash/focus a selected surface.
 - `workspace.reorder`, `workspace.reorder_many`, and `workspace.equalize_splits`: reorder shared-work-panel surfaces or refit equal-size split panes. `workspace.move_to_window` is recognized but returns `unsupported=true` because aiopsterm currently exposes one main work panel per app window.
 - `workspace.prompt_submit`: writes the prompt text to the selected terminal surface through the existing terminal command security path. It may return `needs-approval` when the command security policy requires confirmation.
 
-The workspace metadata compatibility slice adds control_compat-style workspace metadata controls:
+The workspace metadata compatibility slice adds compatibility workspace metadata controls:
 
-- `workspace.env`: returns workspace environment metadata that was supplied through `workspace.create` / CLI `new-window --workspace-env KEY=VALUE`. Like control_compat, these values are not included in `workspace.list` or ordinary snapshot summaries except for key/count metadata.
+- `workspace.env`: returns workspace environment metadata that was supplied through `workspace.create` / CLI `new-window --workspace-env KEY=VALUE`. Like compatibility protocol, these values are not included in `workspace.list` or ordinary snapshot summaries except for key/count metadata.
 - `workspace.set_auto_title`: applies an automation-generated title to the selected visible panel only when the title is not user-owned. `probe=true` reports whether the target is user-owned without changing titles.
 
 aiopsterm records workspace env metadata for compatibility, but this slice does not inject those variables into already-running terminal sessions. Future terminal creation can decide explicitly whether to merge this metadata into launch environments.
 
-The sidebar metadata slice adds control_compat-style status channels for local automation:
+The sidebar metadata slice adds compatibility status channels for local automation:
 
 - `sidebar.status.set`, `sidebar.status.clear`, `sidebar.status.list`: manage keyed status entries.
 - `sidebar.progress.set`, `sidebar.progress.clear`: manage a workspace progress value.
@@ -287,7 +287,7 @@ The Agent Vault slice adds custom agent launch metadata for visible local-termin
 - `agent.vault.scan`: inspect descendants of aiopsterm visible local-terminal shell processes, match them against Vault registrations, and render resume/fork commands.
 - `agent.vault.remove`: remove one custom agent definition.
 
-Aliases are accepted for control_compat-compatible scripts where useful:
+Aliases are accepted for protocol-compatible scripts where useful:
 
 - `tree` and `top` map to `workspace.snapshot`.
 - `list_workspaces` and `list-workspaces` map to `workspace.list`.
@@ -298,7 +298,7 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `mobile events subscribe` and `mobile events unsubscribe` map to `mobile.events.subscribe` and `mobile.events.unsubscribe`.
 - `mobile chat sessions|history|send|interrupt|answer` maps to `mobile.chat.*`; `chat sessions dump` maps to `chat.sessions.dump`.
 - `mobile attach-ticket create` maps to `mobile.attach_ticket.create`.
-- `terminal create`, `terminal input`, `terminal paste`, `terminal replay`, and `terminal viewport` map to the matching control_compat-style terminal data-plane methods.
+- `terminal create`, `terminal input`, `terminal paste`, `terminal replay`, and `terminal viewport` map to the matching compatibility terminal data-plane methods.
 - `read-screen`, `capture-pane`, and `surface.read_text` map to `terminal.read_screen`.
 - `clear-history` and `surface.clear_history` map to `terminal.clear_history`.
 - `respawn-pane` and `surface.respawn` map to `terminal.respawn`.
@@ -501,7 +501,7 @@ aio context
 
 `system.capabilities`, `system.identify`, and CLI `rpc` are automation plumbing. The first two are read-only probes. `rpc` does not grant extra permission; it sends exactly the requested method and JSON object params through the same control socket dispatcher and inherits that method's safety policy.
 
-`agent.hooks.*` reuses the same explicit installer used by Settings -> AI Notifications. It only writes aiopsterm-owned hook commands, plugin files, or marked config blocks, and uninstall removes only those owned entries. `setup` mirrors control_compat's convenience behavior by skipping installers whose agent binary is not on `PATH`; `install` is for an explicit selected source when the user wants the config written anyway. Hook commands fail open outside aiopsterm-managed local connection terminals and do not take over external OS terminals.
+`agent.hooks.*` reuses the same explicit installer used by Settings -> AI Notifications. It only writes aiopsterm-owned hook commands, plugin files, or marked config blocks, and uninstall removes only those owned entries. `setup` mirrors the compatibility protocol's convenience behavior by skipping installers whose agent binary is not on `PATH`; `install` is for an explicit selected source when the user wants the config written anyway. Hook commands fail open outside aiopsterm-managed local connection terminals and do not take over external OS terminals.
 
 `terminal.send_text` and `terminal.send_key` are raw terminal input primitives, equivalent to typed text or a physical key press in the terminal. They do not run the existing AI command security approval flow, because they may need to send non-command input, prompts, or control sequences. Command-generation and AI-command execution still use the existing renderer security path.
 
@@ -513,7 +513,7 @@ Future higher-level automation commands should use the control socket but must c
 
 `sync.wait_for` is an in-process local rendezvous primitive for scripts talking to the same running aiopsterm app. Token names are limited to letters, numbers, `.`, `_`, `:`, and `-`; they are not filesystem paths and are not shared across app restarts. Signaling wakes all current waiters and leaves a bounded one-shot signal for a later waiter. Timeouts return `WAIT_FOR_TIMEOUT`.
 
-`terminal.buffer.*` stores named text snippets in memory in the running main process. It is a tmux/control_compat compatibility primitive, not the OS clipboard and not persisted across app restarts. `show-buffer` returns the text to the caller, and the CLI helper implements `save-buffer` by writing that returned text in the caller process; the main process does not write arbitrary caller paths. `paste-buffer` writes the stored text through the same raw-input boundary as `terminal.send_text`.
+`terminal.buffer.*` stores named text snippets in memory in the running main process. It is a tmux-compatible primitive, not the OS clipboard and not persisted across app restarts. `show-buffer` returns the text to the caller, and the CLI helper implements `save-buffer` by writing that returned text in the caller process; the main process does not write arbitrary caller paths. `paste-buffer` writes the stored text through the same raw-input boundary as `terminal.send_text`.
 
 `tmux.hook.*` stores compatibility hook definitions as runtime metadata only. aiopsterm does not execute those hook commands automatically. `show-options extended-keys` returns `on` for agent/tmux compatibility probes; unsupported options fail explicitly instead of returning misleading values. The no-op tmux commands exist so scripts that probe or source tmux configuration can continue when those commands do not affect aiopsterm state. `popup`, `bind-key`, `unbind-key`, and `copy-mode` are recognized as tmux compatibility placeholders and return `TMUX_COMPAT_UNSUPPORTED`.
 
@@ -527,11 +527,11 @@ Future higher-level automation commands should use the control socket but must c
 
 `window.close`, `window.create`, and `window.display` are deliberately non-destructive compatibility probes in this slice. They do not close user windows or create separate native workspaces. `settings.open`, `feedback.open`, `extension.sidebar.snapshot`, and `system.tree` route through the active renderer because those operations depend on UI state; they do not write terminal input or bypass terminal command approval. `system.top` and `system.memory` try to attach the same renderer snapshot when a window is available, but still return Node/OS process and memory samples if no renderer can answer. `feedback.submit` is local-only and does not perform network submission.
 
-`vm.*` and `remotes.*` are deliberately unsupported compatibility surfaces. control_compat implements these through its authenticated Cloud VM and device-registry services; aiopsterm does not. These methods do not create VMs, open SSH tunnels, mutate aiopsterm SSH hosts, or perform network calls.
+`vm.*` and `remotes.*` are deliberately unsupported compatibility surfaces. compatibility protocol implements these through its authenticated Cloud VM and device-registry services; aiopsterm does not. These methods do not create VMs, open SSH tunnels, mutate aiopsterm SSH hosts, or perform network calls.
 
-`sidebar.custom.*` is also a compatibility surface. aiopsterm may inspect filenames and JSON syntax under its own user-data directory, but it does not read from control_compat's `~/.config/control_compat/sidebars`, does not select a rendered custom sidebar, and never executes custom Swift sidebar code from the control socket.
+`sidebar.custom.*` is also a compatibility surface. aiopsterm inspects filenames and JSON syntax only under its own user-data directory, does not select a rendered custom sidebar, and never executes custom Swift sidebar code from the control socket.
 
-Navigation commands are also renderer-owned. Because aiopsterm currently exposes one shared main work panel instead of control_compat's independent workspace windows, `next-window`, `previous-window`, `last-window`, `select-window`, `select-pane`, `last-pane`, and `find-window` move focus among visible aiopsterm surfaces in that shared panel. They do not create windows, start processes, or write terminal input.
+Navigation commands are also renderer-owned. Because aiopsterm currently exposes one shared main work panel instead of the compatibility protocol's independent workspace windows, `next-window`, `previous-window`, `last-window`, `select-window`, `select-pane`, `last-pane`, and `find-window` move focus among visible aiopsterm surfaces in that shared panel. They do not create windows, start processes, or write terminal input.
 
 Management compatibility commands use the same shared-panel mapping. `new-window` creates a new aiopsterm work-panel tab, `split-window` creates a split panel, `rename-window` renames the selected panel, and `kill-window` / `kill-pane` close selected panels. These commands only operate on aiopsterm-owned panels and do not manage external OS terminals. `select-layout` records whether the requested tmux layout name is understood; pane resizing remains equal-size until aiopsterm stores per-pane dimensions.
 
@@ -545,15 +545,15 @@ By default `sweep` uses the configured `confirmationSeconds` settle window. The 
 
 `agent.team.launch` is visible automation. Every created team member is a real local terminal surface, and every launch command is written through the existing renderer terminal command path. If command security requires approval, the member is returned with `status: "needs-approval"` and the normal terminal security prompt is shown. The command builder supports `source=codex`, `source=claude-code`, and `source=custom`. Custom commands may use `{{index}}`, `{{cwd}}`, `{{prompt}}`, `{{role}}`, and `{{model}}` placeholders.
 
-The current Teams slice intentionally stops at visible local-terminal orchestration. control_compat's deeper Codex Teams app-server watcher, which bridges Codex private app-server approvals into Feed, is a separate integration because it owns a private Codex websocket lifecycle and approval response mapping.
+The current Teams slice intentionally stops at visible local-terminal orchestration. A deeper Codex Teams app-server watcher, which bridges Codex private app-server approvals into Feed, is a separate integration because it owns a private Codex websocket lifecycle and approval response mapping.
 
 `agent.session.*` operates only on the managed AI session store built from hooks/events emitted by agents running in aiopsterm-created local connection terminals. It does not close terminal panels, kill agent processes, disconnect SSH sessions, or take ownership of the visible terminal connection. `clear` removes the AI session manager record only. `reply` records a compact decision; for blocking Claude Code hooks it may resolve the waiting hook through the existing managed-session backend, while stock Codex permission events remain visibility-only because Codex keeps its native approval path. Session summaries intentionally omit raw hook payloads, terminal screen text, typed input, and command output.
 
 `agent.session.bulk` and `feed.*` are batch operations over the same managed session records. `mark-handled` can resolve waiting Claude Code hooks as locally handled, while `clear-ended` and `clear-all` remove only aiopsterm's AI session records. `clear-all` requires an explicit confirmation flag (`confirm=true` or CLI `--yes`) and still does not kill agent processes or terminal panels.
 
-`mobile.chat.*` is a control_compat-compatible view over those same managed AI session records. It does not manage aiopsterm's embedded right-side Codex panel and does not discover external OS terminals; it only operates on agent sessions launched inside aiopsterm-created local connection terminal surfaces. `send`, `interrupt`, and `answer` write raw terminal input to the bound visible terminal, so callers should treat them like typing into that terminal. `history` is currently a safe event-summary transcript page, not a parser for Claude/Codex transcript files.
+`mobile.chat.*` is a protocol-compatible view over those same managed AI session records. It does not manage aiopsterm's embedded right-side Codex panel and does not discover external OS terminals; it only operates on agent sessions launched inside aiopsterm-created local connection terminal surfaces. `send`, `interrupt`, and `answer` write raw terminal input to the bound visible terminal, so callers should treat them like typing into that terminal. `history` is currently a safe event-summary transcript page, not a parser for Claude/Codex transcript files.
 
-`mobile.attach_ticket.create` mirrors control_compat's ticket response shape (`ticket`, `attach_url`, `routes`, `expires_at`) but only describes the local aiopsterm control socket. The ticket contains a short-lived bearer token for machine-readable clients, so the CLI hides it unless `--json` is used. It is not a phone pairing feature yet and does not expose a remote listener or bypass the existing control-socket method safety rules.
+`mobile.attach_ticket.create` mirrors the compatibility protocol's ticket response shape (`ticket`, `attach_url`, `routes`, `expires_at`) but only describes the local aiopsterm control socket. The ticket contains a short-lived bearer token for machine-readable clients, so the CLI hides it unless `--json` is used. It is not a phone pairing feature yet and does not expose a remote listener or bypass the existing control-socket method safety rules.
 
 `surface.resume.*` is restore metadata, not a live process checkpoint. aiopsterm stores a bounded command binding on a visible surface and exposes it through `surface.list`, `surface.current`, and `workspace.snapshot`. Public CLI/socket-created bindings are manual by default; setting `autoResume=true` alone does not authorize automatic execution. A binding becomes auto-runnable only after `surface.resume.trust --policy auto`, which records a command fingerprint and trust metadata on that binding. `surface.resume.preview` reports `ready`, `manual`, `untrusted`, or `terminal-not-connected` reasons before anything runs.
 
@@ -563,7 +563,7 @@ The current Teams slice intentionally stops at visible local-terminal orchestrat
 
 ## Events
 
-`events.stream` mirrors the useful part of control_compat's event stream contract for local tools. A client sends one request line and then keeps reading newline-delimited JSON frames on that same socket. The first frame is always:
+`events.stream` mirrors the useful part of the compatibility protocol's event stream contract for local tools. A client sends one request line and then keeps reading newline-delimited JSON frames on that same socket. The first frame is always:
 
 ```json
 {"type":"ack","protocol":"aiopsterm-events","version":1}
@@ -571,7 +571,7 @@ The current Teams slice intentionally stops at visible local-terminal orchestrat
 
 After the ack, aiopsterm sends retained replay events whose `seq` is greater than `after_seq`, then live events and optional heartbeat frames. The stream supports `after_seq` / `after`, `names` / `name`, `categories` / `category`, and `include_heartbeats=false`. `events.list` accepts the same filters plus `limit`.
 
-`mobile.events.subscribe` / `mobile.events.unsubscribe` are request/response compatibility handshakes for clients that follow control_compat's mobile RPC contract. They record the requested `stream_id` and `topics` and return `already_subscribed` so a liveness probe can decide whether it needs a catch-up replay. Live event frames are still delivered through `events.stream`, which keeps the socket in streaming mode and is safe for local CLI consumers.
+`mobile.events.subscribe` / `mobile.events.unsubscribe` are request/response compatibility handshakes for clients that follow the compatibility protocol's mobile RPC contract. They record the requested `stream_id` and `topics` and return `already_subscribed` so a liveness probe can decide whether it needs a catch-up replay. Live event frames are still delivered through `events.stream`, which keeps the socket in streaming mode and is safe for local CLI consumers.
 
 Current event categories are:
 
@@ -587,7 +587,7 @@ Notification event payloads include bounded title previews and content lengths; 
 
 ## Agent Vault
 
-Agent Vault is aiopsterm's custom-agent registry for local-terminal automation. It is inspired by control_compat Vault's custom agent registrations. The current aiopsterm slice stores command templates plus process-detection metadata, can identify an agent from a process snapshot supplied by the caller, and can scan visible aiopsterm local terminals on Linux. Pi and OMP are registered by default with `piSessionFile` session ids and `{{executable}} --session {{sessionId}}` resume/fork commands.
+Agent Vault is aiopsterm's custom-agent registry for local-terminal automation. The current aiopsterm slice stores command templates plus process-detection metadata, can identify an agent from a process snapshot supplied by the caller, and can scan visible aiopsterm local terminals on Linux. Pi and OMP are registered by default with `piSessionFile` session ids and `{{executable}} --session {{sessionId}}` resume/fork commands.
 
 `agent.vault.scan` asks the renderer for current visible local terminal summaries, including shell `processId`, optional `processGroupId`, shell name, cwd, panel id, and terminal session id. On Linux, the main process then reads `/proc` only for descendant processes of those known shell PIDs. It does not scan unrelated process trees, SSH remote shells, external OS terminals, or the embedded right-side Codex panel. On non-Linux platforms the command returns an empty unsupported result until a platform-specific process reader is added.
 
@@ -631,13 +631,13 @@ The queue is intentionally not persisted in this slice. Session restore and pers
 
 ## Workspace Snapshot
 
-`workspace.snapshot` is the canonical read model for later control_compat-style workspace groups, session restore, and team automation. It is intentionally read-only in this slice. The payload contains summaries only:
+`workspace.snapshot` is the canonical read model for later compatibility workspace groups, session restore, and team automation. It is intentionally read-only in this slice. The payload contains summaries only:
 
 - `workspaces`: one logical `main` workspace for the shared work panel.
 - `surfaces`: terminal panels and knowledge editor panels with active/split metadata.
 - `terminals`: terminal-only summaries with connection, cwd, SSH target, and xterm size when available.
 - `splitGroups`: grouped panel ids for split layouts.
-- `workspaceGroups`: control_compat-style surface group metadata for the shared main work panel.
+- `workspaceGroups`: compatibility surface group metadata for the shared main work panel.
 - `resumeBinding` / `resume_binding`: optional surface-level resume command metadata for each surface.
 - `agentHibernation`: explicit hibernation config for managed AI sessions.
 - `notifications`: generic control notifications currently held by the main process and synced into the renderer.
@@ -653,7 +653,7 @@ The snapshot does not include terminal screen text. Use `terminal.read_screen` f
 
 aiopsterm keeps the user's design constraint that the AI session manager and SSH/local terminal work share one main work panel. Because of that, `workspace.group.*` does not create a second primary workspace surface. It groups existing main-panel surfaces so external automation can name, focus, and restore related terminal/editor panels.
 
-Group members are `panelId` values. For compatibility, CLI flags still use control_compat wording such as `--workspace`; aiopsterm resolves those values as either `panelId` or `sessionId`.
+Group members are `panelId` values. For compatibility, CLI flags still use protocol wording such as `--workspace`; aiopsterm resolves those values as either `panelId` or `sessionId`.
 
 `workspace.group.delete` is destructive because it closes the member panels and attempts to kill any backing terminal sessions. It fails unless the request includes `confirm=true`, or the CLI uses `--confirm`. Use `workspace.group.ungroup` when the intent is only to remove grouping metadata.
 

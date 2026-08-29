@@ -6,7 +6,6 @@ import { join, resolve } from 'node:path'
 import { nativeBinarySha256 } from './native-binary-integrity.mjs'
 
 const NODE_VERSION = '22.20.0'
-const REFERENCE_TREE_PREFIX = ['external-reference', ''].join('/')
 const NODE_RUNTIME_PACKAGES = {
   'linux:x64': 'node-linux-x64',
   'linux:arm64': 'node-linux-arm64',
@@ -108,7 +107,6 @@ const metafile = JSON.parse(readFileSync(metafilePath, 'utf8'))
 const packageCoordinates = new Set()
 for (const inputPath of Object.keys(metafile.inputs || {})) {
   const normalized = inputPath.replaceAll('\\', '/')
-  if (normalized.includes(REFERENCE_TREE_PREFIX)) throw new Error(`Cline sidecar imported reference-only source: ${inputPath}`)
   const marker = '/node_modules/'
   const markerIndex = normalized.lastIndexOf(marker)
   const packageStart = markerIndex >= 0

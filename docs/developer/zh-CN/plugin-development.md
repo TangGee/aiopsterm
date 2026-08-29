@@ -1,6 +1,6 @@
 # aiopsterm 插件开发
 
-aiopsterm 插件是宿主可验证、可安装的声明式能力包。它不是 External reference 插件的兼容层，也不执行插件自带的 JavaScript 入口。
+aiopsterm 插件是宿主可验证、可安装的声明式能力包，不执行插件自带的 JavaScript 入口。
 
 当前支持两类插件：
 
@@ -18,7 +18,7 @@ my-plugin.aiopsterm-plugin
 
 内置插件不需要压缩，放在 `resources/builtin-plugins/<plugin-name>/aiopsterm.plugin.json`。构建配置会将该目录复制到应用资源目录。
 
-`.external-reference` 文件和 External reference 的 `plugin.json` 不受支持。
+不支持的包扩展名和旧版清单会被拒绝。
 
 ## 通用清单字段
 

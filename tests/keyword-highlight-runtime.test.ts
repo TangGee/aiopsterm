@@ -11,7 +11,7 @@ const createConfig = (rules: KeywordHighlightUserConfig['keyword-highlight']['ru
 })
 
 describe('keyword highlight runtime', () => {
-  it('applies regex rules with External reference-style case-insensitive prefix', () => {
+  it('applies regex rules with case-insensitive prefix', () => {
     const config = createConfig([
       {
         name: 'error',

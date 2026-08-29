@@ -442,7 +442,7 @@ export const handleControlSystemCompatibilityRequest = async (method: string, pa
   if (method === 'auth.sign_in_url') {
     return ok({
       unsupported: true,
-      unsupported_reason: 'aiopsterm does not expose a control_compat Stack Auth sign-in URL.',
+      unsupported_reason: 'The local control socket does not expose a cloud authentication sign-in URL.',
       url: null
     })
   }
@@ -576,7 +576,7 @@ export const handleMobileAttachTicketControlRequest = (params: Record<string, un
     expires_at: expiresAt,
     ttl_seconds: ttlSeconds,
     unsupported_remote: true,
-    unsupported_reason: 'aiopsterm currently exposes attach tickets only for the local control socket, not a control_compat mobile network listener.'
+    unsupported_reason: 'Attach tickets currently describe only the local control socket; a mobile network listener is not available.'
   })
 }
 

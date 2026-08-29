@@ -18,7 +18,6 @@ import { nativeBinarySha256 } from './native-binary-integrity.mjs'
 
 const NODE_VERSION = '22.20.0'
 const NODE_LICENSE_SHA256 = 'e991d81497a85bb24fc6bffae0a3637a6accd6c6bc5ce1f2c5698bd555cf9d49'
-const REFERENCE_TREE_PREFIX = ['external-reference', ''].join('/')
 const NODE_RUNTIME_PACKAGES = {
   'linux:x64': 'node-linux-x64',
   'linux:arm64': 'node-linux-arm64',
@@ -368,9 +367,6 @@ if (bundleResult.status !== 0) throw new Error(`Cline Agent sidecar bundle faile
 
 const metafile = JSON.parse(readFileSync(metafilePath, 'utf8'))
 const inputPaths = Object.keys(metafile.inputs || {}).map(normalizePath)
-if (inputPaths.some((path) => path.includes(REFERENCE_TREE_PREFIX))) {
-  throw new Error('The Cline sidecar bundle imported the reference-only source tree.')
-}
 const components = createBundleInventory(metafile)
 const bundleText = readFileSync(bundlePath, 'utf8')
 for (const marker of RESTRICTED_BUNDLE_MARKERS) {

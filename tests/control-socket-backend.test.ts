@@ -380,7 +380,7 @@ describe('control socket backend', () => {
             program_totals: [expect.objectContaining({ id: 'aiopsterm' })],
             coding_agents: [],
             windows: [],
-            compatibility: expect.objectContaining({ control_compat_shape: true, renderer_snapshot_available: false }),
+            compatibility: expect.objectContaining({ cmux_shape: true, renderer_snapshot_available: false }),
             warning: expect.objectContaining({ ok: false, errorCode: 'NO_APP_WINDOW' })
           })
         })
@@ -393,7 +393,7 @@ describe('control socket backend', () => {
             sample: expect.objectContaining({ source: 'node.process.memoryUsage+os' }),
             memory_diagnostic: expect.objectContaining({ children: expect.objectContaining({ groups: expect.any(Array) }) }),
             windows: [],
-            compatibility: expect.objectContaining({ control_compat_shape: true })
+            compatibility: expect.objectContaining({ cmux_shape: true })
           })
         })
       )
@@ -513,7 +513,7 @@ describe('control socket backend', () => {
     }
   })
 
-  it('routes control_compat-style agent hook installer controls through the control socket', async () => {
+  it('routes agent hook installer controls through the control socket', async () => {
     const backend = await loadBackend()
     const installer = await loadAgentHookInstallerBackend()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-hooks-'))
@@ -709,7 +709,7 @@ describe('control socket backend', () => {
     expect(mockWindow.requests).toEqual([expect.objectContaining({ method: 'workspace.snapshot' })])
   })
 
-  it('exposes control_compat-style system and window compatibility controls without closing user windows', async () => {
+  it('exposes system and window compatibility controls without closing user windows', async () => {
     const backend = await loadBackend()
     backend.registerControlSocketIpc({
       handle: (_channel, handler) => {
@@ -1168,7 +1168,7 @@ describe('control socket backend', () => {
     expect(writes).toEqual([{ sessionId: 'terminal-1', data: 'pwd\n' }])
   })
 
-  it('routes control_compat-style screen capture aliases to terminal read-screen', async () => {
+  it('routes screen capture aliases to terminal read-screen', async () => {
     const backend = await loadBackend()
     backend.registerControlSocketIpc({
       handle: (_channel, handler) => {
@@ -1201,7 +1201,7 @@ describe('control socket backend', () => {
     ])
   })
 
-  it('routes control_compat-style mobile terminal controls to shared terminal surfaces', async () => {
+  it('routes mobile terminal controls to shared terminal surfaces', async () => {
     const backend = await loadBackend()
     backend.registerControlSocketIpc({
       handle: (_channel, handler) => {
@@ -1278,7 +1278,7 @@ describe('control socket backend', () => {
     ])
   })
 
-  it('routes control_compat-style clear-history aliases to the renderer and records a terminal event', async () => {
+  it('routes clear-history aliases to the renderer and records a terminal event', async () => {
     const backend = await loadBackend()
     backend.registerControlSocketIpc({
       handle: (_channel, handler) => {
@@ -1320,7 +1320,7 @@ describe('control socket backend', () => {
     expect(terminalEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'terminal.history_cleared' })]))
   })
 
-  it('routes control_compat-style respawn aliases to the renderer and records a terminal event', async () => {
+  it('routes respawn aliases to the renderer and records a terminal event', async () => {
     const backend = await loadBackend()
     backend.registerControlSocketIpc({
       handle: (_channel, handler) => {
@@ -1355,7 +1355,7 @@ describe('control socket backend', () => {
     expect(terminalEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'terminal.respawn_requested', payload: expect.objectContaining({ decision_status: 'allow' }) })]))
   })
 
-  it('routes control_compat-style pane layout aliases to the renderer and records pane events', async () => {
+  it('routes pane layout aliases to the renderer and records pane events', async () => {
     const backend = await loadBackend()
     backend.registerControlSocketIpc({
       handle: (_channel, handler) => {
@@ -1429,7 +1429,7 @@ describe('control socket backend', () => {
     )
   })
 
-  it('routes control_compat-style pane navigation aliases to the renderer and records focus events', async () => {
+  it('routes pane navigation aliases to the renderer and records focus events', async () => {
     const backend = await loadBackend()
     backend.registerControlSocketIpc({
       handle: (_channel, handler) => {
@@ -1550,7 +1550,7 @@ describe('control socket backend', () => {
     expect(paneEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'pane.created' }), expect.objectContaining({ name: 'pane.closed' })]))
   })
 
-  it('routes control_compat-style surface and workspace aliases to the renderer', async () => {
+  it('routes surface and workspace aliases to the renderer', async () => {
     const backend = await loadBackend()
     backend.registerControlSocketIpc({
       handle: (_channel, handler) => {
@@ -1597,7 +1597,7 @@ describe('control socket backend', () => {
     expect(paneEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'pane.created' }), expect.objectContaining({ name: 'pane.closed' })]))
   })
 
-  it('routes control_compat-style surface operation aliases to the renderer', async () => {
+  it('routes surface operation aliases to the renderer', async () => {
     const backend = await loadBackend()
     backend.registerControlSocketIpc({
       handle: (_channel, handler) => {
@@ -1667,7 +1667,7 @@ describe('control socket backend', () => {
     expect(workspaceEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'workspace.reordered' }), expect.objectContaining({ name: 'workspace.reordered_many' }), expect.objectContaining({ name: 'workspace.actioned' })]))
   })
 
-  it('routes control_compat-style surface telemetry and create/focus primitives to the renderer', async () => {
+  it('routes surface telemetry and create/focus primitives to the renderer', async () => {
     const backend = await loadBackend()
     backend.registerControlSocketIpc({
       handle: (_channel, handler) => {
@@ -2041,7 +2041,7 @@ describe('control socket backend', () => {
     )
   })
 
-  it('creates control_compat-style targeted notifications for surfaces and targets', async () => {
+  it('creates targeted notifications for surfaces and targets', async () => {
     const backend = await loadBackend()
     const shown: Record<string, unknown>[] = []
     backend.configureControlSocketRuntime({
@@ -2181,7 +2181,7 @@ describe('control socket backend', () => {
     }
   })
 
-  it('acknowledges control_compat-style mobile event subscription probes', async () => {
+  it('acknowledges mobile event subscription probes', async () => {
     const backend = await loadBackend()
 
     await expect(
@@ -2904,7 +2904,7 @@ describe('control socket backend', () => {
     }
   })
 
-  it('accepts control_compat-style feed push, jump, and reply commands', async () => {
+  it('accepts feed push, jump, and reply commands', async () => {
     const backend = await loadBackend()
     const agentSessions = await loadAgentSessionsBackend()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-feed-compat-'))
@@ -3059,7 +3059,7 @@ describe('control socket backend', () => {
     }
   })
 
-  it('exposes control_compat-style mobile chat sessions and actions for managed terminal agents', async () => {
+  it('exposes mobile chat sessions and actions for managed terminal agents', async () => {
     const backend = await loadBackend()
     const agentSessions = await loadAgentSessionsBackend()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-mobile-chat-'))
@@ -3169,7 +3169,7 @@ describe('control socket backend', () => {
     }
   })
 
-  it('creates local-only control_compat-style mobile attach tickets', async () => {
+  it('creates local-only mobile attach tickets', async () => {
     const backend = await loadBackend()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-attach-ticket-'))
     try {

@@ -412,7 +412,7 @@ describe('aio CLI', () => {
     expect(fish.stdout).toContain('complete -c aiswitch')
   })
 
-  it('sends control_compat-style system, settings, app, and window requests from the CLI helper', async () => {
+  it('sends system, settings, app, and window requests from the CLI helper', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
       seen.push(request)
@@ -629,7 +629,7 @@ describe('aio CLI', () => {
     ])
   })
 
-  it('sends control_compat-style mobile terminal requests from the CLI helper', async () => {
+  it('sends mobile terminal requests from the CLI helper', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
       seen.push(request)
@@ -680,7 +680,7 @@ describe('aio CLI', () => {
     ])
   })
 
-  it('sends control_compat-style mobile chat requests from the CLI helper', async () => {
+  it('sends mobile chat requests from the CLI helper', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
       seen.push(request)
@@ -752,7 +752,7 @@ describe('aio CLI', () => {
     ])
   })
 
-  it('sends control_compat-style mobile attach ticket requests from the CLI helper', async () => {
+  it('sends mobile attach ticket requests from the CLI helper', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
       seen.push(request)
@@ -1090,7 +1090,7 @@ describe('aio CLI', () => {
     ])
   })
 
-  it('sends control_compat-style surface and workspace aliases from the CLI helper', async () => {
+  it('sends surface and workspace aliases from the CLI helper', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
       seen.push(request)
@@ -1140,7 +1140,7 @@ describe('aio CLI', () => {
     ])
   })
 
-  it('sends control_compat-style surface operation requests from the CLI helper', async () => {
+  it('sends surface operation requests from the CLI helper', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
       seen.push(request)
@@ -1507,7 +1507,7 @@ describe('aio CLI', () => {
     ])
   })
 
-  it('sends control_compat-style surface telemetry and create/focus requests from the CLI helper', async () => {
+  it('sends surface telemetry and create/focus requests from the CLI helper', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
       seen.push(request)
@@ -2525,7 +2525,7 @@ describe('aio CLI', () => {
     await rm(cursorPath, { force: true })
   })
 
-  it('sends control_compat-style mobile event subscription probes from the CLI helper', async () => {
+  it('sends mobile event subscription probes from the CLI helper', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
       seen.push(request)

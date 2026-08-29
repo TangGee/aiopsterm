@@ -78,7 +78,7 @@ describe('aiopsterm deep links', () => {
     })
   })
 
-  it('rejects External reference and internal attachment URLs', () => {
+  it('rejects unsupported protocols and internal attachment URLs', () => {
     expect(parseAiopstermDeepLink('external-term://open/files')).toEqual({ valid: false, reason: 'unsupported-protocol' })
     expect(parseAiopstermDeepLink('aiopsterm://chat-attachment/task/readme.md')).toEqual({ valid: false, reason: 'internal-ref' })
   })

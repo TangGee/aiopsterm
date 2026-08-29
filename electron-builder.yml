@@ -7,7 +7,6 @@ directories:
 files:
   - out/**
   - package.json
-  - '!external-reference/**'
   - '!docs/**'
   - '!tests/**'
   - '!src/**'

@@ -161,7 +161,7 @@ describe('local files IPC registrar', () => {
       properties: ['openFile'],
       filters: [{ name: 'Asset Import Files', extensions: ['json'] }]
     })
-    const assetPath = join(userDataPath, 'e2e-external-reference-assets.json')
+    const assetPath = join(userDataPath, 'e2e-aiopsterm-assets.json')
     expect(assetResult).toEqual({ canceled: false, filePaths: [assetPath] })
     expect(input.writeFixtureFile).toHaveBeenLastCalledWith(
       assetPath,

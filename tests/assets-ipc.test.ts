@@ -87,7 +87,7 @@ describe('assets IPC registrar', () => {
     backendMocks.refreshOrganizationAssets.mockReturnValue({ ok: true, data: { assets: [] } })
     backendMocks.previewAssetImport.mockReturnValue({ ok: true, data: { rows: [] } })
     backendMocks.confirmAssetImport.mockReturnValue({ ok: true, data: { imported: 1 } })
-    backendMocks.exportAssets.mockResolvedValue({ ok: true, data: { filePath: '/tmp/external-reference-assets.json', count: 1 } })
+    backendMocks.exportAssets.mockResolvedValue({ ok: true, data: { filePath: '/tmp/aiopsterm-assets.json', count: 1 } })
     backendMocks.startSshTunnel.mockResolvedValue({ ok: true, data: { tunnel: { tunnelId: 'tunnel-1' } } })
     backendMocks.stopSshTunnel.mockResolvedValue({ ok: true, data: { tunnel: { tunnelId: 'tunnel-1' } } })
     backendMocks.saveAssetFolder.mockReturnValue({ ok: true, data: { uuid: 'folder-1' } })
@@ -185,7 +185,7 @@ describe('assets IPC registrar', () => {
 
     await expect(handlers.get('assets:export')?.({}, { assetIds: ['asset-1'] })).resolves.toEqual({
       ok: true,
-      data: { filePath: '/tmp/external-reference-assets.json', count: 1 }
+      data: { filePath: '/tmp/aiopsterm-assets.json', count: 1 }
     })
     expect(backendMocks.exportAssets).toHaveBeenCalledWith({ assetIds: ['asset-1'] }, { showSaveDialog })
   })

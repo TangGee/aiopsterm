@@ -250,7 +250,7 @@ export const createTerminalControlSurfaceRemoteHandlers = ({
       const sessionId = controlText(params.sessionId || params.session_id)
       if (!sessionId) return controlFail('REMOTE_PTY_SESSION_REQUIRED', 'workspace.remote.pty_bridge requires session_id.')
       const attachmentId = controlText(params.attachmentId || params.attachment_id) || `aiopsterm-${Date.now().toString(36)}`
-      return unsupportedRemoteControlPayload(method, 'aiopsterm does not expose control_compat remote PTY bridge daemon sessions; use visible SSH terminal surfaces instead.', {
+      return unsupportedRemoteControlPayload(method, 'Detached remote PTY bridge sessions are not available; use visible SSH terminal surfaces instead.', {
         session_id: sessionId,
         attachment_id: attachmentId,
         require_existing: controlBool(params.requireExisting ?? params.require_existing, false),
@@ -270,7 +270,7 @@ export const createTerminalControlSurfaceRemoteHandlers = ({
       const cols = controlNumber(params.cols || params.columns, 0, 0, 1000)
       const rows = controlNumber(params.rows, 0, 0, 1000)
       if (!cols || !rows) return controlFail('REMOTE_PTY_SIZE_INVALID', 'workspace.remote.pty_resize requires positive cols and rows.')
-      return unsupportedRemoteControlPayload(method, 'aiopsterm does not expose control_compat remote PTY resize for detached bridge sessions; resize the visible SSH terminal surface instead.', {
+      return unsupportedRemoteControlPayload(method, 'Detached remote PTY resize is not available; resize the visible SSH terminal surface instead.', {
         session_id: sessionId,
         attachment_id: attachmentId,
         cols,
@@ -280,7 +280,7 @@ export const createTerminalControlSurfaceRemoteHandlers = ({
     }
 
     if (method.startsWith('workspace.remote.pty_')) {
-      return unsupportedRemoteControlPayload(method, 'aiopsterm does not expose control_compat remote PTY bridge daemon sessions; use visible SSH terminal surfaces instead.', {
+      return unsupportedRemoteControlPayload(method, 'Detached remote PTY bridge sessions are not available; use visible SSH terminal surfaces instead.', {
         session_id: controlText(params.sessionId || params.session_id),
         attachment_id: controlText(params.attachmentId || params.attachment_id),
         closed: false,
@@ -289,7 +289,7 @@ export const createTerminalControlSurfaceRemoteHandlers = ({
     }
 
     if (method.startsWith('remote.tmux.')) {
-      return unsupportedRemoteControlPayload(method, 'aiopsterm does not implement control_compat remote tmux control-mode mirroring in the control socket.', {
+      return unsupportedRemoteControlPayload(method, 'Remote tmux control-mode mirroring is not available through the control socket.', {
         host: controlText(params.host || params.destination),
         session: controlText(params.session)
       })

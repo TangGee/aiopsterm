@@ -954,8 +954,8 @@ describe('extension plugin backend boundary', () => {
     })
   })
 
-  it('rejects legacy External reference plugin packages', async () => {
-    const result = await installExtensionPackage({ fileName: 'legacy.external-reference', filePath: '/tmp/legacy.external-reference' })
+  it('rejects unsupported plugin package extensions', async () => {
+    const result = await installExtensionPackage({ fileName: 'legacy.invalid-plugin', filePath: '/tmp/legacy.invalid-plugin' })
 
     expect(result).toEqual({
       ok: false,

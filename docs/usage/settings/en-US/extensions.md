@@ -10,4 +10,4 @@ This page controls local terminal enhancements.
 
 Saved keyword-highlight configuration is written to a local config file and used for later terminal input/output rendering.
 
-Plugin installation and built-in plugin actions are available in the main Plugins workspace, not on this settings page. aiopsterm accepts only `.aiopsterm-plugin` packages and does not load External reference plugins.
+Plugin installation and built-in plugin actions are available in the main Plugins workspace, not on this settings page. aiopsterm accepts only `.aiopsterm-plugin` packages and does not load legacy plugin formats.

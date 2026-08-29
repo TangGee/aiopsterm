@@ -352,7 +352,7 @@ describe('quick commands backend boundary', () => {
     expect(deleted.data?.snippets.some((snippet) => snippet.id === created.id)).toBe(false)
   })
 
-  it('deletes groups by moving grouped commands back to the root level like External reference', async () => {
+  it('deletes groups by moving grouped commands back to the root level while preserving root commands', async () => {
     const databasePath = await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-quick-commands-delete-group-' })
     const group = expectOkData(backend.saveQuickCommandGroup({ group_name: '待删除组' })).group
     const grouped = expectOkData(
@@ -516,7 +516,7 @@ describe('quick commands backend boundary', () => {
     )
   })
 
-  it('builds backend-owned script plans with External reference syntax semantics', async () => {
+  it('builds backend-owned script plans with grouped command syntax', async () => {
     const planned = backend.planQuickCommandScript({
       snippetContent: `
         # ignored

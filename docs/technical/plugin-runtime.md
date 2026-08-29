@@ -12,7 +12,7 @@ The catalog merges three aiopsterm-owned sources:
 
 Installed store and local rows are persisted under `userData/extensions/registry.json`. Extracted package contents live under `userData/extensions/installed/<id>/<version>`, and downloaded packages use `userData/extensions/cache`.
 
-The runtime accepts only `.aiopsterm-plugin` archives with a root `aiopsterm.plugin.json`. It rejects `.external-reference`, External reference `plugin.json`, missing engine declarations, unsupported app versions, invalid plugin kinds, missing contributions, unsafe ZIP paths, manifest identity mismatches, version mismatches, and checksum mismatches.
+The runtime accepts only `.aiopsterm-plugin` archives with a root `aiopsterm.plugin.json`. It rejects unsupported package extensions and manifests, missing engine declarations, unsupported app versions, invalid plugin kinds, missing contributions, unsafe ZIP paths, manifest identity mismatches, version mismatches, and checksum mismatches.
 
 ## Runtime Flow
 

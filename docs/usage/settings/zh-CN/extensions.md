@@ -10,4 +10,4 @@
 
 关键词高亮配置保存后会写入本地配置文件，并用于后续终端输入/输出渲染。
 
-插件安装和内置插件操作位于主界面的插件工作区，不在本设置页。aiopsterm 只接受 `.aiopsterm-plugin` 包，不加载 External reference 插件。
+插件安装和内置插件操作位于主界面的插件工作区，不在本设置页。aiopsterm 只接受 `.aiopsterm-plugin` 包，不加载 旧版插件格式。

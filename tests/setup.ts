@@ -5259,7 +5259,7 @@ const refreshOrganizationAssetsMock = (input?: { organizationId?: string }) => {
 
 const localFileContentMock = (filePath: string) => {
   const localPath = String(filePath || '')
-  if (localPath.endsWith('external-reference-assets.json')) {
+  if (localPath.endsWith('aiopsterm-assets.json')) {
     return JSON.stringify([
       { username: 'ops', ip: '10.24.8.12', label: 'prod-bastion-imported', group_name: '生产', port: 22 },
       { username: 'ops', ip: '10.55.0.9', label: 'imported-json', group_name: 'Imported', port: 2200 }
@@ -7311,7 +7311,7 @@ Object.defineProperty(window, 'aiops', {
         ok: true,
         data: {
           exported: exportable.length,
-          fileName: 'external-reference-assets-2024-06-01.json',
+          fileName: 'aiopsterm-assets-2024-06-01.json',
           filePath: '/tmp/assets-export.json',
           bytes: Buffer.byteLength(JSON.stringify(
             exportable.map((asset) => ({

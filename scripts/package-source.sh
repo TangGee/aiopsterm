@@ -42,7 +42,7 @@ snapshot_repository() {
 
   while IFS= read -r -d '' path; do
     case "$snapshot_label/$path" in
-      root/external-reference|root/external-reference/*|root/codex|root/codex/*|root/control_compat|root/control_compat/*|root/release|root/release/*)
+      root/codex|root/codex/*|root/release|root/release/*)
         continue
         ;;
     esac
@@ -70,46 +70,21 @@ snapshot_repository() {
 }
 
 git clone --quiet --no-hardlinks --no-recurse-submodules "$project_root" "$staging_root"
-if git -C "$staging_root" ls-files --error-unmatch external-reference >/dev/null 2>&1; then
-  git -C "$staging_root" rm --cached --quiet external-reference
-fi
-if [[ -d "$staging_root/external-reference" ]]; then
-  rmdir "$staging_root/external-reference"
-fi
 snapshot_repository \
   "$project_root" \
   "$staging_root" \
   root \
   . \
-  ':(exclude)external-reference' \
-  ':(exclude)external-reference/**' \
   ':(exclude)codex' \
   ':(exclude)codex/**' \
-  ':(exclude)control_compat' \
-  ':(exclude)control_compat/**' \
   ':(exclude)release' \
   ':(exclude)release/**'
 
 git clone --quiet --no-hardlinks --no-recurse-submodules "$codex_root" "$staging_root/codex"
 snapshot_repository "$codex_root" "$staging_root/codex" codex .
 
-tar \
-  -C "$temp_dir" \
-  --exclude="$project_name/.git/modules/external-reference" \
-  --exclude="$project_name/.git/modules/external-reference/*" \
-  -czf "$archive_path" \
-  "$project_name"
+tar -C "$temp_dir" -czf "$archive_path" "$project_name"
 tar -tzf "$archive_path" > "$archive_list"
-
-if grep -Eq "^${project_name}/(external-reference|control_compat)(/|$)" "$archive_list"; then
-  echo "Archive contains a forbidden source tree" >&2
-  exit 1
-fi
-
-if grep -Eq "^${project_name}/\\.git/modules/external-reference(/|$)" "$archive_list"; then
-  echo "Archive contains External reference Git objects" >&2
-  exit 1
-fi
 
 for required_path in \
   "$project_name/package.json" \

@@ -68,7 +68,7 @@ const loadBackend = async (options: { useDefaultRuntime?: boolean } = {}) => {
 const withAssetImportFile = async <T>(rows: unknown[], run: (filePath: string) => Promise<T>): Promise<T> => {
   const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-assets-import-'))
   try {
-    const filePath = join(dir, 'external-reference-assets.json')
+    const filePath = join(dir, 'aiopsterm-assets.json')
     await writeFile(filePath, JSON.stringify(rows, null, 2), 'utf-8')
     return await run(filePath)
   } finally {
@@ -760,7 +760,7 @@ describe('assets backend boundary', () => {
         expect(preview.ok).toBe(true)
         expect(preview.data).toMatchObject({
           filePath,
-          fileName: 'external-reference-assets.json',
+          fileName: 'aiopsterm-assets.json',
           duplicateCount: 1
         })
         expect(preview.data?.assets).toEqual(
@@ -795,7 +795,7 @@ describe('assets backend boundary', () => {
         {
           now: () => new Date('2026-06-10T00:00:00.000Z'),
           showSaveDialog: async (options: { defaultPath: string }) => {
-            expect(options.defaultPath).toBe('external-reference-assets-2026-06-10.json')
+            expect(options.defaultPath).toBe('aiopsterm-assets-2026-06-10.json')
             return { canceled: false, filePath }
           }
         }
@@ -805,7 +805,7 @@ describe('assets backend boundary', () => {
         ok: true,
         data: {
           exported: 1,
-          fileName: 'external-reference-assets-2026-06-10.json',
+          fileName: 'aiopsterm-assets-2026-06-10.json',
           filePath,
           bytes: expect.any(Number)
         }
@@ -851,7 +851,7 @@ describe('assets backend boundary', () => {
       ok: true,
       data: {
         exported: 0,
-        fileName: 'external-reference-assets-2026-06-10.json',
+        fileName: 'aiopsterm-assets-2026-06-10.json',
         canceled: true
       }
     })
@@ -977,7 +977,7 @@ describe('assets backend boundary', () => {
           created: 1,
           updated: 0,
           filePath,
-          fileName: 'external-reference-assets.json'
+          fileName: 'aiopsterm-assets.json'
         })
         expect(result.data?.assets).toEqual(
           expect.arrayContaining([
@@ -1007,7 +1007,7 @@ describe('assets backend boundary', () => {
           created: 1,
           updated: 1,
           filePath,
-          fileName: 'external-reference-assets.json'
+          fileName: 'aiopsterm-assets.json'
         })
         expect(result.data?.assets).toEqual(
           expect.arrayContaining([

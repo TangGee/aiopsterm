@@ -215,26 +215,26 @@ const managedAiSessionMatchesWorkstream = (session: ManagedAiSessionRecord, work
   session.workspaceId === workstreamId ||
   session.events.some((event) => event.id === workstreamId || event.requestId === workstreamId)
 
-const control_compatChatTimestamp = (value: unknown) => {
+const mobileChatTimestamp = (value: unknown) => {
   const numberValue = Number(value)
   if (!Number.isFinite(numberValue) || numberValue <= 0) return undefined
   return new Date(numberValue).toISOString()
 }
 
-const control_compatChatAgentKind = (source: string) => (source === 'claude-code' || source === 'claude' ? 'claude' : source === 'codex' ? 'codex' : source)
+const mobileChatAgentKind = (source: string) => (source === 'claude-code' || source === 'claude' ? 'claude' : source === 'codex' ? 'codex' : source)
 
-const control_compatChatState = (session: ManagedAiSessionRecord) => {
-  const since = control_compatChatTimestamp(session.lastActivityAt || session.updatedAt || session.createdAt)
+const mobileChatState = (session: ManagedAiSessionRecord) => {
+  const since = mobileChatTimestamp(session.lastActivityAt || session.updatedAt || session.createdAt)
   if (session.state === 'needsInput') return { state: 'needs_input', ...(since ? { since } : {}) }
   if (session.state === 'working') return { state: 'working', ...(since ? { since } : {}) }
   if (session.state === 'ended') return { state: 'ended' }
   return { state: 'idle' }
 }
 
-const control_compatMobileChatDescriptor = (session: ManagedAiSessionRecord) => ({
+const mobileChatDescriptor = (session: ManagedAiSessionRecord) => ({
   session_id: session.id,
   id: session.id,
-  agent_kind: control_compatChatAgentKind(session.source),
+  agent_kind: mobileChatAgentKind(session.source),
   source: session.source,
   kind: 'agent',
   title: session.title || session.summary || session.id,
@@ -242,8 +242,8 @@ const control_compatMobileChatDescriptor = (session: ManagedAiSessionRecord) => 
   ...(session.panelId ? { terminal_id: session.panelId, panelId: session.panelId, surface_id: session.panelId } : {}),
   ...(session.terminalSessionId ? { terminal_session_id: session.terminalSessionId, terminalSessionId: session.terminalSessionId } : {}),
   ...(session.cwd ? { cwd: session.cwd, workingDirectory: session.cwd } : {}),
-  state: control_compatChatState(session),
-  ...(control_compatChatTimestamp(session.lastActivityAt) ? { last_activity_at: control_compatChatTimestamp(session.lastActivityAt), lastActivityAt: session.lastActivityAt } : {}),
+  state: mobileChatState(session),
+  ...(mobileChatTimestamp(session.lastActivityAt) ? { last_activity_at: mobileChatTimestamp(session.lastActivityAt), lastActivityAt: session.lastActivityAt } : {}),
   needs_input: session.state === 'needsInput',
   needsInput: session.state === 'needsInput',
   actionable: session.actionable === true,
@@ -253,11 +253,11 @@ const control_compatMobileChatDescriptor = (session: ManagedAiSessionRecord) => 
   created_at: session.createdAt
 })
 
-const control_compatChatEventText = (event: ReturnType<typeof managedAiTimelineSummary>[number]) =>
+const mobileChatEventText = (event: ReturnType<typeof managedAiTimelineSummary>[number]) =>
   cleanText(event.summary || event.title || event.toolName || event.event || event.requestId || event.id)
 
-const control_compatChatEventKind = (event: ReturnType<typeof managedAiTimelineSummary>[number], session: ManagedAiSessionRecord) => {
-  const text = control_compatChatEventText(event)
+const mobileChatEventKind = (event: ReturnType<typeof managedAiTimelineSummary>[number], session: ManagedAiSessionRecord) => {
+  const text = mobileChatEventText(event)
   if (event.requestKind === 'permission' || event.requestKind === 'plan') {
     return {
       type: 'permission_request',
@@ -277,16 +277,16 @@ const control_compatChatEventKind = (event: ReturnType<typeof managedAiTimelineS
   return { type: 'prose', text: text || event.event || 'Session event' }
 }
 
-const control_compatChatMessageFromEvent = (event: ReturnType<typeof managedAiTimelineSummary>[number], session: ManagedAiSessionRecord, index: number) => {
+const mobileChatMessageFromEvent = (event: ReturnType<typeof managedAiTimelineSummary>[number], session: ManagedAiSessionRecord, index: number) => {
   const seq = Math.max(0, index)
-  const timestamp = control_compatChatTimestamp(event.receivedAt) || control_compatChatTimestamp(session.lastActivityAt) || new Date(session.updatedAt || Date.now()).toISOString()
+  const timestamp = mobileChatTimestamp(event.receivedAt) || mobileChatTimestamp(session.lastActivityAt) || new Date(session.updatedAt || Date.now()).toISOString()
   const role = event.requestKind === 'permission' || event.requestKind === 'question' || event.requestKind === 'plan' ? 'agent' : event.event === 'prompt_submit' ? 'user' : 'system'
   return {
     id: event.id || `${session.id}-${seq}`,
     seq,
     role,
     timestamp,
-    kind: control_compatChatEventKind(event, session),
+    kind: mobileChatEventKind(event, session),
     source: event.source,
     event: event.event,
     request_kind: event.requestKind,
@@ -296,9 +296,9 @@ const control_compatChatMessageFromEvent = (event: ReturnType<typeof managedAiTi
   }
 }
 
-const control_compatChatSessionDebugSummary = (session: ManagedAiSessionRecord) => ({
+const mobileChatSessionDebugSummary = (session: ManagedAiSessionRecord) => ({
   ...managedAiControlSummary(session, { includeEvents: true, includeDecisions: true, eventLimit: 25, decisionLimit: 25 }),
-  descriptor: control_compatMobileChatDescriptor(session)
+  descriptor: mobileChatDescriptor(session)
 })
 
 const resolveMobileChatSession = async (params: Record<string, unknown>) => {
@@ -307,7 +307,7 @@ const resolveMobileChatSession = async (params: Record<string, unknown>) => {
   const source = cleanText(params.source || params.agent || params.agent_kind)
   const snapshot = await listManagedAiSessions()
   if (!snapshot.ok || !snapshot.data) return { error: fail(snapshot.errorCode || 'MOBILE_CHAT_UNAVAILABLE', snapshot.errorMessage || 'Managed AI sessions are unavailable.') }
-  const matches = snapshot.data.sessions.filter((session) => session.id === sessionId && (!source || session.source === source || control_compatChatAgentKind(session.source) === source))
+  const matches = snapshot.data.sessions.filter((session) => session.id === sessionId && (!source || session.source === source || mobileChatAgentKind(session.source) === source))
   if (!matches.length) return { error: fail('MOBILE_CHAT_SESSION_NOT_FOUND', `Mobile chat session was not found: ${source ? `${source}:` : ''}${sessionId}`) }
   if (matches.length > 1) return { error: fail('MOBILE_CHAT_SOURCE_REQUIRED', `Multiple mobile chat sessions match ${sessionId}; pass source.`) }
   return { session: matches[0], snapshot: snapshot.data }
@@ -355,12 +355,12 @@ export const handleMobileChatControlRequest = async (method: string, params: Rec
     const limit = normalizeLimit(params.limit, 100)
     const filtered = snapshot.data.sessions.filter((session) => {
       if (workspaceId && session.workspaceId !== workspaceId) return false
-      if (source && session.source !== source && control_compatChatAgentKind(session.source) !== source) return false
+      if (source && session.source !== source && mobileChatAgentKind(session.source) !== source) return false
       if (!includeEnded && session.state === 'ended') return false
       return Boolean(session.panelId || session.terminalSessionId || session.cwd || session.transcriptPath || session.events.length)
     })
     return ok({
-      sessions: filtered.slice(0, limit).map(control_compatMobileChatDescriptor),
+      sessions: filtered.slice(0, limit).map(mobileChatDescriptor),
       count: filtered.length,
       total: snapshot.data.sessions.length,
       needs_input_count: filtered.filter((session) => session.state === 'needsInput').length
@@ -370,7 +370,7 @@ export const handleMobileChatControlRequest = async (method: string, params: Rec
     const snapshot = await listManagedAiSessions()
     if (!snapshot.ok || !snapshot.data) return fail(snapshot.errorCode || 'MOBILE_CHAT_UNAVAILABLE', snapshot.errorMessage || 'Managed AI sessions are unavailable.')
     return ok({
-      sessions: snapshot.data.sessions.map(control_compatChatSessionDebugSummary),
+      sessions: snapshot.data.sessions.map(mobileChatSessionDebugSummary),
       count: snapshot.data.sessions.length,
       needs_input_count: snapshot.data.sessions.filter((session) => session.state === 'needsInput').length
     })
@@ -385,9 +385,9 @@ export const handleMobileChatControlRequest = async (method: string, params: Rec
     const pageEvents = Number.isFinite(beforeSeq) && beforeSeq >= 0 ? events.filter((_event, index) => index < beforeSeq).slice(-limit) : events.slice(-limit)
     const baseSeq = Number.isFinite(beforeSeq) && beforeSeq >= 0 ? Math.max(0, Math.floor(beforeSeq) - pageEvents.length) : Math.max(0, events.length - pageEvents.length)
     return ok({
-      messages: pageEvents.map((event, index) => control_compatChatMessageFromEvent(event, session, baseSeq + index)),
+      messages: pageEvents.map((event, index) => mobileChatMessageFromEvent(event, session, baseSeq + index)),
       has_more: events.length > pageEvents.length && baseSeq > 0,
-      session: control_compatMobileChatDescriptor(session),
+      session: mobileChatDescriptor(session),
       source: 'managed-ai-events',
       transcript_unavailable: Boolean(session.transcriptPath) ? false : true
     })
@@ -479,7 +479,7 @@ const resolveManagedAiControlSessionByRequest = async (params: Record<string, un
   return { requestId, session: matches[0], snapshot: snapshot.data }
 }
 
-const control_compatFeedEventFromParams = (params: Record<string, unknown>) => {
+const feedEventFromParams = (params: Record<string, unknown>) => {
   const nestedEvent = params.event && typeof params.event === 'object' && !Array.isArray(params.event) ? (params.event as Record<string, unknown>) : {}
   const topLevelEventName = typeof params.event === 'string' ? params.event : ''
   const event: Record<string, unknown> = { ...params, ...nestedEvent }
@@ -775,8 +775,8 @@ export const handleFeedControlRequest = async (method: string, params: Record<st
   await ensureAgentSessionStore()
   const action = method.slice('feed.'.length)
   if (action === 'list' || action === 'status') {
-    const control_compatPendingOnly = typeof params.pending_only === 'boolean' ? params.pending_only : typeof params.pendingOnly === 'boolean' ? params.pendingOnly : undefined
-    return handleAgentSessionControlRequest('agent.session.list', { ...params, needsInput: params.needsInput ?? params.needs_input ?? control_compatPendingOnly ?? true })
+    const pendingOnly = typeof params.pending_only === 'boolean' ? params.pending_only : typeof params.pendingOnly === 'boolean' ? params.pendingOnly : undefined
+    return handleAgentSessionControlRequest('agent.session.list', { ...params, needsInput: params.needsInput ?? params.needs_input ?? pendingOnly ?? true })
   }
   if (action === 'jump') {
     const workstreamId = cleanText(params.workstream_id || params.workstreamId || params.sessionId || params.session_id || params.id || params.request_id || params.requestId)
@@ -791,7 +791,7 @@ export const handleFeedControlRequest = async (method: string, params: Record<st
     })
   }
   if (action === 'push') {
-    const event = control_compatFeedEventFromParams(params)
+    const event = feedEventFromParams(params)
     const result = publishAiAgentSessionEvent(event, null)
     if (!result.ok || !result.data) return fail(result.errorCode || 'FEED_PUSH_FAILED', result.errorMessage || 'Managed AI feed event was not accepted.')
     const snapshot = await listManagedAiSessions()

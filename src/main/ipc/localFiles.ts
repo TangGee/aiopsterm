@@ -124,7 +124,7 @@ const ensureLocalDirectory = async (input?: EnsureLocalDirectoryInput): Promise<
 const e2eOpenDialogFixture = async (input: RegisterLocalFilesIpcInput, options: OpenDialogOptions | undefined) => {
   if (!input.shouldUseE2eDialogFixtures()) return undefined
   if (hasOpenProperty(options, 'openFile') && hasFilterNamed(options, 'Asset Import Files')) {
-    const assetImportPath = join(input.getUserDataPath(), 'e2e-external-reference-assets.json')
+    const assetImportPath = join(input.getUserDataPath(), 'e2e-aiopsterm-assets.json')
     return writeFixture(
       input,
       assetImportPath,

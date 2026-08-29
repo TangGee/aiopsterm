@@ -40,4 +40,4 @@ docs
 
 The main process rejects unsupported schemes, unsupported targets, unsupported settings sections, and internal attachment refs such as `aiopsterm://chat-attachment/...`.
 
-Deep links only route to local aiopsterm UI state. They do not call External reference services, login callbacks, sync APIs, or remote backends.
+Deep links only route to local aiopsterm UI state. They do not call login callbacks, sync APIs, or remote backends.

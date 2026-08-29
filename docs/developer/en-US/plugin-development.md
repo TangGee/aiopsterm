@@ -1,6 +1,6 @@
 # Develop aiopsterm Plugins
 
-An aiopsterm plugin is a declarative capability package validated and hosted by aiopsterm. It is not compatible with External reference plugins and does not execute a plugin-provided JavaScript entry point.
+An aiopsterm plugin is a declarative capability package validated and hosted by aiopsterm. It does not execute a plugin-provided JavaScript entry point.
 
 The current plugin kinds are:
 
@@ -18,7 +18,7 @@ my-plugin.aiopsterm-plugin
 
 Built-in plugins remain unpacked below `resources/builtin-plugins/<plugin-name>/aiopsterm.plugin.json`. Packaging copies that directory into the application resources.
 
-`.external-reference` packages and External reference `plugin.json` manifests are unsupported.
+Unsupported package extensions and legacy manifests are rejected.
 
 ## Manifest
 

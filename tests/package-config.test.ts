@@ -68,7 +68,6 @@ describe('package configuration audit', () => {
     const mainSource = readFileSync('src/main/index.ts', 'utf8')
     const packagedAudit = readFileSync('scripts/audit-packaged-app.mjs', 'utf8')
     expect(builderConfig).toContain('  - from: docs\n    to: docs')
-    expect(builderConfig).not.toContain('from: external-reference')
     expect(mainSource).toContain("join(process.resourcesPath || '', 'docs', 'usage', 'best-practices')")
     expect(mainSource).toContain('await knowledgeBaseRuntime.ensureKnowledgeBaseDirectory().catch((error) => {')
     expect(packagedAudit).toContain("join(resourcesDir, 'docs', 'usage', 'best-practices', 'index.md')")

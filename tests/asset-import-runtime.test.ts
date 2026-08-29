@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parseAssetImportContent } from '../src/shared/assetImport'
 
 describe('assetImport shared parser', () => {
-  it('parses External reference JSON and CSV host rows', () => {
+  it('parses generic JSON and CSV host rows', () => {
     expect(
       parseAssetImportContent(
         JSON.stringify({
@@ -10,7 +10,7 @@ describe('assetImport shared parser', () => {
             { label: 'json-host', ip: '10.10.1.5', username: 'ops', group_name: 'JSON', port: 2222, auth_type: 'keyBased' }
           ]
         }),
-        'external-reference-assets.json'
+        'aiopsterm-assets.json'
       )
     ).toEqual([
       expect.objectContaining({

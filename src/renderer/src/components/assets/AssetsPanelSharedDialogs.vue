@@ -112,7 +112,7 @@
           </button>
         </header>
         <div class="asset-import-help-content">
-          <p>支持 external-reference.json、CSV、XSH/XTS、INI/XML、MXTSESSIONS 等会话文件。</p>
+          <p>支持 JSON、CSV、XSH/XTS、INI/XML、MXTSESSIONS 等会话文件。</p>
           <p>CSV 建议包含 username、ip、password、label、group_name、auth_type、port 字段；缺失字段会在预览阶段提示。</p>
           <p>点击导入后先打开预览确认，确认前不会写入资产库。</p>
         </div>
@@ -138,7 +138,7 @@
             <X />
           </button>
         </header>
-        <p>选择要导出的主机，导出文件名使用 external-reference-assets-YYYY-MM-DD.json。</p>
+        <p>选择要导出的主机，导出文件名使用 aiopsterm-assets-YYYY-MM-DD.json。</p>
         <div class="asset-search-input export-search">
           <input
             v-model="exportQuery"

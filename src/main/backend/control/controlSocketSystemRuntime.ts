@@ -405,7 +405,7 @@ const systemTopPayload = async (params: Record<string, unknown>, options: { memo
     windows: tree.windows,
     compatibility: {
       source: 'aiopsterm',
-      control_compat_shape: true,
+      cmux_shape: true,
       process_scope: 'aiopsterm-main-process',
       renderer_snapshot_available: Boolean(snapshot)
     },

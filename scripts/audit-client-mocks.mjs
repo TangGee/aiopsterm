@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { basename, extname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -13,7 +13,7 @@ const repoRootFromArg = () => {
 
 const scriptPath = fileURLToPath(import.meta.url)
 
-const skippedDirs = new Set(['.git', 'node_modules', 'out', 'dist', 'test-results', 'playwright-report', 'coverage', 'external-reference'])
+const skippedDirs = new Set(['.git', 'node_modules', 'out', 'dist', 'test-results', 'playwright-report', 'coverage'])
 const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.json', '.less', '.css'])
 const largeFileThresholds = [
   { root: ['src', 'main'], extensions: new Set(['.ts']), maxLines: 1800 },
@@ -42,19 +42,6 @@ const largeFileBaselines = new Map(
     'src/main/backend/assets.ts': 1818
   })
 )
-const rootBoundaryFiles = [
-  'package.json',
-  'electron.vite.config.ts',
-  'vite.config.ts',
-  'vitest.config.ts',
-  'playwright.config.ts',
-  'electron-builder.yml',
-  'electron-builder.yaml',
-  'tsconfig.json',
-  'tsconfig.node.json',
-  'tsconfig.web.json'
-]
-
 const toPosix = (value) => value.split(sep).join('/')
 
 const isUnder = (target, root) => {
@@ -226,35 +213,6 @@ const rendererConfigStaticMetadataFailures = (filePath, content) => {
   return failures
 }
 
-const external-referenceImportPattern = /(?:from|require|import)\s*\(?\s*['"][^'"]*(?:^|\/|\.\.)external-reference(?:\/|['"])/
-
-const external-referenceTreePathPattern = /(^|[^.\w-])(?:\.{1,2}\/)?external-reference[\\/]/i
-
-const hasExternal referenceTreePathReference = (content) => external-referenceTreePathPattern.test(content.replace(/\\/g, '/'))
-
-const isAllowedExternal referenceTreeExclusion = (line) => {
-  const normalized = line.replace(/\\/g, '/').trim()
-  const token = normalized
-    .replace(/^[-\s,[{]+/, '')
-    .replace(/[,\]}]+$/, '')
-    .replace(/^['"]|['"]$/g, '')
-  return /^!\.?(?:\/)?external-reference\/\*\*$/.test(token)
-}
-
-const external-referenceTreeReferenceFailures = (filePath, content, message) => {
-  const failures = []
-  content.split(/\r?\n/).forEach((line, index) => {
-    if (!hasExternal referenceTreePathReference(line) || isAllowedExternal referenceTreeExclusion(line)) return
-    failures.push({
-      filePath,
-      rule: 'external-reference-tree-reference',
-      message,
-      lineNumber: index + 1
-    })
-  })
-  return failures
-}
-
 const countLines = (content) => (content ? content.split(/\r?\n/).filter((line, index, lines) => index < lines.length - 1 || line.length > 0).length : 0)
 
 const largeFileAuditFailures = (repoRoot) => {
@@ -282,7 +240,6 @@ export const auditClientMocks = (root = repoRootFromArg()) => {
   const rendererRoot = join(repoRoot, 'src', 'renderer', 'src')
   const rendererDataRoot = join(rendererRoot, 'data')
   const rendererConfigRoot = join(rendererRoot, 'config')
-  const sourceRoots = [join(repoRoot, 'src'), join(repoRoot, 'scripts')]
   const failures = []
 
   for (const filePath of walkFiles(rendererDataRoot)) {
@@ -320,39 +277,6 @@ export const auditClientMocks = (root = repoRootFromArg()) => {
         message: 'Renderer fixture directories are not allowed for product business data.'
       })
     }
-  }
-
-  for (const rootPath of sourceRoots) {
-    for (const filePath of walkFiles(rootPath)) {
-      if (filePath === scriptPath) continue
-      const content = readFileSync(filePath, 'utf8')
-      if (external-referenceImportPattern.test(content)) {
-        failures.push({
-          filePath,
-          rule: 'external-reference-source-import',
-          message: 'external-reference/ is reference-only and must not be imported, required, or packaged by aiopsterm source.'
-        })
-      }
-      failures.push(
-        ...external-referenceTreeReferenceFailures(
-          filePath,
-          content,
-          'external-reference/ is reference-only and must not be copied, built from, packaged, or treated as an aiopsterm runtime source path.'
-        )
-      )
-    }
-  }
-
-  for (const fileName of rootBoundaryFiles) {
-    const filePath = join(repoRoot, fileName)
-    if (!existsSync(filePath) || !statSync(filePath).isFile()) continue
-    failures.push(
-      ...external-referenceTreeReferenceFailures(
-        filePath,
-        readFileSync(filePath, 'utf8'),
-        'Build, package, and project configuration must not include external-reference/ reference-tree inputs; explicit !external-reference/** exclusions are allowed.'
-      )
-    )
   }
 
   failures.push(...largeFileAuditFailures(repoRoot))

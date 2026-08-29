@@ -2,8 +2,6 @@
 
 This document defines the architecture rules used when changing aiopsterm. It is the decision guide for keeping the codebase cohesive, loosely coupled, and maintainable.
 
-For migration history and current progress, see [Architecture Modernization Plan](architecture-modernization.md).
-
 ## Layer Model
 
 aiopsterm follows a process and domain layered architecture:
@@ -38,11 +36,11 @@ Each layer has one primary reason to change:
 
 - `main` may import from `main` and process-neutral shared contracts/rules.
 - `preload` may import from shared contracts and Electron preload APIs only.
-- `renderer` may import from `renderer` and shared contracts, but not from `main`, `preload`, Electron, or `external-reference/`.
+- `renderer` may import from `renderer` and shared contracts, but not from `main`, `preload`, Electron, or reference-only source trees.
 - `shared/contracts` must stay process-neutral and must not import Electron, Vue, Node-only modules, renderer code, or main-process code.
 - Node-only shared runtimes are allowed only when they are consumed by main-process code or tests, not by renderer code.
 - Renderer components should use stores, controllers, or domain clients instead of calling `window.aiops` directly.
-- `external-reference/` is reference-only. Do not import, copy, build from, or package files from `external-reference/` into aiopsterm.
+- Reference-only source trees must not be imported, copied, built from, or packaged into aiopsterm.
 
 ## Domain Ownership
 
@@ -206,6 +204,6 @@ Before changing architecture, answer:
 - Which public facade or user path must stay stable?
 - What test proves the behavior did not move incorrectly?
 - Does the split reduce coupling, or only reduce line count?
-- Does the change avoid importing, copying, building, or packaging from `external-reference/`?
+- Does the change avoid importing, copying, building, or packaging from reference-only source trees?
 
 If the answers are weak, stop and leave the current structure intact.

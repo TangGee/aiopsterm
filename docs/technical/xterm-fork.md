@@ -26,7 +26,7 @@ The fork keeps the official CommonJS/UMD `main` bundles. `electron.vite.config.t
 - Browser xterm compatibility renderer behavior: `vendor/xterm/xterm`.
 - aiopsterm threaded scheduling, worker protocol, canvas rendering, scrollbar, and selection glue: `src/renderer/src/services/terminal`.
 
-Do not patch `node_modules`; reinstalling dependencies will discard it. Do not import or copy from `external-reference/`.
+Do not patch `node_modules`; reinstalling dependencies will discard it. Do not import or copy from reference-only source trees.
 
 ## Verification
 

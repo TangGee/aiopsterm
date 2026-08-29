@@ -3631,7 +3631,7 @@ describe('workspace store', () => {
     ])
   })
 
-  it('hydrates and migrates persisted External reference-style onboarding completion state', async () => {
+  it('hydrates and migrates persisted onboarding completion state', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
       language: 'zh-CN',
@@ -3732,8 +3732,8 @@ describe('workspace store', () => {
         },
         keywordHighlight: defaultKeywordHighlight,
         privacy: {
-          telemetry: 'undecided',
-          telemetryConsentVersion: 0,
+          telemetry: 'enabled',
+          telemetryConsentVersion: 1,
           secretRedaction: 'disabled',
           dataSync: 'disabled'
         },
@@ -3819,8 +3819,8 @@ describe('workspace store', () => {
         },
         keywordHighlight: defaultKeywordHighlight,
         privacy: {
-          telemetry: 'undecided',
-          telemetryConsentVersion: 0,
+          telemetry: 'enabled',
+          telemetryConsentVersion: 1,
           secretRedaction: 'disabled',
           dataSync: 'disabled'
         },
@@ -3838,7 +3838,7 @@ describe('workspace store', () => {
     expect(window.aiops.getSettingsPreferences).toHaveBeenCalledWith()
   })
 
-  it('hydrates and migrates External reference-style editor settings', async () => {
+  it('hydrates and migrates editor settings', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
       language: 'zh-CN',
@@ -3950,7 +3950,7 @@ describe('workspace store', () => {
     )
   })
 
-  it('hydrates and migrates External reference-style SSH proxy configs', async () => {
+  it('hydrates and migrates SSH proxy configs', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
       language: 'zh-CN',
@@ -4083,7 +4083,7 @@ describe('workspace store', () => {
     )
   })
 
-  it('hydrates and migrates External reference-style SSH Agent key rows', async () => {
+  it('hydrates and migrates SSH Agent key rows', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
       language: 'zh-CN',
@@ -4351,7 +4351,7 @@ describe('workspace store', () => {
     }
   })
 
-  it('hydrates and migrates External reference-style user rules and legacy custom instructions', async () => {
+  it('hydrates and migrates user rules and legacy custom instructions', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
       language: 'zh-CN',
@@ -4450,7 +4450,7 @@ describe('workspace store', () => {
     expect(window.aiops.getSettingsPreferences).toHaveBeenCalledWith()
   })
 
-  it('hydrates and migrates External reference-style MCP server list and tool states', async () => {
+  it('hydrates and migrates MCP server list and tool states', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
       language: 'zh-CN',
@@ -4570,7 +4570,7 @@ describe('workspace store', () => {
     )
   })
 
-  it('hydrates and migrates External reference-style Skills rows', async () => {
+  it('hydrates and migrates Skills rows', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
       language: 'zh-CN',
@@ -4710,7 +4710,7 @@ describe('workspace store', () => {
     )
   })
 
-  it('hydrates and migrates External reference-style flat shortcut config to aiopsterm shortcut rows', async () => {
+  it('hydrates and migrates flat shortcut config to aiopsterm shortcut rows', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
       language: 'zh-CN',
@@ -4814,7 +4814,7 @@ describe('workspace store', () => {
     expect(window.aiops.getSettingsPreferences).toHaveBeenCalledWith()
   })
 
-  it('hydrates and migrates External reference-style model settings', async () => {
+  it('hydrates and migrates model settings', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
       language: 'zh-CN',
@@ -4963,7 +4963,7 @@ describe('workspace store', () => {
     )
   })
 
-  it('hydrates persisted External reference-style quick command groups and snippets', async () => {
+  it('hydrates persisted quick command groups and snippets', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getQuickCommands).mockResolvedValueOnce({
       groups: [{ id: 11, uuid: 'group-release', group_name: '发布命令' }],
@@ -5432,7 +5432,7 @@ describe('workspace store', () => {
     expect(vi.mocked(window.aiops.listFileTransferTasks)).toHaveBeenCalledTimes(1)
   })
 
-  it('hydrates and migrates External reference-style keyword highlight config', async () => {
+  it('hydrates and migrates keyword highlight config', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
       language: 'zh-CN',
@@ -5604,7 +5604,7 @@ describe('workspace store', () => {
     )
   })
 
-  it('hydrates and migrates External reference-style security configuration', async () => {
+  it('hydrates and migrates security configuration', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
       language: 'zh-CN',
@@ -5742,7 +5742,7 @@ describe('workspace store', () => {
     )
   })
 
-  it('hydrates and migrates External reference-style privacy settings', async () => {
+  it('hydrates and migrates privacy settings', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
       language: 'zh-CN',
@@ -5850,7 +5850,7 @@ describe('workspace store', () => {
     )
   })
 
-  it('hydrates and migrates External reference-style AI preference settings', async () => {
+  it('hydrates and migrates AI preference settings', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
       language: 'zh-CN',
@@ -6006,7 +6006,7 @@ describe('workspace store', () => {
     })
   })
 
-  it('hydrates persisted External reference-style knowledge base tree and capacity state', async () => {
+  it('hydrates persisted knowledge base tree and capacity state', async () => {
     const store = useWorkspaceStore()
     ;(globalThis as any).__setKnowledgeTreeMock?.([
       {
@@ -6153,7 +6153,7 @@ describe('workspace store', () => {
     await vi.runAllTimersAsync()
   })
 
-  it('derives External reference-style AI tab titles from the first prompt without overwriting named history', async () => {
+  it('derives AI tab titles from the first prompt without overwriting named history', async () => {
     const store = useWorkspaceStore()
     const created = await store.createConversation()
     expect(created?.title).toBe('新会话')
@@ -6222,7 +6222,7 @@ describe('workspace store', () => {
     }
   })
 
-  it('opens terminal-scoped file sessions and generates External reference-style terminal commands', async () => {
+  it('opens terminal-scoped file sessions and generates terminal commands', async () => {
     const store = useWorkspaceStore()
     await store.refreshAiModelCatalog()
 
@@ -6959,7 +6959,7 @@ describe('workspace store', () => {
     }
   })
 
-  it('manages External reference-style AI history conversation actions through backend snapshots', async () => {
+  it('manages AI history conversation actions through backend snapshots', async () => {
     const store = useWorkspaceStore()
     await store.loadChatConversationsFromBackend({ restoreIfEmpty: false })
 
@@ -7295,7 +7295,7 @@ describe('workspace store', () => {
     expect(store.topNotice).toBe('终端命令生成结果无效')
   })
 
-  it('manages External reference-style context chips, command presets, message actions, and todos', async () => {
+  it('manages context chips, command presets, message actions, and todos', async () => {
     const store = useWorkspaceStore()
 
     store.toggleContext({ id: 'doc-linux', kind: 'docs', label: 'Linux 巡检手册' })
@@ -7489,7 +7489,7 @@ describe('workspace store', () => {
     expect(firstPanel.output).not.toContain('echo second')
   })
 
-  it('manages External reference-style quick command scripts and macro snippets', async () => {
+  it('manages quick command scripts and macro snippets', async () => {
     const store = useWorkspaceStore()
     store.securitySettings.security.securityPolicy.blockCritical = false
     await store.refreshQuickCommands()
@@ -8779,7 +8779,7 @@ describe('workspace store', () => {
     }
   })
 
-  it('persists External reference-style knowledge base create, rename, paste, delete, and import completion state', async () => {
+  it('persists knowledge base create, rename, paste, delete, and import completion state', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.saveConfig).mockClear()
 
@@ -8837,7 +8837,7 @@ describe('workspace store', () => {
     expectNoBusinessDataConfigWrites(['knowledgeBase'])
   })
 
-  it('opens External reference-style knowledge editor panels and synchronizes rename, delete, and cut moves', async () => {
+  it('opens knowledge editor panels and synchronizes rename, delete, and cut moves', async () => {
     const store = useWorkspaceStore()
     await store.refreshKnowledgeTree({ persist: false })
 
@@ -9221,7 +9221,7 @@ describe('workspace store', () => {
     }
   })
 
-  it('adds External reference-style knowledge docs and images to AI context and includes them in chat payloads', async () => {
+  it('adds knowledge docs and images to AI context and includes them in chat payloads', async () => {
     const store = useWorkspaceStore()
     await store.refreshKnowledgeTree({ persist: false })
 
@@ -10020,7 +10020,7 @@ describe('workspace store', () => {
     }
   })
 
-  it('manages External reference-style Kubernetes contexts, clusters, terminals, and bastion sync', async () => {
+  it('manages Kubernetes contexts, clusters, terminals, and bastion sync', async () => {
     vi.useFakeTimers()
     const store = useWorkspaceStore()
     try {
@@ -11619,7 +11619,7 @@ describe('workspace store', () => {
     }
   })
 
-  it('manages External reference-style settings state for general, terminal, model, and AI preferences', async () => {
+  it('manages settings state for general, terminal, model, and AI preferences', async () => {
     const store = useWorkspaceStore()
 
     store.setActiveSettingsSection('terminal')
@@ -12334,8 +12334,8 @@ describe('workspace store', () => {
       await expect(store.updatePrivacySettings({ telemetry: 'disabled' })).resolves.toBe(false)
       expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({
         privacy: {
-          telemetry: 'undecided',
-          telemetryConsentVersion: 0,
+          telemetry: 'enabled',
+          telemetryConsentVersion: 1,
           secretRedaction: 'disabled',
           dataSync: 'disabled'
         }
@@ -12347,14 +12347,14 @@ describe('workspace store', () => {
       await expect(store.updatePrivacySettings({ dataSync: 'enabled' })).resolves.toBe(true)
       expect(window.aiops.applyPrivacyRuntimeSettings).toHaveBeenLastCalledWith({
         previousPrivacy: {
-          telemetry: 'undecided',
-          telemetryConsentVersion: 0,
+          telemetry: 'enabled',
+          telemetryConsentVersion: 1,
           secretRedaction: 'disabled',
           dataSync: 'disabled'
         },
         nextPrivacy: {
-          telemetry: 'undecided',
-          telemetryConsentVersion: 0,
+          telemetry: 'enabled',
+          telemetryConsentVersion: 1,
           secretRedaction: 'disabled',
           dataSync: 'enabled'
         }
@@ -12399,8 +12399,8 @@ describe('workspace store', () => {
       expect(store.settingsNotice).toBe('隐私设置已保存')
       expect(window.aiops.applyPrivacyRuntimeSettings).toHaveBeenLastCalledWith({
         previousPrivacy: {
-          telemetry: 'undecided',
-          telemetryConsentVersion: 0,
+          telemetry: 'enabled',
+          telemetryConsentVersion: 1,
           secretRedaction: 'disabled',
           dataSync: 'disabled'
         },
@@ -12435,8 +12435,8 @@ describe('workspace store', () => {
     await expect(store.updatePrivacySettings({ secretRedaction: 'enabled' })).resolves.toBe(true)
     expect(window.aiops.saveConfig).toHaveBeenCalledWith({
       privacy: {
-        telemetry: 'undecided',
-        telemetryConsentVersion: 0,
+        telemetry: 'enabled',
+        telemetryConsentVersion: 1,
         secretRedaction: 'enabled',
         dataSync: 'disabled'
       }
@@ -12446,8 +12446,8 @@ describe('workspace store', () => {
     await expect(store.updatePrivacySettings({ telemetry: 'disabled' })).resolves.toBe(true)
     expect(window.aiops.applyPrivacyRuntimeSettings).toHaveBeenCalledWith({
       previousPrivacy: {
-        telemetry: 'undecided',
-        telemetryConsentVersion: 0,
+        telemetry: 'enabled',
+        telemetryConsentVersion: 1,
         secretRedaction: 'enabled',
         dataSync: 'disabled'
       },
@@ -13005,7 +13005,7 @@ describe('workspace store', () => {
     }
   })
 
-  it('manages remaining External reference-style settings lists and toggles', async () => {
+  it('manages remaining settings lists and toggles', async () => {
     const store = useWorkspaceStore()
 
     await store.refreshUserAccount()
@@ -15685,7 +15685,7 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     expect(window.aiops.saveConfig).not.toHaveBeenCalled()
   })
 
-  it('manages External reference-style onboarding guide, tour preparation, and completion state', () => {
+  it('manages onboarding guide, tour preparation, and completion state', () => {
     const store = useWorkspaceStore()
 
     store.openOnboardingGuide()

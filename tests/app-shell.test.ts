@@ -2485,7 +2485,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('switches core shell and AI labels through the External reference locale set', async () => {
+  it('switches core shell and AI labels through the application locale set', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const wrapper = mount(AppShell, {
@@ -2800,7 +2800,7 @@ describe('AppShell', () => {
     expect(store.topNotice).toContain('deep link')
   })
 
-  it('binds External reference-style configured shortcuts at runtime', async () => {
+  it('binds configured shortcuts at runtime', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const wrapper = mount(AppShell, {
@@ -3256,7 +3256,7 @@ describe('AppShell', () => {
     }
   })
 
-  it('follows External reference-style asset management navigation and filters knowledge documents', async () => {
+  it('follows asset management navigation and filters knowledge documents', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useWorkspaceStore()
@@ -3742,7 +3742,7 @@ describe('AppShell', () => {
     }
   })
 
-  it('supports External reference-style asset import/export and organization asset table management', async () => {
+  it('supports asset import/export and organization asset table management', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     vi.mocked(window.aiops.exportAssets).mockClear()
@@ -3767,7 +3767,7 @@ describe('AppShell', () => {
     expect(window.aiops.exportAssets).toHaveBeenCalledWith({ assetIds: ['asset-1'] })
     expect(window.aiops.showSaveDialog).not.toHaveBeenCalled()
     expect(window.aiops.writeLocalFile).not.toHaveBeenCalled()
-    expect(assets.text()).toContain('已导出 1 个主机到 external-reference-assets-2024-06-01.json')
+    expect(assets.text()).toContain('已导出 1 个主机到 aiopsterm-assets-2024-06-01.json')
     expect(assets.find('.export-assets-modal').exists()).toBe(false)
 
     const originalFileReader = window.FileReader
@@ -3785,7 +3785,7 @@ describe('AppShell', () => {
       vi.mocked(window.aiops.previewAssetImport).mockClear()
       vi.mocked(window.aiops.confirmAssetImport).mockClear()
       vi.mocked(window.aiops.saveAsset).mockClear()
-      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/external-reference-assets.json'] })
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/aiopsterm-assets.json'] })
       await assets.findAll('.asset-action-button').find((button) => button.text().includes('导入'))!.trigger('click')
       await flushPromises()
       expect(window.aiops.showOpenDialog).toHaveBeenCalledWith(
@@ -3794,13 +3794,13 @@ describe('AppShell', () => {
           filters: expect.arrayContaining([expect.objectContaining({ name: 'Asset Import Files' })])
         })
       )
-      expect(window.aiops.previewAssetImport).toHaveBeenCalledWith({ filePath: '/tmp/external-reference-assets.json' })
+      expect(window.aiops.previewAssetImport).toHaveBeenCalledWith({ filePath: '/tmp/aiopsterm-assets.json' })
       expect(window.aiops.readLocalFile).not.toHaveBeenCalled()
       expect(assets.find('.import-assets-modal').text()).toContain('其中 1 个与现有主机重复')
       expect(assets.find('.import-assets-modal').text()).toContain('imported-json')
       await assets.findAll('.import-assets-modal footer button').find((button) => button.text().includes('跳过重复'))!.trigger('click')
       await flushPromises()
-      expect(window.aiops.confirmAssetImport).toHaveBeenCalledWith({ filePath: '/tmp/external-reference-assets.json', overwrite: false })
+      expect(window.aiops.confirmAssetImport).toHaveBeenCalledWith({ filePath: '/tmp/aiopsterm-assets.json', overwrite: false })
       expect(window.aiops.saveAsset).not.toHaveBeenCalled()
       expect(assets.text()).toContain('imported-json')
       expect(assets.findAll('.host-card').some((card) => card.text().includes('prod-bastion-imported'))).toBe(false)
@@ -4372,7 +4372,7 @@ describe('AppShell', () => {
         ok: true,
         data: {
           exported: 0,
-          fileName: 'external-reference-assets-2024-06-01.json',
+          fileName: 'aiopsterm-assets-2024-06-01.json',
           canceled: true
         }
       })
@@ -4419,7 +4419,7 @@ describe('AppShell', () => {
 
       ;(window.aiops as any).showOpenDialog = originalAiops.showOpenDialog
       ;(window.aiops as any).previewAssetImport = undefined
-      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/external-reference-assets.json'] })
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/aiopsterm-assets.json'] })
       await importButton().trigger('click')
       await flushPromises()
       expect(assets.text()).toContain('导入文件预览服务不可用。')
@@ -4427,7 +4427,7 @@ describe('AppShell', () => {
       expect(assets.find('.import-assets-modal').exists()).toBe(false)
 
       ;(window.aiops as any).previewAssetImport = originalAiops.previewAssetImport
-      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/external-reference-assets.json'] })
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/aiopsterm-assets.json'] })
       vi.mocked(window.aiops.previewAssetImport).mockRejectedValueOnce(new Error('asset preview denied'))
       await importButton().trigger('click')
       await flushPromises()
@@ -4435,7 +4435,7 @@ describe('AppShell', () => {
       expect(window.aiops.readLocalFile).not.toHaveBeenCalled()
       expect(assets.find('.import-assets-modal').exists()).toBe(false)
 
-      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/external-reference-assets.json'] })
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/aiopsterm-assets.json'] })
       vi.mocked(window.aiops.previewAssetImport).mockResolvedValueOnce({
         ok: false,
         errorCode: 'ASSET_IMPORT_PARSE_FAILED',
@@ -4533,7 +4533,7 @@ describe('AppShell', () => {
       ok: true,
       data: {
         exported: 1,
-        fileName: 'external-reference-assets-2024-06-01.json',
+        fileName: 'aiopsterm-assets-2024-06-01.json',
         filePath: '/tmp/assets-export.json'
       }
     } as any)
@@ -4543,10 +4543,10 @@ describe('AppShell', () => {
     expect(assets.find('.export-assets-modal').exists()).toBe(true)
     expect(assets.text()).not.toContain('已导出 1 个主机')
 
-    vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/external-reference-assets.json'] })
+    vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/aiopsterm-assets.json'] })
     vi.mocked(window.aiops.previewAssetImport).mockResolvedValueOnce({
       ok: true,
-      data: { filePath: '/tmp/external-reference-assets.json', fileName: 'external-reference-assets.json', assets: [{ previewId: 'missing-host' }], duplicateCount: 0 }
+      data: { filePath: '/tmp/aiopsterm-assets.json', fileName: 'aiopsterm-assets.json', assets: [{ previewId: 'missing-host' }], duplicateCount: 0 }
     } as any)
     await assets.findAll('.asset-action-button').find((button) => button.text().includes('导入'))!.trigger('click')
     await flushPromises()
@@ -4808,7 +4808,7 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('(后端备注)')
   })
 
-  it('starts Workspace SSH tunnels with External reference-style typed parameters from the modal', async () => {
+  it('starts Workspace SSH tunnels with typed parameters from the modal', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useWorkspaceStore()
@@ -5390,7 +5390,7 @@ describe('AppShell', () => {
     filesPanel.unmount()
   })
 
-  it('matches External reference-style SSH resource tree tabs, display toggle, refresh, and context actions', async () => {
+  it('matches SSH resource tree tabs, display toggle, refresh, and context actions', async () => {
     vi.useFakeTimers()
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -5845,7 +5845,7 @@ describe('AppShell', () => {
     }
   })
 
-  it('matches External reference-style user menu and user info card interactions', async () => {
+  it('matches user menu and user info card interactions', async () => {
     vi.useFakeTimers()
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -6266,7 +6266,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('returns External reference-style context submenus to main on Escape and empty Backspace', async () => {
+  it('returns context submenus to main on Escape and empty Backspace', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const { wrapper, store } = await mountAiPanelWithModels(pinia)
@@ -6854,7 +6854,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('matches External reference-style Agent host context batch actions', async () => {
+  it('matches Agent host context batch actions', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const { wrapper, store } = await mountAiPanelWithModels(pinia)
@@ -7304,7 +7304,7 @@ describe('AppShell', () => {
     }
   })
 
-  it('opens and resets the AI command popup with External reference-style keyboard focus behavior', async () => {
+  it('opens and resets the AI command popup with keyboard focus behavior', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const { wrapper } = await mountAiPanelWithModels(pinia)
@@ -8135,7 +8135,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('opens External reference-style context and command popups in the AI panel', async () => {
+  it('opens context and command popups in the AI panel', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useWorkspaceStore()
@@ -8578,7 +8578,7 @@ describe('AppShell', () => {
     expect(wrapper.text()).not.toContain('任务进度')
   })
 
-  it('shows Fork SSH Channel only for External reference-style SSH terminal panels', async () => {
+  it('shows Fork SSH Channel only for SSH terminal panels', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     mockXtermInstances.length = 0
@@ -8791,7 +8791,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('handles control_compat-style surface actions inside the shared terminal workspace', async () => {
+  it('handles surface actions inside the shared terminal workspace', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     mockXtermInstances.length = 0
@@ -8927,7 +8927,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('launches control_compat-style agent teams as grouped visible local terminals through the control socket', async () => {
+  it('launches agent teams as grouped visible local terminals through the control socket', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     mockXtermInstances.length = 0
@@ -9009,7 +9009,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('manages control_compat-style surface resume bindings through the control socket', async () => {
+  it('manages surface resume bindings through the control socket', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     mockXtermInstances.length = 0
@@ -9152,7 +9152,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('handles control_compat-style mobile terminal data-plane controls on shared terminal surfaces', async () => {
+  it('handles mobile terminal data-plane controls on shared terminal surfaces', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     mockXtermInstances.length = 0
@@ -9557,7 +9557,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('tracks surface telemetry and control_compat create/focus primitives through the control socket', async () => {
+  it('tracks surface telemetry and surface create/focus primitives through the control socket', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     mockXtermInstances.length = 0
@@ -9804,7 +9804,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('opens control_compat-style settings, feedback, and sidebar snapshots through the shared terminal workspace control handler', async () => {
+  it('opens settings, feedback, and sidebar snapshots through the shared terminal workspace control handler', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     mockXtermInstances.length = 0
@@ -10013,7 +10013,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('exports and restores control_compat-style session snapshots in the shared terminal workspace', async () => {
+  it('exports and restores session snapshots in the shared terminal workspace', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     mockXtermInstances.length = 0
@@ -11015,7 +11015,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('matches External reference-style terminal context menu, search overlay, suggestions, and global command bar', async () => {
+  it('matches terminal context menu, search overlay, suggestions, and global command bar', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     mockXtermInstances.length = 0
@@ -11756,7 +11756,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('matches External reference-style Files workspace modes, sessions, and transfer panel', async () => {
+  it('matches Files workspace modes, sessions, and transfer panel', async () => {
     vi.useFakeTimers()
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -12176,7 +12176,7 @@ describe('AppShell', () => {
     }
   })
 
-  it('supports External reference-style file table hidden toggle, rename, more menu, and move dialog', async () => {
+  it('supports file table hidden toggle, rename, more menu, and move dialog', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -13044,7 +13044,7 @@ describe('AppShell', () => {
     }
   })
 
-  it('matches External reference-style quick command groups, edit panel, search, menus, and recording', async () => {
+  it('matches quick command groups, edit panel, search, menus, and recording', async () => {
     vi.useFakeTimers()
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -13240,7 +13240,7 @@ describe('AppShell', () => {
     expect((wrapper.find('.script-editor-container textarea').element as HTMLTextAreaElement).value).toBe('echo failed')
   })
 
-  it('matches External reference-style quick command macro control keys, sleep threshold, and auto-stop', async () => {
+  it('matches quick command macro control keys, sleep threshold, and auto-stop', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     mount(SnippetsPanel, {
@@ -13283,7 +13283,7 @@ describe('AppShell', () => {
     expect(store.quickCommands.some((command) => command.snippet_content === 'staged command')).toBe(false)
   })
 
-  it('keeps External reference paste mode from submitting the final quick command after sleep lines', async () => {
+  it('keeps paste mode from submitting the final quick command after sleep lines', async () => {
     vi.useFakeTimers()
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -13308,7 +13308,7 @@ describe('AppShell', () => {
     expect(store.activePanel.output).not.toContain('echo second\n[snippet]')
   })
 
-  it('matches External reference-style knowledge tree search, add menu, context actions, rename, capacity, and import progress', async () => {
+  it('matches knowledge tree search, add menu, context actions, rename, capacity, and import progress', async () => {
     ;(globalThis as any).__resetKnowledgeTreeMock?.()
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -13498,7 +13498,7 @@ describe('AppShell', () => {
     }
   })
 
-  it('opens External reference-style knowledge files in the main workspace editor and adds them to AI context', async () => {
+  it('opens knowledge files in the main workspace editor and adds them to AI context', async () => {
     await loadMonaco()
     vi.useFakeTimers()
     ;(globalThis as any).__resetKnowledgeTreeMock?.()
@@ -14012,7 +14012,7 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('异常')
   })
 
-  it('matches External reference-style Kubernetes contexts, cluster sidebar, config, terminal, and modals', async () => {
+  it('matches Kubernetes contexts, cluster sidebar, config, terminal, and modals', async () => {
     vi.useFakeTimers()
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -14275,7 +14275,7 @@ describe('AppShell', () => {
     }
   })
 
-  it('matches External reference-style Database sidebar, tabs, SQL results, data grid, menus, and modals', async () => {
+  it('matches Database sidebar, tabs, SQL results, data grid, menus, and modals', async () => {
     const wrapper = mount(DatabaseWorkspace, {
       attachTo: document.body,
       global: { plugins: [createPinia()] }
@@ -17257,7 +17257,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('resizes the SQL editor/result panes with a External reference-style horizontal splitter', async () => {
+  it('resizes the SQL editor/result panes with a horizontal splitter', async () => {
     const wrapper = mount(DatabaseWorkspace, {
       attachTo: document.body,
       global: { plugins: [createPinia()] }
@@ -17309,7 +17309,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('matches External reference-style settings nav, general, terminal, model, and split AI settings', async () => {
+  it('matches settings nav, general, terminal, model, and split AI settings', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const panel = mount(SettingsPanel, {
@@ -17843,7 +17843,7 @@ describe('AppShell', () => {
     workspace.unmount()
   })
 
-  it('matches External reference-style onboarding guide and spotlight progress', async () => {
+  it('matches onboarding guide and spotlight progress', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const guide = mount(OnboardingGuide, {
@@ -18351,7 +18351,7 @@ describe('AppShell', () => {
     expect((showCloseSwitch.element as HTMLInputElement).checked).toBe(true)
   })
 
-  it('matches External reference-style remaining settings pages for extensions, nested AI agent pages, shortcuts, privacy, devices, billing, and about', async () => {
+  it('matches remaining settings pages for extensions, nested AI agent pages, shortcuts, privacy, devices, billing, and about', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const panel = mount(SettingsPanel, {

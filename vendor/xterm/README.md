@@ -24,5 +24,5 @@ The published bundles include source maps with `sourcesContent`, so the initial 
 
 - Make xterm and headless terminal-core changes in this directory, not in `node_modules`.
 - After package metadata or dependency changes, run `npm install --ignore-scripts` so `package-lock.json` and `node_modules/@xterm/*` point at this fork.
-- Do not copy from `external-reference/`; that tree is reference-only for aiopsterm.
+- Do not copy from reference-only source trees.
 - Record behavior changes in `docs/technical/xterm-fork.md` and terminal renderer behavior changes in `docs/technical/terminal-renderer-architecture.md`.

@@ -658,7 +658,7 @@ export const handleMobileEventsControlRequest = (method: string, params: Record<
       alreadySubscribed,
       latest_seq: nextEventSeq - 1,
       event_stream_method: 'events.stream',
-      note: 'Use events.stream for live newline-delimited event frames; mobile.events.subscribe records the control_compat-compatible subscription handshake.'
+      note: 'Use events.stream for live newline-delimited event frames; mobile.events.subscribe records the compatibility subscription handshake.'
     })
   }
   const streamId = cleanText(params.stream_id || params.streamId)

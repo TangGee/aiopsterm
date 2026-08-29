@@ -20,7 +20,7 @@
           </div>
           <button
             class="asset-action-button"
-            title="支持 external-reference.json、CSV、XSH/XTS、INI/XML、MXTSESSIONS 导入。"
+            title="支持 JSON、CSV、XSH/XTS、INI/XML、MXTSESSIONS 导入。"
             @click="openImportDialog"
           >
             <Import />

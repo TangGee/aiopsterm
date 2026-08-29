@@ -1,6 +1,6 @@
 # User Account
 
-aiopsterm mirrors External reference's user entry, login tabs, account center, user info card, password reset, contact binding, avatar upload, trusted devices, and account deactivation through self-owned Electron preload/main boundaries.
+aiopsterm provides user entry, login tabs, an account center, a user info card, password reset, contact binding, avatar upload, trusted devices, and account deactivation through self-owned Electron preload/main boundaries.
 
 The renderer never treats typed account credentials as a successful login by itself. Account-password login calls `window.aiops.loginUserAccount()` and succeeds only when the main-process user account backend has a matching credential record. Unknown usernames and wrong passwords return `USER_LOGIN_INVALID`.
 
