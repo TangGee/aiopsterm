@@ -276,6 +276,9 @@ export const isManagedAiSessionContentRecordData = (value: unknown): value is Ma
 export const isManagedAiSessionContentDeleteData = (value: unknown): value is ManagedAiSessionContentDeleteData =>
   isRecord(value) &&
   isNonEmptyString(value.recordId) &&
+  Array.isArray(value.recordIds) &&
+  value.recordIds.length > 0 &&
+  value.recordIds.every(isNonEmptyString) &&
   isNonEmptyString(value.sourceRevision)
 
 export const isAgentHookInstallerStatus = (value: unknown): value is AgentHookInstallerStatus =>

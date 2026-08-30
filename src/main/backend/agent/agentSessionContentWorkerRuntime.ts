@@ -31,6 +31,9 @@ export type JsonlWorkerRewriteInput = {
   pointer: string
   operation: 'update' | 'delete'
   content?: string
+  recordLocators?: Array<{ lineNumber: number; pointer: string }>
+  deleteFollowing?: boolean
+  parserDefinition?: AgentSessionParserDefinition
 }
 
 type JsonlWorkerDiagnostics = {
@@ -410,9 +413,111 @@ const executeRead = async (request) => {
     records: selected.records
   }
 }
+const deletionPointerOrder = (first, second) => {
+  const firstSegments = first.split('/').filter(Boolean).map(decodePointerSegment)
+  const secondSegments = second.split('/').filter(Boolean).map(decodePointerSegment)
+  const length = Math.min(firstSegments.length, secondSegments.length)
+  for (let index = 0; index < length; index += 1) {
+    if (firstSegments[index] === secondSegments[index]) continue
+    const firstNumber = Number(firstSegments[index])
+    const secondNumber = Number(secondSegments[index])
+    if (Number.isInteger(firstNumber) && Number.isInteger(secondNumber)) return secondNumber - firstNumber
+    return secondSegments[index].localeCompare(firstSegments[index])
+  }
+  return secondSegments.length - firstSegments.length
+}
+const parsedLineHasDisplayContent = (parsed, parserDefinition, line) => {
+  if (parserDefinition) return configuredTextPointers(parsed, parserDefinition).length > 0
+  return collectTextPointers(parsed).some((item) => !shouldSkipJsonTextPointer({ ...line, parsed }, item))
+}
+const displayPointersForLine = (line, parserDefinition) => {
+  if (!line.parsed) return ['/']
+  const configuredItems = parserDefinition ? configuredTextPointers(line.parsed, parserDefinition) : []
+  const legacyItems = !parserDefinition ? collectTextPointers(line.parsed) : []
+  const items = [...configuredItems, ...legacyItems].filter((item) => !shouldSkipJsonTextPointer(line, item))
+  return items.length ? items.map((item) => item.pointer) : ['/']
+}
+const executeDeleteRewrite = async (request, lines, rawLines, trailingNewline) => {
+  const locators = Array.isArray(request.recordLocators) && request.recordLocators.length
+    ? request.recordLocators
+    : [{ lineNumber: request.lineNumber, pointer: request.pointer }]
+  if (request.deleteFollowing) {
+    const line = lines.find((item) => item.lineNumber === request.lineNumber)
+    const rootPointer = request.pointer === '/' || request.pointer === ''
+    if (
+      !line ||
+      (!line.parsed && !line.raw.trim()) ||
+      (!rootPointer && (!line.parsed || valueAtPointer(line.parsed, request.pointer) === undefined))
+    ) {
+      throw workerError('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')
+    }
+    const nextLines = rawLines.slice(0, request.lineNumber - 1)
+    if (rootPointer) {
+      nextLines.push(line.raw)
+    } else if (line.parsed) {
+      const displayPointers = displayPointersForLine(line, request.parserDefinition)
+      const anchorIndex = displayPointers.indexOf(request.pointer)
+      if (anchorIndex < 0) {
+        throw workerError('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')
+      }
+      const pointersToDelete = displayPointers.slice(anchorIndex + 1)
+      for (const pointer of [...pointersToDelete].sort(deletionPointerOrder)) {
+        if (!removeValueAtPointer(line.parsed, pointer)) {
+          throw workerError('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')
+        }
+      }
+      nextLines.push(pointersToDelete.length ? JSON.stringify(line.parsed) : line.raw)
+    }
+    const suffix = trailingNewline && nextLines.length ? '\n' : ''
+    await writeFile(request.tempPath, nextLines.join('\n') + suffix, 'utf-8')
+    return
+  }
+  const byLine = new Map()
+  for (const locator of locators) {
+    const line = lines.find((item) => item.lineNumber === locator.lineNumber)
+    if (!line || (!line.parsed && !line.raw.trim())) {
+      throw workerError('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')
+    }
+    const pointers = byLine.get(locator.lineNumber) || []
+    if (!pointers.includes(locator.pointer)) pointers.push(locator.pointer)
+    byLine.set(locator.lineNumber, pointers)
+  }
+  for (const [lineNumber, pointers] of byLine) {
+    const line = lines.find((item) => item.lineNumber === lineNumber)
+    const nestedPointers = pointers.filter((pointer) => pointer !== '/' && pointer !== '')
+    if (nestedPointers.length && (!line || !line.parsed || nestedPointers.some((pointer) => valueAtPointer(line.parsed, pointer) === undefined))) {
+      throw workerError('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')
+    }
+  }
+  const nextLines = []
+  rawLines.forEach((raw, index) => {
+    const lineNumber = index + 1
+    const pointers = byLine.get(lineNumber)
+    if (!pointers) {
+      nextLines.push(raw)
+      return
+    }
+    if (pointers.some((pointer) => pointer === '/' || pointer === '')) return
+    const line = lines.find((item) => item.lineNumber === lineNumber)
+    const parsed = line && line.parsed
+    if (!parsed) return
+    for (const pointer of [...pointers].sort(deletionPointerOrder)) {
+      if (!removeValueAtPointer(parsed, pointer)) {
+        throw workerError('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')
+      }
+    }
+    if (parsedLineHasDisplayContent(parsed, request.parserDefinition, line)) nextLines.push(JSON.stringify(parsed))
+  })
+  const suffix = trailingNewline && nextLines.length ? '\n' : ''
+  await writeFile(request.tempPath, nextLines.join('\n') + suffix, 'utf-8')
+}
 const executeRewrite = async (request) => {
   const { lines, rawLines, trailingNewline } = await readJsonlLines(request.path, true)
   if (!rawLines) throw workerError('MANAGED_AI_CONTENT_WORKER_FAILED', 'Managed AI content worker did not retain source lines.')
+  if (request.operation === 'delete' && (request.deleteFollowing || (request.recordLocators && request.recordLocators.length > 0))) {
+    await executeDeleteRewrite(request, lines, rawLines, trailingNewline)
+    return { workerThreadId: threadId, workerIsMainThread: isMainThread, sourceRevision: request.sourceRevision }
+  }
   const line = lines.find((item) => item.lineNumber === request.lineNumber)
   if (!line || (!line.parsed && !line.raw.trim())) {
     throw workerError('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')

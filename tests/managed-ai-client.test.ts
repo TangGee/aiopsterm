@@ -145,6 +145,7 @@ describe('managedAiClient', () => {
         ok: true,
         data: {
           recordId: input.recordId,
+          recordIds: input.recordIds || [input.recordId],
           sourceRevision: 'revision-after-delete'
         }
       })),
@@ -269,7 +270,7 @@ describe('managedAiClient', () => {
       })
     ).resolves.toEqual({
       ok: true,
-      data: { recordId: 'record-1', sourceRevision: 'revision-after-delete' }
+      data: { recordId: 'record-1', recordIds: ['record-1'], sourceRevision: 'revision-after-delete' }
     })
     expect(managedAiClient.onAiAgentSessionEvent()?.(aiAgentSessionEventListener)).toBe(offAiAgentSessionEvent)
     expect(managedAiClient.onManagedAiSessionEvent()?.(managedAiSessionEventListener)).toBe(offManagedAiSessionEvent)

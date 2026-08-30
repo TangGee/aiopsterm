@@ -52,6 +52,8 @@ export type ManagedAiSessionContentDeleteInput = {
   source: AiAgentSessionSource
   sessionId: string
   recordId: string
+  recordIds?: string[]
+  deleteFollowing?: boolean
   sourceRevision: string
   force?: boolean
 }
@@ -87,5 +89,6 @@ export type ManagedAiSessionContentUpdateResult = AiopsMutationResult<{
 
 export type ManagedAiSessionContentDeleteResult = AiopsMutationResult<{
   recordId: string
+  recordIds: string[]
   sourceRevision: string
 }>

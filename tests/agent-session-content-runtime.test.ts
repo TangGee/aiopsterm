@@ -204,6 +204,131 @@ describe('agentSessionContentRuntime', () => {
     }
   })
 
+  it('deletes selected JSONL records atomically and truncates from an anchor record', async () => {
+    const { createAgentSessionContentRuntime } = await loadRuntime()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-session-content-bulk-delete-'))
+    try {
+      const transcriptPath = join(root, 'codex-bulk-delete.jsonl')
+      await writeFile(
+        transcriptPath,
+        ['one', 'two', 'three', 'four', 'five']
+          .map((message) => JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message } }))
+          .join('\n') + '\n',
+        'utf-8'
+      )
+      const session = makeSession({ id: 'codex-bulk-delete-1', source: 'codex', transcriptPath })
+      const runtime = createAgentSessionContentRuntime({
+        loadStoreIfNeeded: async () => undefined,
+        getSession: () => session,
+        getUserDataPath: () => root,
+        getHomeDir: () => root,
+        getEnv: () => ({ CODEX_HOME: join(root, 'codex-home') }) as NodeJS.ProcessEnv,
+        now: () => 1781884900000
+      })
+
+      const listed = await runtime.list({ source: 'codex', sessionId: session.id })
+      const byContent = new Map<string, ManagedAiSessionContentRecord>(
+        listed.data!.records.map((record: ManagedAiSessionContentRecord) => [record.content, record])
+      )
+      const selectedIds = [byContent.get('two')!.recordId, byContent.get('four')!.recordId]
+      const deleted = await runtime.deleteRecord({
+        source: 'codex',
+        sessionId: session.id,
+        recordId: selectedIds[0],
+        recordIds: selectedIds,
+        sourceRevision: listed.data!.sourceRevision
+      })
+
+      expect(deleted).toEqual(expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({ recordIds: selectedIds })
+      }))
+      expect((await readFile(transcriptPath, 'utf-8')).trim().split('\n').map((line) => JSON.parse(line).payload.message)).toEqual([
+        'one',
+        'three',
+        'five'
+      ])
+
+      const relisted = await runtime.list({ source: 'codex', sessionId: session.id })
+      const anchor = relisted.data!.records.find((record: ManagedAiSessionContentRecord) => record.content === 'three')!
+      const truncated = await runtime.deleteRecord({
+        source: 'codex',
+        sessionId: session.id,
+        recordId: anchor.recordId,
+        deleteFollowing: true,
+        sourceRevision: relisted.data!.sourceRevision
+      })
+
+      expect(truncated).toEqual(expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({ recordIds: [anchor.recordId] })
+      }))
+      expect((await readFile(transcriptPath, 'utf-8')).trim().split('\n').map((line) => JSON.parse(line).payload.message)).toEqual(['one', 'three'])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps the anchor and removes later content from the same JSONL line', async () => {
+    const { createAgentSessionContentRuntime } = await loadRuntime()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-session-content-tail-same-line-'))
+    try {
+      const transcriptPath = join(root, 'codex-tail-same-line.jsonl')
+      await writeFile(
+        transcriptPath,
+        [
+          JSON.stringify({
+            type: 'response_item',
+            payload: {
+              type: 'message',
+              role: 'user',
+              content: [
+                { type: 'input_text', text: 'anchor content' },
+                { type: 'input_text', text: 'same line following content' }
+              ]
+            }
+          }),
+          JSON.stringify({
+            type: 'response_item',
+            payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'later line content' }] }
+          })
+        ].join('\n') + '\n',
+        'utf-8'
+      )
+      const session = makeSession({ id: 'codex-tail-same-line-1', source: 'codex', transcriptPath })
+      const runtime = createAgentSessionContentRuntime({
+        loadStoreIfNeeded: async () => undefined,
+        getSession: () => session,
+        getUserDataPath: () => root,
+        getHomeDir: () => root,
+        getEnv: () => ({ CODEX_HOME: join(root, 'codex-home') }) as NodeJS.ProcessEnv,
+        now: () => 1781884900000
+      })
+
+      const listed = await runtime.list({ source: 'codex', sessionId: session.id })
+      const anchor = listed.data!.records.find((record: ManagedAiSessionContentRecord) => record.content === 'anchor content')!
+      const truncated = await runtime.deleteRecord({
+        source: 'codex',
+        sessionId: session.id,
+        recordId: anchor.recordId,
+        deleteFollowing: true,
+        sourceRevision: listed.data!.sourceRevision
+      })
+
+      expect(truncated.ok).toBe(true)
+      const rawLines = (await readFile(transcriptPath, 'utf-8')).trim().split('\n')
+      expect(rawLines).toHaveLength(1)
+      expect(JSON.parse(rawLines[0]).payload.content).toEqual([
+        { type: 'input_text', text: 'anchor content' },
+        { type: 'input_text' }
+      ])
+      const relisted = await runtime.list({ source: 'codex', sessionId: session.id })
+      expect(relisted.data!.records.map((record: ManagedAiSessionContentRecord) => record.content)).toEqual(['anchor content'])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('lists Codex response_item message text without protocol discriminator fields', async () => {
     const { createAgentSessionContentRuntime } = await loadRuntime()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-session-content-codex-response-item-'))
@@ -694,6 +819,30 @@ describe('agentSessionContentRuntime', () => {
         'opencode-session-1',
         JSON.stringify({ type: 'tool', tool: 'shell', state: { input: { command: 'pwd' }, output: '/work/app' } })
       )
+      db.prepare('INSERT INTO message (id, session_id, data, time_created) VALUES (?, ?, ?, ?)').run(
+        'message-2',
+        'opencode-session-1',
+        JSON.stringify({ role: 'user' }),
+        300
+      )
+      db.prepare('INSERT INTO part (id, message_id, session_id, data) VALUES (?, ?, ?, ?)').run(
+        'part-3',
+        'message-2',
+        'opencode-session-1',
+        JSON.stringify({ type: 'text', text: 'second opencode message' })
+      )
+      db.prepare('INSERT INTO message (id, session_id, data, time_created) VALUES (?, ?, ?, ?)').run(
+        'message-3',
+        'opencode-session-1',
+        JSON.stringify({ role: 'assistant' }),
+        400
+      )
+      db.prepare('INSERT INTO part (id, message_id, session_id, data) VALUES (?, ?, ?, ?)').run(
+        'part-4',
+        'message-3',
+        'opencode-session-1',
+        JSON.stringify({ type: 'text', text: 'third opencode message' })
+      )
       db.close()
 
       const session = makeSession({ id: 'opencode-session-1', source: 'opencode' })
@@ -744,13 +893,29 @@ describe('agentSessionContentRuntime', () => {
         source: 'opencode',
         sessionId: session.id,
         recordId: record!.recordId,
+        recordIds: [record!.recordId, toolRecord.recordId],
         sourceRevision: updatedTool.data!.sourceRevision
       })
       expect(deleted.ok).toBe(true)
       const deletedDb = new Database(dbPath, { readonly: true })
-      const remainingPart = deletedDb.prepare('SELECT data FROM part WHERE id = ?').get('part-1')
+      const deletedParts = deletedDb.prepare('SELECT id FROM part WHERE id IN (?, ?)').all('part-1', 'part-2')
       deletedDb.close()
-      expect(remainingPart).toBeUndefined()
+      expect(deletedParts).toEqual([])
+
+      const relisted = await runtime.list({ source: 'opencode', sessionId: session.id })
+      const anchor = relisted.data!.records.find((item: ManagedAiSessionContentRecord) => item.content === 'second opencode message')!
+      const truncated = await runtime.deleteRecord({
+        source: 'opencode',
+        sessionId: session.id,
+        recordId: anchor.recordId,
+        deleteFollowing: true,
+        sourceRevision: relisted.data!.sourceRevision
+      })
+      expect(truncated.ok).toBe(true)
+      const truncatedDb = new Database(dbPath, { readonly: true })
+      const remainingParts = truncatedDb.prepare('SELECT id FROM part ORDER BY id').all()
+      truncatedDb.close()
+      expect(remainingParts).toEqual([{ id: 'part-3' }])
     } finally {
       await rm(root, { recursive: true, force: true })
     }

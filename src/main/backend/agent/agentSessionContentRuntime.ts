@@ -110,6 +110,7 @@ const maxLimit = 500
 const defaultMaxContentChars = 16_000
 const maxContentCharsLimit = 1_000_000
 const maxScanFiles = 2400
+const maxDeleteRecordCount = 5000
 const jsonlSources = new Set<AiAgentSessionSource>(['codex', 'claude-code'])
 const contentMutationQueues = new Map<string, Promise<void>>()
 const builtinParsersBySource = new Map(builtinAgentSessionParserDefinitions.map((definition) => [definition.source, definition]))
@@ -448,6 +449,11 @@ const parseJsonlRecordId = (recordId: string): JsonlRecordLocator | null => {
   const lineNumber = Number(match[1])
   if (!Number.isInteger(lineNumber) || lineNumber <= 0) return null
   return { lineNumber, pointer: decodeURIComponent(match[2]) }
+}
+
+const deleteRecordIdsForInput = (input: ManagedAiSessionContentDeleteInput) => {
+  const values = Array.isArray(input.recordIds) && input.recordIds.length ? input.recordIds : [input.recordId]
+  return [...new Set(values.map((value) => cleanOptionalText(value)).filter((value): value is string => Boolean(value)))]
 }
 
 const queryRows = <T extends Record<string, unknown>>(db: SqliteDatabase, sql: string, params: unknown[] = []) => {
@@ -891,8 +897,12 @@ const deleteJsonlRecord = async (
   session: ManagedAiSessionRecord,
   input: ManagedAiSessionContentDeleteInput
 ): Promise<ManagedAiSessionContentDeleteResult> => {
-  const locator = parseJsonlRecordId(input.recordId)
-  if (!locator) return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_INVALID', 'Managed AI content record id is invalid.')
+  const recordIds = deleteRecordIdsForInput(input)
+  const locators = recordIds.map(parseJsonlRecordId)
+  if (!locators.length || locators.some((locator) => !locator)) {
+    return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_INVALID', 'Managed AI content record id is invalid.')
+  }
+  const anchor = locators[0]!
   const path = findJsonlTranscriptPath(session, session.source, config)
   if (!path) return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_STORE_MISSING', 'Managed AI transcript file was not found.')
   const currentRevision = await revisionForFiles([path])
@@ -906,14 +916,17 @@ const deleteJsonlRecord = async (
       path,
       tempPath,
       sourceRevision: currentRevision,
-      lineNumber: locator.lineNumber,
-      pointer: locator.pointer,
-      operation: 'delete'
+      lineNumber: anchor.lineNumber,
+      pointer: anchor.pointer,
+      operation: 'delete',
+      recordLocators: locators as JsonlRecordLocator[],
+      ...(input.deleteFollowing ? { deleteFollowing: true } : {}),
+      ...(parserForSource(config, session.source) ? { parserDefinition: parserForSource(config, session.source)! } : {})
     })
     await replaceJsonlAndInvalidateCodexProjection(config, session, tempPath, path)
     renamed = true
     const nextRevision = await revisionForFiles([path])
-    return { ok: true, data: { recordId: input.recordId, sourceRevision: nextRevision } }
+    return { ok: true, data: { recordId: input.recordId, recordIds, sourceRevision: nextRevision } }
   } catch (error) {
     const result = workerMutationError<ManagedAiSessionContentDeleteResult>(error, 'delete')
     if (result) return result
@@ -928,8 +941,12 @@ const deleteOpenCodeRecord = async (
   session: ManagedAiSessionRecord,
   input: ManagedAiSessionContentDeleteInput
 ): Promise<ManagedAiSessionContentDeleteResult> => {
-  const locator = parseOpenCodeRecordId(input.recordId)
-  if (!locator) return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_INVALID', 'Managed AI content record id is invalid.')
+  const recordIds = deleteRecordIdsForInput(input)
+  const locators = recordIds.map(parseOpenCodeRecordId)
+  if (!locators.length || locators.some((locator) => !locator)) {
+    return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_INVALID', 'Managed AI content record id is invalid.')
+  }
+  const anchor = locators[0]!
   const dbPath = openCodeDbPath(config)
   if (!existsSync(dbPath)) return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_STORE_MISSING', 'OpenCode database was not found.')
   const revisionPaths = opencodeRevisionPaths(dbPath)
@@ -943,22 +960,49 @@ const deleteOpenCodeRecord = async (
     db = openSqliteDatabase(dbPath, false)
     db.prepare('BEGIN IMMEDIATE').run()
     transactionOpen = true
-    const rows = queryRows<{ data?: string }>(db, 'SELECT data FROM part WHERE id = ? AND message_id = ? AND session_id = ?', [
-      locator.partId,
-      locator.messageId,
-      session.id
-    ])
-    if (!rows[0]?.data) {
-      return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')
-    }
-    const deleted = db.prepare('DELETE FROM part WHERE id = ? AND message_id = ? AND session_id = ? AND data = ?').run(
-      locator.partId,
-      locator.messageId,
-      session.id,
-      rows[0]!.data
-    )
-    if (deleted.changes !== 1) {
-      return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')
+    if (input.deleteFollowing) {
+      const rows = queryRows<{ message_created?: number }>(
+        db,
+        `SELECT m.time_created AS message_created
+         FROM message m
+         JOIN part p ON p.message_id = m.id
+         WHERE m.session_id = ? AND p.session_id = ? AND m.id = ? AND p.id = ?`,
+        [session.id, session.id, anchor.messageId, anchor.partId]
+      )
+      const messageCreated = rows[0]?.message_created
+      if (typeof messageCreated !== 'number') {
+        return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')
+      }
+      db.prepare(
+        `DELETE FROM part
+         WHERE session_id = ? AND id IN (
+           SELECT p.id FROM part p
+           JOIN message m ON m.id = p.message_id
+           WHERE m.session_id = ? AND p.session_id = ?
+             AND (m.time_created > ? OR (m.time_created = ? AND p.id > ?))
+         )`
+      ).run(session.id, session.id, session.id, messageCreated, messageCreated, anchor.partId)
+    } else {
+      for (const locator of locators as OpenCodeRecordLocator[]) {
+        const rows = queryRows<{ data?: string }>(db, 'SELECT data FROM part WHERE id = ? AND message_id = ? AND session_id = ?', [
+          locator.partId,
+          locator.messageId,
+          session.id
+        ])
+        if (!rows[0]?.data) {
+          return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')
+        }
+      }
+      for (const locator of locators as OpenCodeRecordLocator[]) {
+        const deleted = db.prepare('DELETE FROM part WHERE id = ? AND message_id = ? AND session_id = ?').run(
+          locator.partId,
+          locator.messageId,
+          session.id
+        )
+        if (deleted.changes !== 1) {
+          return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')
+        }
+      }
     }
     db.prepare('COMMIT').run()
     transactionOpen = false
@@ -971,7 +1015,7 @@ const deleteOpenCodeRecord = async (
     db?.close()
   }
   const nextRevision = await revisionForFiles(revisionPaths)
-  return { ok: true, data: { recordId: input.recordId, sourceRevision: nextRevision } }
+  return { ok: true, data: { recordId: input.recordId, recordIds, sourceRevision: nextRevision } }
 }
 
 export const createAgentSessionContentRuntime = (config: AgentSessionContentRuntimeConfig) => {
@@ -1057,6 +1101,13 @@ export const createAgentSessionContentRuntime = (config: AgentSessionContentRunt
     if ('error' in resolved) return resolved.error as ManagedAiSessionContentDeleteResult
     const recordId = cleanOptionalText(input?.recordId)
     if (!recordId) return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_ID_REQUIRED', 'Managed AI content record id is required.')
+    const recordIds = deleteRecordIdsForInput(input)
+    if (!recordIds.length || recordIds.length > maxDeleteRecordCount) {
+      return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_IDS_INVALID', `Managed AI content deletion requires between 1 and ${maxDeleteRecordCount} record ids.`)
+    }
+    if (!recordIds.includes(recordId) || (input.deleteFollowing && recordIds.length !== 1)) {
+      return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_IDS_INVALID', 'Managed AI content deletion record ids do not match the requested operation.')
+    }
     if (!cleanOptionalText(input?.sourceRevision)) return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_REVISION_REQUIRED', 'Managed AI content source revision is required.')
     const editState = sourceEditState(config, resolved.source)
     if (!editState.editable) {

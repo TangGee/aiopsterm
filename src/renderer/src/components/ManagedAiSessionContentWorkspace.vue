@@ -32,9 +32,41 @@
 
     <main class="managed-ai-session-content-body">
       <div class="managed-ai-session-content-toolbar">
-        <div class="managed-ai-session-record-summary">
-          <span>{{ t('aiSessions.content.allRecords') }}</span>
-          <small>{{ loadedRecordSummary }}</small>
+        <div class="managed-ai-session-content-toolbar-primary">
+          <div class="managed-ai-session-record-summary">
+            <span>{{ t('aiSessions.content.allRecords') }}</span>
+            <small>{{ loadedRecordSummary }}</small>
+          </div>
+          <button
+            type="button"
+            class="managed-ai-session-selection-toggle"
+            :class="{ active: selectionMode }"
+            :disabled="loading || bulkDeleting"
+            @click="toggleSelectionMode"
+          >
+            <ListChecks />
+            <span>{{ t(selectionMode ? 'aiSessions.content.exitMultiSelect' : 'aiSessions.content.multiSelect') }}</span>
+          </button>
+          <template v-if="selectionMode">
+            <button
+              type="button"
+              class="managed-ai-session-selection-action"
+              :disabled="!pageSelectableRecordIds.length || bulkDeleting"
+              @click="togglePageSelection"
+            >
+              <CheckSquare />
+              <span>{{ t(allPageRecordsSelected ? 'aiSessions.content.clearPageSelection' : 'aiSessions.content.selectPage') }}</span>
+            </button>
+            <button
+              type="button"
+              class="managed-ai-session-selection-action danger"
+              :disabled="!selectedRecordCount || bulkDeleting"
+              @click="deleteSelectedRecords"
+            >
+              <Trash2 />
+              <span>{{ t('aiSessions.content.deleteSelected', { count: selectedRecordCount }) }}</span>
+            </button>
+          </template>
         </div>
         <label class="managed-ai-session-record-search">
           <Search />
@@ -57,6 +89,18 @@
         >
           <header class="managed-ai-session-record-card-header">
             <div class="managed-ai-session-record-meta">
+              <label
+                v-if="selectionMode"
+                class="managed-ai-session-record-selector"
+                :title="t('aiSessions.content.selectRecord')"
+              >
+                <input
+                  type="checkbox"
+                  :checked="selectedRecordIds.has(record.recordId)"
+                  :disabled="!canDeleteRecord(record)"
+                  @change="toggleRecordSelection(record)"
+                />
+              </label>
               <span class="managed-ai-session-record-role">{{ recordDisplayLabel(record) }}</span>
               <span class="managed-ai-session-record-line">{{ record.locationLabel }}</span>
               <span v-if="recordTypeLabel(record)" class="managed-ai-session-record-type">{{ recordTypeLabel(record) }}</span>
@@ -89,6 +133,15 @@
                 @click="resetRecord(record)"
               >
                 <RotateCcw />
+              </button>
+              <button
+                type="button"
+                class="danger-soft"
+                :title="t('aiSessions.content.deleteFollowing')"
+                :disabled="!canDeleteFollowing(record)"
+                @click="deleteRecordAndFollowing(record)"
+              >
+                <ChevronsDown />
               </button>
               <button
                 type="button"
@@ -285,6 +338,15 @@
               </button>
               <button
                 type="button"
+                class="danger-soft"
+                :disabled="!canDeleteFollowing(modalRecord)"
+                @click="deleteRecordAndFollowing(modalRecord)"
+              >
+                <ChevronsDown />
+                <span>{{ t('aiSessions.content.deleteFollowing') }}</span>
+              </button>
+              <button
+                type="button"
                 class="danger"
                 :disabled="!canDeleteRecord(modalRecord)"
                 @click="deleteRecord(modalRecord)"
@@ -311,7 +373,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Maximize2, RefreshCw, RotateCcw, Save, Search, Trash2, X } from 'lucide-vue-next'
+import { CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ChevronsDown, ChevronsLeft, ChevronsRight, ListChecks, Maximize2, RefreshCw, RotateCcw, Save, Search, Trash2, X } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 import { managedAiClient } from '@/services/ai/managedAiClient'
 import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
@@ -356,6 +418,9 @@ const expandedRecordIds = ref<Set<string>>(new Set(props.viewState?.expandedReco
 const loadingRecordIds = ref<Set<string>>(new Set())
 const savingRecordIds = ref<Set<string>>(new Set())
 const deletingRecordIds = ref<Set<string>>(new Set())
+const selectedRecordIds = ref<Set<string>>(new Set())
+const selectionMode = ref(false)
+const bulkDeleting = ref(false)
 const activeRecordId = ref('')
 const recordListRef = ref<HTMLElement | null>(null)
 let contentLoadSeq = 0
@@ -369,6 +434,11 @@ const pageCount = computed(() => Math.max(1, Math.ceil(matchTotal.value / conten
 const rangeStart = computed(() => matchTotal.value ? (currentPage.value - 1) * contentPageSize + 1 : 0)
 const rangeEnd = computed(() => matchTotal.value ? Math.min(matchTotal.value, rangeStart.value + records.value.length - 1) : 0)
 const modalRecord = computed(() => records.value.find((record) => record.recordId === activeRecordId.value) || null)
+const pageSelectableRecordIds = computed(() => records.value.filter(canDeleteRecord).map((record) => record.recordId))
+const selectedRecordCount = computed(() => selectedRecordIds.value.size)
+const allPageRecordsSelected = computed(() =>
+  pageSelectableRecordIds.value.length > 0 && pageSelectableRecordIds.value.every((recordId) => selectedRecordIds.value.has(recordId))
+)
 
 const normalizeRecordText = (record: ManagedAiSessionContentRecord) =>
   `${record.role} ${record.messageType} ${record.locationLabel}`.toLowerCase()
@@ -425,7 +495,10 @@ const recordFor = (record: ManagedAiSessionContentRecord) => fullRecords[record.
 const recordContent = (record: ManagedAiSessionContentRecord) => drafts[record.recordId] ?? recordFor(record).content
 const isRecordDirty = (record: ManagedAiSessionContentRecord) => (drafts[record.recordId] ?? '') !== (originals[record.recordId] ?? '')
 const hasUnsavedChanges = computed(() => Object.keys(drafts).some((id) => drafts[id] !== originals[id]))
-const recordClass = (record: ManagedAiSessionContentRecord) => `role-${recordDisplayRole(record)}`
+const recordClass = (record: ManagedAiSessionContentRecord) => [
+  `role-${recordDisplayRole(record)}`,
+  selectedRecordIds.value.has(record.recordId) ? 'is-selected' : ''
+]
 
 const setSetMembership = (target: Ref<Set<string>>, id: string, enabled: boolean) => {
   const next = new Set(target.value)
@@ -460,7 +533,33 @@ const canSaveRecord = (record: ManagedAiSessionContentRecord) => {
 }
 const canDeleteRecord = (record: ManagedAiSessionContentRecord) => {
   const current = recordFor(record)
-  return Boolean(current.editable && !deletingRecordIds.value.has(record.recordId) && !savingRecordIds.value.has(record.recordId))
+  return Boolean(current.editable && !bulkDeleting.value && !deletingRecordIds.value.has(record.recordId) && !savingRecordIds.value.has(record.recordId))
+}
+const canDeleteFollowing = (record: ManagedAiSessionContentRecord) =>
+  canDeleteRecord(record) && Boolean(snapshot.value && record.ordinal < snapshot.value.total - 1)
+
+const clearSelection = () => {
+  selectedRecordIds.value = new Set()
+}
+
+const toggleSelectionMode = () => {
+  selectionMode.value = !selectionMode.value
+  if (!selectionMode.value) clearSelection()
+}
+
+const toggleRecordSelection = (record: ManagedAiSessionContentRecord) => {
+  if (!canDeleteRecord(record)) return
+  setSetMembership(selectedRecordIds, record.recordId, !selectedRecordIds.value.has(record.recordId))
+}
+
+const togglePageSelection = () => {
+  const next = new Set(selectedRecordIds.value)
+  if (allPageRecordsSelected.value) {
+    pageSelectableRecordIds.value.forEach((recordId) => next.delete(recordId))
+  } else {
+    pageSelectableRecordIds.value.forEach((recordId) => next.add(recordId))
+  }
+  selectedRecordIds.value = next
 }
 
 const collapsedPreview = (content: string) => {
@@ -532,6 +631,9 @@ const clearRecordState = () => {
   loadingRecordIds.value = new Set()
   savingRecordIds.value = new Set()
   deletingRecordIds.value = new Set()
+  clearSelection()
+  selectionMode.value = false
+  bulkDeleting.value = false
   activeRecordId.value = ''
 }
 
@@ -605,6 +707,7 @@ const removeRecordFromLocalState = (recordId: string) => {
   delete originals[recordId]
   delete fullRecords[recordId]
   setSetMembership(expandedRecordIds, recordId, false)
+  setSetMembership(selectedRecordIds, recordId, false)
   if (activeRecordId.value === recordId) activeRecordId.value = ''
   if (!snapshot.value) return
   snapshot.value = {
@@ -728,6 +831,7 @@ const commitPageInput = () => {
 const refreshContent = () => {
   if (!confirmDiscardChanges()) return
   discardDraftState()
+  clearSelection()
   saveNotice.value = ''
   pageInput.value = String(currentPage.value)
   void loadContent('refresh')
@@ -764,6 +868,7 @@ const saveRecord = async (record: ManagedAiSessionContentRecord) => {
       return
     }
     mutationSucceeded = true
+    clearSelection()
     const savedRecord = result.data.record
     fullRecords[savedRecordId] = savedRecord
     drafts[savedRecordId] = savedRecord.content
@@ -788,6 +893,7 @@ const saveRecord = async (record: ManagedAiSessionContentRecord) => {
 const deleteRecord = async (record: ManagedAiSessionContentRecord) => {
   const current = recordFor(record)
   if (!canDeleteRecord(record)) return
+  if (!confirmDiscardChanges()) return
   if (!window.confirm(t('aiSessions.content.deleteConfirm'))) return
   const deleteContentRecord = managedAiClient.deleteManagedAiSessionContentRecord()
   if (!deleteContentRecord) {
@@ -815,6 +921,7 @@ const deleteRecord = async (record: ManagedAiSessionContentRecord) => {
       return
     }
     mutationSucceeded = true
+    discardDraftState()
     removeRecordFromLocalState(deletedRecordId)
     const targetPage = Math.min(currentPage.value, pageCount.value)
     if (!(await loadContentPage(targetPage, 'delete'))) return
@@ -823,6 +930,93 @@ const deleteRecord = async (record: ManagedAiSessionContentRecord) => {
   } finally {
     setSetMembership(deletingRecordIds, deletedRecordId, false)
     if (mutationSucceeded) saveNotice.value = t('aiSessions.content.deleted')
+  }
+}
+
+const deleteSelectedRecords = async () => {
+  const recordIds = [...selectedRecordIds.value]
+  if (!recordIds.length || !snapshot.value) return
+  if (!confirmDiscardChanges()) return
+  if (!window.confirm(t('aiSessions.content.deleteSelectedConfirm', { count: recordIds.length }))) return
+  const deleteContentRecord = managedAiClient.deleteManagedAiSessionContentRecord()
+  if (!deleteContentRecord) {
+    error.value = t('aiSessions.notice.serviceUnavailable')
+    return
+  }
+  bulkDeleting.value = true
+  error.value = ''
+  saveNotice.value = ''
+  let mutationSucceeded = false
+  try {
+    const mutationInput = {
+      source: props.source,
+      sessionId: props.sessionId,
+      recordId: recordIds[0],
+      recordIds,
+      sourceRevision: snapshot.value.sourceRevision
+    }
+    let result = await deleteContentRecord(mutationInput)
+    if (!result?.ok && result?.errorCode === 'MANAGED_AI_CONTENT_REVISION_CONFLICT' && window.confirm(t('aiSessions.content.overwriteConflict'))) {
+      result = await deleteContentRecord({ ...mutationInput, force: true })
+    }
+    if (!result?.ok || !isManagedAiSessionContentDeleteData(result.data)) {
+      error.value = result?.errorMessage || t('aiSessions.content.deleteFailed')
+      return
+    }
+    mutationSucceeded = true
+    discardDraftState()
+    clearSelection()
+    selectionMode.value = false
+    await loadContentPage(Math.min(currentPage.value, pageCount.value), 'delete')
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : t('aiSessions.content.deleteFailed')
+  } finally {
+    bulkDeleting.value = false
+    if (mutationSucceeded) saveNotice.value = t('aiSessions.content.bulkDeleted')
+  }
+}
+
+const deleteRecordAndFollowing = async (record: ManagedAiSessionContentRecord) => {
+  const current = recordFor(record)
+  if (!canDeleteFollowing(record)) return
+  if (!confirmDiscardChanges()) return
+  if (!window.confirm(t('aiSessions.content.deleteFollowingConfirm'))) return
+  const deleteContentRecord = managedAiClient.deleteManagedAiSessionContentRecord()
+  if (!deleteContentRecord) {
+    error.value = t('aiSessions.notice.serviceUnavailable')
+    return
+  }
+  bulkDeleting.value = true
+  error.value = ''
+  saveNotice.value = ''
+  let mutationSucceeded = false
+  try {
+    const mutationInput = {
+      source: props.source,
+      sessionId: props.sessionId,
+      recordId: record.recordId,
+      deleteFollowing: true,
+      sourceRevision: current.sourceRevision
+    }
+    let result = await deleteContentRecord(mutationInput)
+    if (!result?.ok && result?.errorCode === 'MANAGED_AI_CONTENT_REVISION_CONFLICT' && window.confirm(t('aiSessions.content.overwriteConflict'))) {
+      result = await deleteContentRecord({ ...mutationInput, force: true })
+    }
+    if (!result?.ok || !isManagedAiSessionContentDeleteData(result.data)) {
+      error.value = result?.errorMessage || t('aiSessions.content.deleteFailed')
+      return
+    }
+    mutationSucceeded = true
+    discardDraftState()
+    clearSelection()
+    selectionMode.value = false
+    closeRecordModal()
+    await loadContentPage(Math.min(currentPage.value, pageCount.value), 'delete')
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : t('aiSessions.content.deleteFailed')
+  } finally {
+    bulkDeleting.value = false
+    if (mutationSucceeded) saveNotice.value = t('aiSessions.content.bulkDeleted')
   }
 }
 
@@ -845,6 +1039,7 @@ watch(query, () => {
     const nextQuery = query.value.trim()
     if (nextQuery === appliedQuery.value) return
     appliedQuery.value = nextQuery
+    clearSelection()
     currentPage.value = 1
     pageInput.value = '1'
     void loadContentPage(1, 'search')

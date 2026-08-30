@@ -1262,14 +1262,14 @@ export const deleteManagedAiSessionContentRecord = async (input: ManagedAiSessio
       source: access.source || input?.source,
       sessionId: access.sessionId || input?.sessionId,
       recordId: input?.recordId,
+      recordIds: input?.recordIds,
+      deleteFollowing: input?.deleteFollowing === true,
       durationMs: Date.now() - startedAt,
       existedBeforeImport: access.existedBeforeImport,
       importAttempted: access.importAttempted,
       ok: result.ok,
       ...(result.ok && result.data
-        ? {
-            sourceRevision: result.data.sourceRevision
-          }
+        ? { sourceRevision: result.data.sourceRevision }
         : {
             errorCode: result.errorCode
           })

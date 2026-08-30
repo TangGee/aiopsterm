@@ -221,7 +221,7 @@ describe('ManagedAiSessionContentWorkspace', () => {
         .mockResolvedValueOnce({ ok: true, data: makeSnapshot(previousPage, 'revision-2', 20) }),
       deleteManagedAiSessionContentRecord: vi.fn(async () => ({
         ok: true,
-        data: { recordId: lastRecord.recordId, sourceRevision: 'revision-2' }
+        data: { recordId: lastRecord.recordId, recordIds: [lastRecord.recordId], sourceRevision: 'revision-2' }
       }))
     }
     vi.spyOn(window, 'confirm').mockReturnValue(true)
@@ -233,6 +233,83 @@ describe('ManagedAiSessionContentWorkspace', () => {
     expect(window.aiops.listManagedAiSessionContent).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 0, limit: 20 }))
     expect((wrapper.find('.managed-ai-session-content-pagination input').element as HTMLInputElement).value).toBe('1')
     expect(wrapper.find('.managed-ai-session-content-status .notice').text()).toContain('重启该 AI 对话后修改才会生效')
+    wrapper.unmount()
+  })
+
+  it('selects arbitrary records and deletes them in one backend request', async () => {
+    const initialRecords = makeRecordPage(0, 3, 'revision-1')
+    const remainingRecord = makeRecord('record 2', 'revision-2', 1)
+    const deleteRecords = vi.fn(async () => ({
+      ok: true,
+      data: {
+        recordId: initialRecords[0].recordId,
+        recordIds: [initialRecords[0].recordId, initialRecords[2].recordId],
+        sourceRevision: 'revision-2'
+      }
+    }))
+    window.aiops = {
+      ...originalAiops,
+      listManagedAiSessionContent: vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, data: makeSnapshot(initialRecords, 'revision-1') })
+        .mockResolvedValueOnce({ ok: true, data: makeSnapshot([remainingRecord], 'revision-2') }),
+      deleteManagedAiSessionContentRecord: deleteRecords
+    }
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mountWorkspace()
+    await flushPromises()
+
+    await wrapper.find('.managed-ai-session-selection-toggle').trigger('click')
+    const selectors = wrapper.findAll('.managed-ai-session-record-selector input')
+    await selectors[0].setValue(true)
+    await selectors[2].setValue(true)
+    await wrapper.find('.managed-ai-session-selection-action.danger').trigger('click')
+    await flushPromises()
+
+    expect(deleteRecords).toHaveBeenCalledTimes(1)
+    expect(deleteRecords).toHaveBeenCalledWith(expect.objectContaining({
+      recordId: initialRecords[0].recordId,
+      recordIds: [initialRecords[0].recordId, initialRecords[2].recordId],
+      sourceRevision: 'revision-1'
+    }))
+    expect(wrapper.findAll('.managed-ai-session-record-card')).toHaveLength(1)
+    expect(wrapper.find('.managed-ai-session-selection-toggle').classes()).not.toContain('active')
+    wrapper.unmount()
+  })
+
+  it('deletes the chosen record and all following records in one backend request', async () => {
+    const initialRecords = makeRecordPage(0, 3, 'revision-1')
+    const remainingRecord = makeRecord('record 1', 'revision-2', 0)
+    const deleteRecords = vi.fn(async () => ({
+      ok: true,
+      data: {
+        recordId: initialRecords[1].recordId,
+        recordIds: [initialRecords[1].recordId],
+        sourceRevision: 'revision-2'
+      }
+    }))
+    window.aiops = {
+      ...originalAiops,
+      listManagedAiSessionContent: vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, data: makeSnapshot(initialRecords, 'revision-1') })
+        .mockResolvedValueOnce({ ok: true, data: makeSnapshot([remainingRecord], 'revision-2') }),
+      deleteManagedAiSessionContentRecord: deleteRecords
+    }
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mountWorkspace()
+    await flushPromises()
+
+    await wrapper.findAll('.managed-ai-session-record-actions .danger-soft')[1].trigger('click')
+    await flushPromises()
+
+    expect(deleteRecords).toHaveBeenCalledTimes(1)
+    expect(deleteRecords).toHaveBeenCalledWith(expect.objectContaining({
+      recordId: initialRecords[1].recordId,
+      deleteFollowing: true,
+      sourceRevision: 'revision-1'
+    }))
+    expect(wrapper.findAll('.managed-ai-session-record-card')).toHaveLength(1)
     wrapper.unmount()
   })
 

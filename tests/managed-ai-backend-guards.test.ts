@@ -137,9 +137,10 @@ describe('managedAiBackendGuards', () => {
   })
 
   it('validates managed AI content delete data', () => {
-    expect(isManagedAiSessionContentDeleteData({ recordId: 'record-1', sourceRevision: 'revision-1' })).toBe(true)
-    expect(isManagedAiSessionContentDeleteData({ recordId: '', sourceRevision: 'revision-1' })).toBe(false)
-    expect(isManagedAiSessionContentDeleteData({ recordId: 'record-1', sourceRevision: '' })).toBe(false)
+    expect(isManagedAiSessionContentDeleteData({ recordId: 'record-1', recordIds: ['record-1'], sourceRevision: 'revision-1' })).toBe(true)
+    expect(isManagedAiSessionContentDeleteData({ recordId: '', recordIds: ['record-1'], sourceRevision: 'revision-1' })).toBe(false)
+    expect(isManagedAiSessionContentDeleteData({ recordId: 'record-1', recordIds: [], sourceRevision: 'revision-1' })).toBe(false)
+    expect(isManagedAiSessionContentDeleteData({ recordId: 'record-1', recordIds: ['record-1'], sourceRevision: '' })).toBe(false)
   })
 
   it('validates Agent Hook installer snapshots and operation data', () => {

@@ -94,6 +94,13 @@
   color: var(--theme-core-danger);
 }
 
+.managed-ai-session-record-actions button.danger-soft,
+.managed-ai-session-record-modal-footer-actions button.danger-soft,
+.managed-ai-session-selection-action.danger {
+  border-color: color-mix(in srgb, var(--theme-core-danger) 30%, var(--theme-module-active-border));
+  color: var(--theme-core-danger);
+}
+
 .managed-ai-session-record-actions button.danger:hover:not(:disabled),
 .managed-ai-session-record-modal-footer-actions button.danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--theme-core-danger) 12%, var(--theme-module-active-card-bg));
@@ -128,6 +135,28 @@
   gap: 12px;
   border-bottom: 1px solid var(--theme-module-active-border);
   padding: 7px 14px;
+}
+
+.managed-ai-session-content-toolbar-primary {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.managed-ai-session-selection-toggle,
+.managed-ai-session-selection-action {
+  flex: 0 0 auto;
+  min-height: 32px;
+  gap: 6px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.managed-ai-session-selection-toggle.active {
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 58%, var(--theme-module-active-border));
+  background: color-mix(in srgb, var(--theme-module-active-accent) 14%, var(--theme-module-active-card-bg));
+  color: var(--theme-module-active-accent);
 }
 
 .managed-ai-session-record-summary {
@@ -230,6 +259,11 @@
   --record-accent: color-mix(in srgb, var(--theme-module-active-accent) 38%, var(--theme-module-active-text-muted));
 }
 
+.managed-ai-session-record-card.is-selected {
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 58%, var(--theme-module-active-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--theme-module-active-accent) 22%, transparent);
+}
+
 .managed-ai-session-record-card-header {
   min-height: 42px;
   display: flex;
@@ -246,6 +280,24 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.managed-ai-session-record-selector {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 7px;
+  background: var(--theme-module-active-card-bg);
+}
+
+.managed-ai-session-record-selector input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--theme-module-active-accent);
 }
 
 .managed-ai-session-record-meta span {
@@ -581,6 +633,10 @@
   .managed-ai-session-content-toolbar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .managed-ai-session-content-toolbar-primary {
+    flex-wrap: wrap;
   }
 
   .managed-ai-session-record-summary,
