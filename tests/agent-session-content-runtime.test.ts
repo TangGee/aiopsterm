@@ -47,11 +47,55 @@ const makeSession = (input: {
   decisions: []
 })
 
+const createCodexProjectionDatabase = (path: string, sessionIds: string[]) => {
+  const db = new Database(path)
+  db.exec(`
+    CREATE TABLE thread_items (thread_id TEXT NOT NULL);
+    CREATE TABLE thread_turns (thread_id TEXT NOT NULL);
+    CREATE TABLE thread_realtime_items (thread_id TEXT NOT NULL);
+    CREATE TABLE thread_history_projection_state (thread_id TEXT PRIMARY KEY);
+  `)
+  for (const table of ['thread_items', 'thread_turns', 'thread_realtime_items', 'thread_history_projection_state']) {
+    const insert = db.prepare(`INSERT INTO ${table} (thread_id) VALUES (?)`)
+    sessionIds.forEach((sessionId) => insert.run(sessionId))
+  }
+  db.close()
+}
+
+const codexProjectionCounts = (path: string, sessionId: string) => {
+  const db = new Database(path, { readonly: true })
+  try {
+    return Object.fromEntries(
+      ['thread_items', 'thread_turns', 'thread_realtime_items', 'thread_history_projection_state'].map((table) => [
+        table,
+        Number((db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE thread_id = ?`).get(sessionId) as { count?: number }).count || 0)
+      ])
+    )
+  } finally {
+    db.close()
+  }
+}
+
+const insertCodexProjection = (path: string, sessionId: string) => {
+  const db = new Database(path)
+  try {
+    for (const table of ['thread_items', 'thread_turns', 'thread_realtime_items', 'thread_history_projection_state']) {
+      db.prepare(`INSERT INTO ${table} (thread_id) VALUES (?)`).run(sessionId)
+    }
+  } finally {
+    db.close()
+  }
+}
+
 describe('agentSessionContentRuntime', () => {
   it('lists, confirms stale overwrite, and deletes JSONL transcript records without backups', async () => {
     const { createAgentSessionContentRuntime } = await loadRuntime()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-session-content-jsonl-'))
     try {
+      const codexHome = join(root, 'codex-home')
+      await mkdir(codexHome, { recursive: true })
+      const projectionPath = join(codexHome, 'thread_history_17.sqlite')
+      createCodexProjectionDatabase(projectionPath, ['codex-session-1', 'unrelated-session'])
       const transcriptPath = join(root, 'codex-session.jsonl')
       await writeFile(
         transcriptPath,
@@ -68,7 +112,7 @@ describe('agentSessionContentRuntime', () => {
         getSession: () => session,
         getUserDataPath: () => root,
         getHomeDir: () => root,
-        getEnv: () => ({ CODEX_HOME: join(root, 'codex-home') }) as NodeJS.ProcessEnv,
+        getEnv: () => ({ CODEX_HOME: codexHome }) as NodeJS.ProcessEnv,
         now: () => 1781884900000
       })
 
@@ -100,6 +144,18 @@ describe('agentSessionContentRuntime', () => {
       expect(lines).toHaveLength(4)
       expect(lines[3]).toBe('')
       expect(JSON.parse(lines[1]).payload.message).toBe('fix the billing api')
+      expect(codexProjectionCounts(projectionPath, session.id)).toEqual({
+        thread_items: 0,
+        thread_turns: 0,
+        thread_realtime_items: 0,
+        thread_history_projection_state: 0
+      })
+      expect(codexProjectionCounts(projectionPath, 'unrelated-session')).toEqual({
+        thread_items: 1,
+        thread_turns: 1,
+        thread_realtime_items: 1,
+        thread_history_projection_state: 1
+      })
 
       const conflict = await runtime.updateRecord({
         source: 'codex',
@@ -121,6 +177,8 @@ describe('agentSessionContentRuntime', () => {
       expect(overwritten).toEqual(expect.objectContaining({ ok: true }))
       expect(overwritten.data?.record.content).toBe('confirmed overwrite')
 
+      insertCodexProjection(projectionPath, session.id)
+
       const deleted = await runtime.deleteRecord({
         source: 'codex',
         sessionId: session.id,
@@ -133,6 +191,12 @@ describe('agentSessionContentRuntime', () => {
       expect(deletedLines).toHaveLength(3)
       expect(deletedLines[2]).toBe('')
       expect(deletedRaw).not.toContain('confirmed overwrite')
+      expect(codexProjectionCounts(projectionPath, session.id)).toEqual({
+        thread_items: 0,
+        thread_turns: 0,
+        thread_realtime_items: 0,
+        thread_history_projection_state: 0
+      })
       const relisted = await runtime.list({ source: 'codex', sessionId: session.id })
       expect(relisted.data?.records.map((record: ManagedAiSessionContentRecord) => record.messageType)).toEqual(['raw-json', 'message'])
     } finally {
@@ -498,6 +562,52 @@ describe('agentSessionContentRuntime', () => {
         sourceRevision: updated.data!.sourceRevision
       })
       expect(deleted).toEqual(expect.objectContaining({ ok: true }))
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('does not invalidate Codex projections while editing Claude Code content', async () => {
+    const { createAgentSessionContentRuntime } = await loadRuntime()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-session-content-claude-projection-'))
+    try {
+      const codexHome = join(root, 'codex-home')
+      await mkdir(codexHome, { recursive: true })
+      const projectionPath = join(codexHome, 'thread_history_29.sqlite')
+      createCodexProjectionDatabase(projectionPath, ['shared-session-id'])
+      const transcriptPath = join(root, 'claude-session.jsonl')
+      await writeFile(
+        transcriptPath,
+        `${JSON.stringify({ type: 'user', message: { role: 'user', content: 'before' } })}\n`,
+        'utf-8'
+      )
+      const session = makeSession({ id: 'shared-session-id', source: 'claude-code', transcriptPath })
+      const runtime = createAgentSessionContentRuntime({
+        loadStoreIfNeeded: async () => undefined,
+        getSession: () => session,
+        getUserDataPath: () => root,
+        getHomeDir: () => root,
+        getEnv: () => ({ CODEX_HOME: codexHome, CLAUDE_CONFIG_DIR: join(root, 'claude-home') }) as NodeJS.ProcessEnv,
+        now: () => 1781884900000
+      })
+
+      const listed = await runtime.list({ source: 'claude-code', sessionId: session.id })
+      const record = listed.data!.records[0]
+      const updated = await runtime.updateRecord({
+        source: 'claude-code',
+        sessionId: session.id,
+        recordId: record.recordId,
+        content: 'after',
+        sourceRevision: record.sourceRevision
+      })
+
+      expect(updated).toEqual(expect.objectContaining({ ok: true }))
+      expect(codexProjectionCounts(projectionPath, session.id)).toEqual({
+        thread_items: 1,
+        thread_turns: 1,
+        thread_realtime_items: 1,
+        thread_history_projection_state: 1
+      })
     } finally {
       await rm(root, { recursive: true, force: true })
     }

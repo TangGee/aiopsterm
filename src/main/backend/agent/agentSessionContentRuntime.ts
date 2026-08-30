@@ -100,6 +100,11 @@ type OpenCodeSessionRow = {
   time_updated?: number
 }
 
+type CodexProjectionTransaction = {
+  db: SqliteDatabase
+  transactionOpen: boolean
+}
+
 const defaultLimit = 200
 const maxLimit = 500
 const defaultMaxContentChars = 16_000
@@ -108,6 +113,12 @@ const maxScanFiles = 2400
 const jsonlSources = new Set<AiAgentSessionSource>(['codex', 'claude-code'])
 const contentMutationQueues = new Map<string, Promise<void>>()
 const builtinParsersBySource = new Map(builtinAgentSessionParserDefinitions.map((definition) => [definition.source, definition]))
+const codexProjectionTableNames = [
+  'thread_items',
+  'thread_turns',
+  'thread_realtime_items',
+  'thread_history_projection_state'
+] as const
 const skippedJsonStringKeys = new Set([
   'id',
   'uuid',
@@ -177,6 +188,115 @@ const cleanPath = (value: unknown, home = defaultHomeDir()) => {
 const pathInHome = (home: string, relative: string) => join(home || defaultHomeDir(), relative)
 
 const codexHomeFor = (env: NodeJS.ProcessEnv, home: string) => cleanPath(env.CODEX_HOME, home) || pathInHome(home, '.codex')
+
+const codexThreadHistoryDatabasePaths = (config: AgentSessionContentRuntimeConfig) => {
+  const root = codexHomeFor(config.getEnv(), config.getHomeDir())
+  let entries: string[]
+  try {
+    entries = readdirSync(root)
+  } catch {
+    return []
+  }
+  return entries
+    .map((entry) => {
+      const match = /^thread_history_(\d+)\.sqlite$/.exec(entry)
+      return match ? { path: join(root, entry), version: Number(match[1]) } : null
+    })
+    .filter((entry): entry is { path: string; version: number } => Boolean(entry))
+    .sort((first, second) => second.version - first.version)
+    .map((entry) => entry.path)
+}
+
+const codexProjectionTablesFor = (db: SqliteDatabase) => {
+  const placeholders = codexProjectionTableNames.map(() => '?').join(', ')
+  const rows = queryRows<{ name?: string }>(
+    db,
+    `SELECT name FROM sqlite_schema WHERE type = 'table' AND name IN (${placeholders})`,
+    [...codexProjectionTableNames]
+  )
+  const found = new Set(rows.map((row) => cleanOptionalText(row.name)).filter(Boolean))
+  return codexProjectionTableNames.filter((name) => found.has(name))
+}
+
+const beginCodexProjectionInvalidation = (
+  config: AgentSessionContentRuntimeConfig,
+  session: ManagedAiSessionRecord
+): CodexProjectionTransaction[] => {
+  if (session.source !== 'codex') return []
+  const transactions: CodexProjectionTransaction[] = []
+  try {
+    for (const path of codexThreadHistoryDatabasePaths(config)) {
+      const db = openSqliteDatabase(path, false)
+      const transaction: CodexProjectionTransaction = { db, transactionOpen: false }
+      try {
+        const tables = codexProjectionTablesFor(db)
+        if (!tables.length) {
+          db.close()
+          continue
+        }
+        db.prepare('BEGIN IMMEDIATE').run()
+        transaction.transactionOpen = true
+        const containsSession = tables.some((table) =>
+          queryRows<{ found?: number }>(db, `SELECT 1 AS found FROM ${table} WHERE thread_id = ? LIMIT 1`, [session.id]).length > 0
+        )
+        if (!containsSession) {
+          db.prepare('ROLLBACK').run()
+          transaction.transactionOpen = false
+          db.close()
+          continue
+        }
+        tables.forEach((table) => db.prepare(`DELETE FROM ${table} WHERE thread_id = ?`).run(session.id))
+        transactions.push(transaction)
+      } catch (error) {
+        if (transaction.transactionOpen) {
+          try {
+            db.prepare('ROLLBACK').run()
+          } catch {}
+        }
+        db.close()
+        throw error
+      }
+    }
+    return transactions
+  } catch (error) {
+    transactions.forEach((transaction) => {
+      if (transaction.transactionOpen) {
+        try {
+          transaction.db.prepare('ROLLBACK').run()
+        } catch {}
+      }
+      transaction.db.close()
+    })
+    throw error
+  }
+}
+
+const replaceJsonlAndInvalidateCodexProjection = async (
+  config: AgentSessionContentRuntimeConfig,
+  session: ManagedAiSessionRecord,
+  tempPath: string,
+  path: string
+) => {
+  const transactions = beginCodexProjectionInvalidation(config, session)
+  try {
+    await rename(tempPath, path)
+    transactions.forEach((transaction) => {
+      transaction.db.prepare('COMMIT').run()
+      transaction.transactionOpen = false
+    })
+  } catch (error) {
+    transactions.forEach((transaction) => {
+      if (!transaction.transactionOpen) return
+      try {
+        transaction.db.prepare('ROLLBACK').run()
+      } catch {}
+      transaction.transactionOpen = false
+    })
+    throw error
+  } finally {
+    transactions.forEach((transaction) => transaction.db.close())
+  }
+}
 
 const claudeHomesFor = (env: NodeJS.ProcessEnv, home: string) => {
   const roots: string[] = []
@@ -677,7 +797,7 @@ const updateJsonlRecord = async (
       operation: 'update',
       content: input.content
     })
-    await rename(tempPath, path)
+    await replaceJsonlAndInvalidateCodexProjection(config, session, tempPath, path)
     renamed = true
     const nextRevision = await revisionForFiles([path])
     const record = await getFullRecord(config, session, input.recordId, maxContentCharsLimit)
@@ -790,7 +910,7 @@ const deleteJsonlRecord = async (
       pointer: locator.pointer,
       operation: 'delete'
     })
-    await rename(tempPath, path)
+    await replaceJsonlAndInvalidateCodexProjection(config, session, tempPath, path)
     renamed = true
     const nextRevision = await revisionForFiles([path])
     return { ok: true, data: { recordId: input.recordId, sourceRevision: nextRevision } }
