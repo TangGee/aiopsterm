@@ -25,9 +25,9 @@
       />
     </div>
 
-    <AiPanelCodexShell v-show="!projectFilesActive" />
+    <AiPanelCodexShell v-show="!projectFilesActive && aiPanelMode === 'codex'" />
 
-    <AiPanelClassicConversation v-show="!projectFilesActive" />
+    <AiPanelClassicConversation v-show="!projectFilesActive && aiPanelMode === 'classic'" />
 
     <span
       v-if="!projectFilesActive && aiPanelMode === 'classic' && chatExportNotice"
@@ -37,7 +37,7 @@
       {{ chatExportNotice }}
     </span>
 
-    <AiPanelClassicComposer v-show="!projectFilesActive" />
+    <AiPanelClassicComposer v-show="!projectFilesActive && aiPanelMode === 'classic'" />
 
     <AiPanelCommandAuditDialog />
 

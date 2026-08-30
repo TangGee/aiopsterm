@@ -1,6 +1,5 @@
 <template>
   <div
-    v-show="aiPanelMode === 'codex'"
     class="ai-codex-shell"
     :class="{ 'drop-active': dropActive }"
     data-testid="ai-codex-shell"
@@ -197,7 +196,6 @@ const {
   activeCodexBoundTarget,
   activeCodexConversation,
   activeCodexConversationId,
-  aiPanelMode,
   bindCodexTarget,
   bindHostContextToCodex,
   closeCodexTargetPicker,

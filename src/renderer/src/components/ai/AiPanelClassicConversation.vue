@@ -1,6 +1,5 @@
 <template>
   <div
-    v-show="aiPanelMode === 'classic'"
     ref="chatScrollRef"
     class="chat-scroll"
     @scroll.passive="handleChatScroll"

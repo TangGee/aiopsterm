@@ -1,10 +1,10 @@
 import { mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const runtime = vi.hoisted(() => ({
   agentMode: { value: false },
-  aiPanelMode: { value: 'classic' as 'classic' | 'codex' },
+  aiPanelMode: { __v_isRef: true, value: 'classic' as 'classic' | 'codex' },
   chatExportNotice: { value: '' },
   closePopups: vi.fn(),
   handleDragEnter: vi.fn(),
@@ -42,6 +42,11 @@ const passiveStubs = {
 }
 
 describe('AiPanel project files surface', () => {
+  beforeEach(() => {
+    runtime.aiPanelMode.value = 'classic'
+    vi.clearAllMocks()
+  })
+
   it('switches the content area to project files while keeping AI content mounted', async () => {
     const wrapper = mount(AiPanelPresentation, {
       props: {
@@ -88,5 +93,38 @@ describe('AiPanel project files surface', () => {
     expect(wrapper.find('[data-testid="codex-shell-stub"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="codex-shell-stub"]').isVisible()).toBe(false)
     expect(wrapper.find('[data-testid="project-files-drawer-stub"]').isVisible()).toBe(true)
+  })
+
+  it('shows only the surface selected by the AI panel mode', () => {
+    runtime.aiPanelMode.value = 'codex'
+    const codexWrapper = mount(AiPanelPresentation, {
+      props: {
+        projectFilesAvailable: true,
+        projectFilesActive: false
+      },
+      global: {
+        stubs: passiveStubs
+      }
+    })
+
+    expect(codexWrapper.find('[data-testid="codex-shell-stub"]').isVisible()).toBe(true)
+    expect(codexWrapper.find('[data-testid="classic-conversation-stub"]').isVisible()).toBe(false)
+    expect(codexWrapper.find('[data-testid="classic-composer-stub"]').isVisible()).toBe(false)
+    codexWrapper.unmount()
+
+    runtime.aiPanelMode.value = 'classic'
+    const classicWrapper = mount(AiPanelPresentation, {
+      props: {
+        projectFilesAvailable: true,
+        projectFilesActive: false
+      },
+      global: {
+        stubs: passiveStubs
+      }
+    })
+
+    expect(classicWrapper.find('[data-testid="codex-shell-stub"]').isVisible()).toBe(false)
+    expect(classicWrapper.find('[data-testid="classic-conversation-stub"]').isVisible()).toBe(true)
+    expect(classicWrapper.find('[data-testid="classic-composer-stub"]').isVisible()).toBe(true)
   })
 })

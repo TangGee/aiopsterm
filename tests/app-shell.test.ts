@@ -989,6 +989,9 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('prod-bastion')
     expect(wrapper.find('.ai-header h2').exists()).toBe(false)
     expect(wrapper.find('[data-testid="ai-codex-shell"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ai-codex-shell"]').isVisible()).toBe(true)
+    expect(wrapper.find('.chat-scroll').isVisible()).toBe(false)
+    expect(wrapper.find('.ai-empty-chat').isVisible()).toBe(false)
     expect(wrapper.find('[data-testid="ai-panel-mode-open"]').attributes('title')).toContain('Codex CLI')
     expect(wrapper.find('[data-testid="ai-codex-target-bar"]').text()).toContain('未绑定终端')
     expect(wrapper.find('.ai-codex-xterm-stack').classes()).toContain('is-empty')
@@ -1969,6 +1972,8 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
 
     expect(wrapper.find('[data-testid="ai-panel-mode-open"]').attributes('title')).toContain('Classic Chat')
+    expect(wrapper.find('[data-testid="ai-codex-shell"]').isVisible()).toBe(false)
+    expect(wrapper.find('.chat-scroll').isVisible()).toBe(true)
     expect(wrapper.find('[data-testid="ai-message-input"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="ai-new-chat"]').exists()).toBe(true)
     expect(window.aiops.listChatConversations).toHaveBeenCalled()
