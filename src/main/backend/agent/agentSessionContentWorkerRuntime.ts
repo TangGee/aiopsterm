@@ -197,7 +197,8 @@ const configuredTextPointers = (line, parser) => {
             value: content,
             role: isInjectedSessionContextText(content) ? 'developer' : roleFromRule(line, scopeEntry.value, rule, fallbackRole),
             messageType: label ? rule.kind + ': ' + label : rule.kind,
-            editable: rule.editable !== false
+            editable: rule.editable !== false && typeof item.value === 'string',
+            structured: typeof item.value !== 'string'
           })
           ruleProduced = true
         }
@@ -205,7 +206,12 @@ const configuredTextPointers = (line, parser) => {
     }
     if (rule.scopePointer && ruleProduced) scopedContentFound = true
   }
-  return configured.filter((item, index, items) => items.findIndex((candidate) => candidate.pointer === item.pointer && candidate.messageType === item.messageType) === index)
+  return configured.filter((item, index, items) => {
+    if (items.findIndex((candidate) => candidate.pointer === item.pointer && candidate.messageType === item.messageType) !== index) return false
+    if (!item.structured) return true
+    const prefix = item.pointer === '/' ? '/' : item.pointer.replace(/\/$/, '') + '/'
+    return !items.some((candidate) => candidate !== item && candidate.messageType === item.messageType && candidate.pointer.startsWith(prefix))
+  })
 }
 const valueAtPointer = (value, pointer) => {
   if (pointer === '/' || pointer === '') return value

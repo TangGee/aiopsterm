@@ -155,10 +155,32 @@
     },
     {
       "id": "function-result",
-      "match": { "/type": "response_item", "/payload/type": ["function_call_output", "custom_tool_call_output"] },
+      "match": { "/type": "response_item", "/payload/type": "function_call_output" },
       "kind": "tool result",
       "role": "tool",
-      "contentPointers": ["/payload/output"]
+      "contentPointers": ["/payload/output/*/text", "/payload/output"]
+    },
+    {
+      "id": "custom-tool-result",
+      "match": { "/type": "response_item", "/payload/type": "custom_tool_call_output" },
+      "kind": "tool result",
+      "role": "tool",
+      "contentPointers": ["/payload/output/*/text", "/payload/output"]
+    },
+    {
+      "id": "exec-command-result",
+      "match": { "/type": "event_msg", "/payload/type": "exec_command_end" },
+      "kind": "tool result",
+      "role": "tool",
+      "contentPointers": ["/payload/aggregated_output"],
+      "label": "exec_command"
+    },
+    {
+      "id": "error-message",
+      "match": { "/type": "event_msg", "/payload/type": "error" },
+      "kind": "error",
+      "role": "system",
+      "contentPointers": ["/payload/message"]
     },
     {
       "id": "reasoning-summary",
@@ -230,6 +252,14 @@
       "kind": "tool result",
       "role": "tool",
       "contentPointers": ["/payload/result", "/payload/saved_path", "/payload/revised_prompt"],
+      "label": "image generation"
+    },
+    {
+      "id": "image-generation-response-result",
+      "match": { "/type": "response_item", "/payload/type": "image_generation_call" },
+      "kind": "tool result",
+      "role": "tool",
+      "contentPointers": ["/payload/result", "/payload/revised_prompt"],
       "label": "image generation"
     },
     {

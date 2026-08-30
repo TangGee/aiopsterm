@@ -4,6 +4,7 @@ import { join } from 'path'
 import { isMainThread, threadId } from 'worker_threads'
 import { afterAll, describe, expect, it } from 'vitest'
 import type { ManagedAiSessionContentRecord } from '../src/shared/contracts/managedAiSessionContent'
+import { builtinAgentSessionParserDefinitions } from '../src/shared/agentSessionParserConfigRuntime'
 
 let workerRuntime: any
 
@@ -22,6 +23,7 @@ const pageInput = (path: string, sessionId: string, offset = 0, limit = 80) => (
   offset,
   limit
 })
+const codexParser = builtinAgentSessionParserDefinitions.find((definition) => definition.source === 'codex')!
 
 afterAll(async () => {
   await workerRuntime?.disposeAgentSessionContentWorker()
@@ -38,18 +40,30 @@ describe('agentSessionContentWorkerRuntime', () => {
         [
           JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'question' } }),
           JSON.stringify({ type: 'response_item', payload: { type: 'function_call', call_id: 'call-1', name: 'exec_command', arguments: '{"cmd":"pwd"}' } }),
-          JSON.stringify({ type: 'response_item', payload: { type: 'function_call_output', call_id: 'call-1', output: 'tool output' } })
+          JSON.stringify({ type: 'response_item', payload: { type: 'function_call_output', call_id: 'call-1', output: 'tool output' } }),
+          JSON.stringify({ type: 'response_item', payload: { type: 'custom_tool_call', call_id: 'call-2', name: 'terminal', input: 'inspect files' } }),
+          JSON.stringify({
+            type: 'response_item',
+            payload: {
+              type: 'custom_tool_call_output',
+              call_id: 'call-2',
+              output: [
+                { type: 'input_text', text: 'Script completed' },
+                { type: 'input_text', text: 'file.txt' }
+              ]
+            }
+          })
         ].join('\n') + '\n',
         'utf-8'
       )
 
-      const result = await listJsonlSessionContentInWorker(pageInput(path, 'session-1', 2, 1))
+      const result = await listJsonlSessionContentInWorker({ ...pageInput(path, 'session-1', 2, 1), parserDefinition: codexParser })
 
       expect(isMainThread).toBe(true)
       expect(result.workerIsMainThread).toBe(false)
       expect(result.workerThreadId).not.toBe(threadId)
-      expect(result.total).toBe(3)
-      expect(result.matchTotal).toBe(3)
+      expect(result.total).toBe(6)
+      expect(result.matchTotal).toBe(6)
       expect(result.records).toEqual([
         expect.objectContaining({
           ordinal: 2,
@@ -61,12 +75,24 @@ describe('agentSessionContentWorkerRuntime', () => {
 
       const searched = await listJsonlSessionContentInWorker({
         ...pageInput(path, 'session-1', 0, 1),
+        parserDefinition: codexParser,
         query: 'tool'
       })
-      expect(searched.total).toBe(3)
-      expect(searched.matchTotal).toBe(2)
+      expect(searched.total).toBe(6)
+      expect(searched.matchTotal).toBe(5)
       expect(searched.records).toEqual([
         expect.objectContaining({ ordinal: 1, messageType: 'tool call: exec_command' })
+      ])
+
+      const customResults = await listJsonlSessionContentInWorker({
+        ...pageInput(path, 'session-1', 0, 20),
+        parserDefinition: codexParser,
+        query: 'tool result'
+      })
+      expect(customResults.records).toEqual([
+        expect.objectContaining({ content: 'tool output', locationLabel: 'line 3 /payload/output', editable: true }),
+        expect.objectContaining({ content: 'Script completed', locationLabel: 'line 5 /payload/output/0/text', editable: true }),
+        expect.objectContaining({ content: 'file.txt', locationLabel: 'line 5 /payload/output/1/text', editable: true })
       ])
     } finally {
       await rm(root, { recursive: true, force: true })

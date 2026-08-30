@@ -46,7 +46,7 @@
       "match": { "/type": "tool_result" },
       "kind": "tool result",
       "role": "tool",
-      "contentPointers": ["/content"]
+      "contentPointers": ["/content/*/text", "/content"]
     },
     {
       "id": "agent-result",

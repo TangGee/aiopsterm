@@ -61,7 +61,7 @@
       "match": { "/type": "context.append_loop_event", "/event/type": "tool.result" },
       "kind": "tool result",
       "role": "tool",
-      "contentPointers": ["/event/result"]
+      "contentPointers": ["/event/result/output/*/text", "/event/result/output", "/event/result/note", "/event/result"]
     }
   ],
   "fallback": "raw-json"

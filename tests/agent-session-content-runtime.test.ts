@@ -156,7 +156,34 @@ describe('agentSessionContentRuntime', () => {
           }),
           JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'real assistant answer' }] } }),
           JSON.stringify({ type: 'response_item', payload: { type: 'function_call', call_id: 'call-1', name: 'exec_command', arguments: '{"cmd":"pwd"}' } }),
-          JSON.stringify({ type: 'response_item', payload: { type: 'function_call_output', call_id: 'call-1', output: 'tool output text' } })
+          JSON.stringify({ type: 'response_item', payload: { type: 'function_call_output', call_id: 'call-1', output: 'tool output text' } }),
+          JSON.stringify({ type: 'response_item', payload: { type: 'custom_tool_call', call_id: 'call-2', name: 'exec', input: 'inspect files' } }),
+          JSON.stringify({
+            type: 'response_item',
+            payload: {
+              type: 'custom_tool_call_output',
+              call_id: 'call-2',
+              output: [
+                { type: 'input_text', text: 'Script completed' },
+                { type: 'input_text', text: 'Output:\nfile.txt' }
+              ]
+            }
+          }),
+          JSON.stringify({ type: 'response_item', payload: { type: 'function_call', call_id: 'call-3', name: 'view_image', arguments: '{"path":"image.png"}' } }),
+          JSON.stringify({
+            type: 'response_item',
+            payload: {
+              type: 'function_call_output',
+              call_id: 'call-3',
+              output: [
+                { type: 'input_text', text: 'image inspected' },
+                { type: 'input_image', image_url: 'data:image/png;base64,hidden' }
+              ]
+            }
+          }),
+          JSON.stringify({ type: 'event_msg', payload: { type: 'exec_command_end', aggregated_output: 'legacy command output' } }),
+          JSON.stringify({ type: 'event_msg', payload: { type: 'error', message: 'network failed' } }),
+          JSON.stringify({ type: 'response_item', payload: { type: 'image_generation_call', result: '/tmp/out.png', revised_prompt: 'blue sky' } })
         ].join('\n') + '\n',
         'utf-8'
       )
@@ -184,7 +211,16 @@ describe('agentSessionContentRuntime', () => {
         'real user prompt',
         'real assistant answer',
         '{"cmd":"pwd"}',
-        'tool output text'
+        'tool output text',
+        'inspect files',
+        'Script completed',
+        'Output:\nfile.txt',
+        '{"path":"image.png"}',
+        'image inspected',
+        'legacy command output',
+        'network failed',
+        '/tmp/out.png',
+        'blue sky'
       ])
       expect(contents).not.toEqual(expect.arrayContaining(['auto', 'response_item', 'message', 'input_text', 'output_text', 'function_call_output']))
       expect(listed.data?.records.find((record: ManagedAiSessionContentRecord) => record.content === 'developer instructions')).toEqual(
@@ -204,6 +240,22 @@ describe('agentSessionContentRuntime', () => {
       )
       expect(listed.data?.records.find((record: ManagedAiSessionContentRecord) => record.content === 'tool output text')).toEqual(
         expect.objectContaining({ role: 'tool', messageType: 'tool result: exec_command', locationLabel: 'line 7 /payload/output' })
+      )
+      expect(listed.data?.records.find((record: ManagedAiSessionContentRecord) => record.content === 'Script completed')).toEqual(
+        expect.objectContaining({ role: 'tool', messageType: 'tool result', locationLabel: 'line 9 /payload/output/0/text', editable: true })
+      )
+      expect(listed.data?.records.find((record: ManagedAiSessionContentRecord) => record.content === 'Output:\nfile.txt')).toEqual(
+        expect.objectContaining({ role: 'tool', messageType: 'tool result', locationLabel: 'line 9 /payload/output/1/text', editable: true })
+      )
+      expect(listed.data?.records.find((record: ManagedAiSessionContentRecord) => record.content === 'image inspected')).toEqual(
+        expect.objectContaining({ role: 'tool', messageType: 'tool result: view_image', locationLabel: 'line 11 /payload/output/0/text', editable: true })
+      )
+      expect(contents.some((content: string) => content.includes('base64,hidden'))).toBe(false)
+      expect(listed.data?.records.find((record: ManagedAiSessionContentRecord) => record.content === 'legacy command output')).toEqual(
+        expect.objectContaining({ role: 'tool', messageType: 'tool result: exec_command', locationLabel: 'line 12 /payload/aggregated_output' })
+      )
+      expect(listed.data?.records.find((record: ManagedAiSessionContentRecord) => record.content === 'network failed')).toEqual(
+        expect.objectContaining({ role: 'system', messageType: 'error', locationLabel: 'line 13 /payload/message' })
       )
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -311,7 +363,7 @@ describe('agentSessionContentRuntime', () => {
           JSON.stringify({ type: 'context.append_loop_event', event: { type: 'content.part', part: { type: 'think', think: 'kimi reasoning' } } }),
           JSON.stringify({ type: 'context.append_loop_event', event: { type: 'content.part', part: { type: 'text', text: 'kimi answer' } } }),
           JSON.stringify({ type: 'context.append_loop_event', event: { type: 'tool.call', name: 'Read', args: { path: '/tmp/file' } } }),
-          JSON.stringify({ type: 'context.append_loop_event', event: { type: 'tool.result', result: { output: 'file body' } } }),
+          JSON.stringify({ type: 'context.append_loop_event', event: { type: 'tool.result', result: { output: 'file body', note: 'complete' } } }),
           JSON.stringify({ type: 'usage.record', usage: { inputTokens: 10 } })
         ].join('\n') + '\n',
         'utf-8'
@@ -335,9 +387,44 @@ describe('agentSessionContentRuntime', () => {
         expect.objectContaining({ content: 'kimi reasoning', role: 'assistant', messageType: 'reasoning', editable: false }),
         expect.objectContaining({ content: 'kimi answer', role: 'assistant', messageType: 'message', editable: false }),
         expect.objectContaining({ role: 'tool', messageType: 'tool call: Read', editable: false }),
-        expect.objectContaining({ role: 'tool', messageType: 'tool result', editable: false }),
+        expect.objectContaining({ content: 'file body', role: 'tool', messageType: 'tool result', editable: false }),
+        expect.objectContaining({ content: 'complete', role: 'tool', messageType: 'tool result', editable: false }),
         expect.objectContaining({ messageType: 'raw-json', editable: false })
       ])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('extracts Claude Code array tool-result text and keeps object tool input read-only', async () => {
+    const { createAgentSessionContentRuntime } = await loadRuntime()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-session-content-claude-tools-'))
+    try {
+      const transcriptPath = join(root, 'claude-tools.jsonl')
+      await writeFile(
+        transcriptPath,
+        [
+          JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Read', input: { file_path: '/tmp/file' } }] } }),
+          JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: [{ type: 'text', text: 'file body' }, { type: 'image', source: { data: 'hidden' } }] }] } })
+        ].join('\n') + '\n',
+        'utf-8'
+      )
+      const session = makeSession({ id: 'claude-tools', source: 'claude-code', transcriptPath })
+      const runtime = createAgentSessionContentRuntime({
+        loadStoreIfNeeded: async () => undefined,
+        getSession: () => session,
+        getUserDataPath: () => root,
+        getHomeDir: () => root,
+        getEnv: () => ({ CLAUDE_CONFIG_DIR: join(root, 'claude-home') }) as NodeJS.ProcessEnv,
+        now: () => 1781884900000
+      })
+
+      const listed = await runtime.list({ source: 'claude-code', sessionId: session.id })
+      expect(listed.data?.records).toEqual([
+        expect.objectContaining({ role: 'tool', messageType: 'tool call: Read', editable: false }),
+        expect.objectContaining({ content: 'file body', role: 'tool', messageType: 'tool result', editable: true })
+      ])
+      expect(listed.data?.records.some((record: ManagedAiSessionContentRecord) => record.content.includes('hidden'))).toBe(false)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
