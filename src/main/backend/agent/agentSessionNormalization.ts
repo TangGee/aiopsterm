@@ -80,7 +80,10 @@ export const managedAiNotificationId = (source: AiAgentSessionSource, sessionId:
 export const pendingDecisionKey = (source: AiAgentSessionSource, sessionId: string, requestId: string) => `${source}:${sessionId}:${requestId}`
 
 export const normalizeSource = (value: unknown): AiAgentSessionSource | null => {
-  return normalizeAgentIntegrationSource(value)
+  const builtin = normalizeAgentIntegrationSource(value)
+  if (builtin) return builtin
+  const normalized = cleanText(value).toLowerCase().replace(/_/g, '-')
+  return /^custom:[a-z0-9][a-z0-9-]{0,63}$/.test(normalized) ? normalized as AiAgentSessionSource : null
 }
 
 const normalizeBoolean = (value: unknown) => {
@@ -414,7 +417,7 @@ const baseNameFromPath = (value: unknown) => {
 }
 
 export const sourceLabel = (source: AiAgentSessionSource) => {
-  const labels: Record<AiAgentSessionSource, string> = {
+  const labels: Partial<Record<AiAgentSessionSource, string>> = {
     'claude-code': 'Claude Code',
     antigravity: 'Antigravity',
     amp: 'Amp',
@@ -435,7 +438,7 @@ export const sourceLabel = (source: AiAgentSessionSource) => {
     'kimi-code': 'Kimi Code',
     'deepseek-harness': 'DeepSeek Harness'
   }
-  return labels[source] || source
+  return labels[source] || source.replace(/^custom:/, '')
 }
 
 const eventTitle = (source: AiAgentSessionSource, event: AiAgentSessionEventName, input: Record<string, unknown>, cwd?: string) =>

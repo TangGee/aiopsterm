@@ -134,6 +134,13 @@ import type {
   AgentHookInstallerOperationResult
 } from './agentHooks'
 import type {
+  AgentSessionParserImportInput,
+  AgentSessionParserImportResult,
+  AgentSessionParserListResult,
+  AgentSessionParserRemoveInput,
+  AgentSessionParserRemoveResult
+} from './agentSessionParsers'
+import type {
   ExportMcpCopyConfigInput,
   ExportMcpCopyConfigResult,
   ExportMcpInstallerListResult,
@@ -647,6 +654,9 @@ export type AiopsPreloadApi = {
   listAgentHookInstallers: () => Promise<AgentHookInstallerListResult>
   installAgentHook: (input: AgentHookInstallerOperationInput) => Promise<AgentHookInstallerOperationResult>
   uninstallAgentHook: (input: AgentHookInstallerOperationInput) => Promise<AgentHookInstallerOperationResult>
+  listAgentSessionParsers: () => Promise<AgentSessionParserListResult>
+  importAgentSessionParser: (input: AgentSessionParserImportInput) => Promise<AgentSessionParserImportResult>
+  removeAgentSessionParser: (input: AgentSessionParserRemoveInput) => Promise<AgentSessionParserRemoveResult>
   listExportMcpInstallers: () => Promise<ExportMcpInstallerListResult>
   installExportMcp: (input: ExportMcpInstallerOperationInput) => Promise<ExportMcpInstallerOperationResult>
   uninstallExportMcp: (input: ExportMcpInstallerOperationInput) => Promise<ExportMcpInstallerOperationResult>

@@ -1,9 +1,13 @@
 import { computed, defineComponent, h, ref } from 'vue'
 import { Brain, Copy, Eye, EyeOff, LockKeyhole, Upload, Volume2, X } from 'lucide-vue-next'
 import type { AgentHookInstallerStatus } from '@shared/contracts/agentHooks'
+import type { AgentSessionParserProfile } from '@shared/contracts/agentSessionParsers'
+import type { AiAgentSessionSource } from '@shared/contracts/managedAiSessions'
 import type { ModelProviderCheckResult, NotificationSoundPreset } from '@shared/contracts/appRuntime'
 import { resolveModelProviderEndpoint, suggestModelProviderEndpoint, type ModelProviderEndpointSuggestion } from '@shared/modelProviderEndpoint'
 import type { SettingsModelProviderKey, SettingsWorkspacePageContext, SettingsWorkspaceStore, SettingsWorkspaceTranslate } from '@/services/settings/settingsWorkspacePageContext'
+import { localFilesClient } from '@/services/app/localFilesClient'
+import { agentSessionParserClient } from '@/services/settings/agentSessionParserClient'
 
 export const createSettingsWorkspaceModelAiPages = (
   workspace: SettingsWorkspaceStore,
@@ -523,6 +527,82 @@ export const createSettingsWorkspaceModelAiPages = (
   const AgentHookInstallerCard = defineComponent({
     name: 'AgentHookInstallerCard',
     setup() {
+      const parserProfiles = ref<AgentSessionParserProfile[]>([])
+      const parserLoading = ref(false)
+      const parserBusySource = ref('')
+      const parserError = ref('')
+
+      const refreshParsers = async () => {
+        const list = agentSessionParserClient.list()
+        if (!list) return
+        parserLoading.value = true
+        try {
+          const result = await list()
+          if (!result?.ok || !result.data || !Array.isArray(result.data.parsers)) {
+            parserError.value = result?.errorMessage || t('settings.ai.sessionParser.loadFailed')
+            return
+          }
+          parserProfiles.value = result.data.parsers
+          parserError.value = ''
+        } catch (error) {
+          parserError.value = error instanceof Error ? error.message : t('settings.ai.sessionParser.loadFailed')
+        } finally {
+          parserLoading.value = false
+        }
+      }
+
+      const importParser = async (expectedSource?: AiAgentSessionSource) => {
+        const showOpenDialog = localFilesClient.showOpenDialog()
+        const importRule = agentSessionParserClient.import()
+        if (!showOpenDialog || !importRule) {
+          workspace.setTopNotice(t('settings.ai.sessionParser.serviceUnavailable'))
+          return
+        }
+        const selected = await showOpenDialog({
+          properties: ['openFile'],
+          filters: [{ name: t('settings.ai.sessionParser.fileType'), extensions: ['json'] }]
+        })
+        const filePath = selected?.canceled ? '' : selected?.filePaths?.[0] || ''
+        if (!filePath) return
+        parserBusySource.value = expectedSource || 'add'
+        try {
+          const result = await importRule({ filePath, ...(expectedSource ? { expectedSource } : {}) })
+          if (!result?.ok || !result.data) {
+            workspace.setTopNotice(result?.errorMessage || t('settings.ai.sessionParser.importFailed'))
+            return
+          }
+          parserProfiles.value = result.data.snapshot.parsers
+          workspace.setTopNotice(t('settings.ai.sessionParser.imported', { label: result.data.parser.displayName }))
+          void workspace.refreshManagedAiSessions()
+        } catch (error) {
+          workspace.setTopNotice(error instanceof Error ? error.message : t('settings.ai.sessionParser.importFailed'))
+        } finally {
+          parserBusySource.value = ''
+        }
+      }
+
+      const removeParser = async (profile: AgentSessionParserProfile) => {
+        const removeRule = agentSessionParserClient.remove()
+        if (!removeRule) return
+        parserBusySource.value = profile.source
+        try {
+          const result = await removeRule({ source: profile.source })
+          if (!result?.ok || !result.data) {
+            workspace.setTopNotice(result?.errorMessage || t('settings.ai.sessionParser.removeFailed'))
+            return
+          }
+          parserProfiles.value = result.data.snapshot.parsers
+          workspace.setTopNotice(t(profile.source.startsWith('custom:') ? 'settings.ai.sessionParser.removed' : 'settings.ai.sessionParser.reset', { label: profile.displayName }))
+          void workspace.refreshManagedAiSessions()
+        } finally {
+          parserBusySource.value = ''
+        }
+      }
+
+      const parserFor = (source: AgentHookInstallerStatus['source']) => parserProfiles.value.find((parser) => parser.source === source)
+
+      void refreshParsers()
+
       const renderStatusPill = (installer: AgentHookInstallerStatus) =>
         h(
           'span',
@@ -547,6 +627,8 @@ export const createSettingsWorkspaceModelAiPages = (
       const renderInstaller = (installer: AgentHookInstallerStatus) => {
         const busy = workspace.agentHookInstallerBusySource === installer.source
         const disabled = busy || workspace.agentHookInstallersLoading || !installer.scriptPath
+        const parser = parserFor(installer.source)
+        const parserBusy = parserBusySource.value === installer.source
         return h('article', { class: 'agent-hook-installer-row' }, [
           h('div', { class: 'agent-hook-installer-main' }, [
             h('header', [
@@ -554,6 +636,9 @@ export const createSettingsWorkspaceModelAiPages = (
               renderStatusPill(installer)
             ]),
             h('p', { class: 'agent-hook-description' }, t('settings.ai.agentHook.description')),
+            h('p', { class: 'agent-hook-description' }, parser
+              ? t('settings.ai.sessionParser.status', { origin: parser.origin === 'builtin' ? t('settings.ai.sessionParser.builtin') : t('settings.ai.sessionParser.custom'), count: parser.ruleCount })
+              : t('settings.ai.sessionParser.notConfigured')),
             h('div', { class: 'agent-hook-meta-grid' }, [
               renderMeta('CLI', installer.binaryPath),
               renderMeta(t('settings.ai.agentHook.config'), installer.configPath),
@@ -564,6 +649,26 @@ export const createSettingsWorkspaceModelAiPages = (
             installer.warnings.length ? h('ul', { class: 'agent-hook-warnings' }, installer.warnings.map((warning) => h('li', warning))) : null
           ]),
           h('div', { class: 'agent-hook-installer-actions' }, [
+            h(
+              'button',
+              {
+                class: 'settings-button',
+                disabled: parserBusy || parserLoading.value,
+                onClick: () => importParser(installer.source)
+              },
+              parserBusy ? t('common.processing') : t('settings.ai.sessionParser.importRule')
+            ),
+            parser?.origin === 'user'
+              ? h(
+                  'button',
+                  {
+                    class: 'settings-button',
+                    disabled: parserBusy,
+                    onClick: () => removeParser(parser)
+                  },
+                  t('settings.ai.sessionParser.restoreDefault')
+                )
+              : null,
             h(
               'button',
               {
@@ -586,6 +691,27 @@ export const createSettingsWorkspaceModelAiPages = (
         ])
       }
 
+      const renderStandaloneParser = (parser: AgentSessionParserProfile) => {
+        const busy = parserBusySource.value === parser.source
+        const customSource = parser.source.startsWith('custom:')
+        return h('article', { class: 'agent-hook-installer-row' }, [
+          h('div', { class: 'agent-hook-installer-main' }, [
+            h('header', [
+              h('div', [h('strong', parser.displayName), h('small', parser.source.replace(/^custom:/, ''))]),
+              h('span', { class: 'agent-hook-status-pill installed' }, t(parser.origin === 'builtin' ? 'settings.ai.sessionParser.builtin' : 'settings.ai.sessionParser.custom'))
+            ]),
+            h('p', { class: 'agent-hook-description' }, t('settings.ai.sessionParser.customDescription', { kind: parser.storageKind, count: parser.ruleCount })),
+            parser.filePath ? renderMeta(t('settings.ai.sessionParser.ruleFile'), parser.filePath) : null
+          ]),
+          h('div', { class: 'agent-hook-installer-actions' }, [
+            h('button', { class: 'settings-button', disabled: busy, onClick: () => importParser(parser.source) }, t('settings.ai.sessionParser.replaceRule')),
+            parser.origin === 'user'
+              ? h('button', { class: ['settings-button', customSource ? 'danger' : ''], disabled: busy, onClick: () => removeParser(parser) }, customSource ? t('common.delete') : t('settings.ai.sessionParser.restoreDefault'))
+              : null
+          ])
+        ])
+      }
+
       return () =>
         h('div', { class: 'settings-section-card agent-hook-installer-card' }, [
           h('header', { class: 'agent-hook-card-header' }, [
@@ -593,18 +719,28 @@ export const createSettingsWorkspaceModelAiPages = (
               h('strong', t('settings.ai.agentHook.title')),
               h('small', t('settings.ai.agentHook.subtitle'))
             ]),
-            h(
-              'button',
-              {
-                class: 'settings-button',
-                disabled: workspace.agentHookInstallersLoading,
-                onClick: () => workspace.refreshAgentHookInstallers()
-              },
-              workspace.agentHookInstallersLoading ? t('common.refreshing') : t('common.refresh')
-            )
+            h('div', { class: 'export-mcp-card-actions' }, [
+              h(
+                'button',
+                {
+                  class: 'settings-button',
+                  disabled: workspace.agentHookInstallersLoading || parserLoading.value,
+                  onClick: () => {
+                    void workspace.refreshAgentHookInstallers()
+                    void refreshParsers()
+                  }
+                },
+                workspace.agentHookInstallersLoading ? t('common.refreshing') : t('common.refresh')
+              ),
+              h('button', { class: 'settings-button primary', disabled: parserBusySource.value === 'add', onClick: () => importParser() }, t('settings.ai.sessionParser.addAgent'))
+            ])
           ]),
           workspace.agentHookInstallerError ? h('p', { class: 'agent-hook-error' }, workspace.agentHookInstallerError) : null,
-          ...agentHookInstallerRows().map((installer) => renderInstaller(installer))
+          parserError.value ? h('p', { class: 'agent-hook-error' }, parserError.value) : null,
+          ...agentHookInstallerRows().map((installer) => renderInstaller(installer)),
+          ...parserProfiles.value
+            .filter((parser) => !agentHookInstallerRows().some((installer) => installer.source === parser.source))
+            .map(renderStandaloneParser)
         ])
     }
   })

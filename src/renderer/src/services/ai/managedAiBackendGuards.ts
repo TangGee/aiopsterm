@@ -121,7 +121,8 @@ export const isExportMcpClientSource = (value: unknown): value is ExportMcpClien
 export const isExportMcpServerId = (value: unknown): value is ExportMcpServerId =>
   exportMcpServerIds.has(value as ExportMcpServerId)
 
-export const isAiAgentSessionSource = (value: unknown): value is AiAgentSessionSource => aiAgentSessionSources.has(value as AiAgentSessionSource)
+export const isAiAgentSessionSource = (value: unknown): value is AiAgentSessionSource =>
+  aiAgentSessionSources.has(value as AiAgentSessionSource) || (typeof value === 'string' && /^custom:[a-z0-9][a-z0-9-]{0,63}$/.test(value))
 
 export const isAiAgentSessionEventName = (value: unknown): value is AiAgentSessionEventName =>
   aiAgentSessionEventNames.has(value as AiAgentSessionEventName)

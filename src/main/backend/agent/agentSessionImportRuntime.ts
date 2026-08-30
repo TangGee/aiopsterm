@@ -10,6 +10,7 @@ import type {
   ManagedAiSessionRecord,
   ManagedAiSessionTimelineEvent
 } from '@shared/contracts/managedAiSessions'
+import type { AgentSessionParserDefinition } from '@shared/contracts/agentSessionParsers'
 import {
   canonicalCwdFor,
   cleanOptionalText,
@@ -23,6 +24,7 @@ export type ImportedAgentSession = Omit<ManagedAiSessionRecord, 'decisions'>
 
 export type AgentSessionImportRuntime = {
   configure: (input?: Partial<AgentSessionImportRuntimeConfig>) => void
+  invalidateCache: () => void
   importSessions: () => Promise<ImportedAgentSession[]>
 }
 
@@ -34,6 +36,7 @@ type AgentSessionImportRuntimeConfig = {
   cacheTtlMs: number
   openSqliteDatabase: (filePath: string, readonly: boolean) => SqliteDatabase
   jsonlParseCache: Map<string, JsonlParseCacheEntry>
+  getParserDefinitions: () => AgentSessionParserDefinition[]
   importSessions?: () => Promise<ImportedAgentSession[]>
 }
 
@@ -95,6 +98,7 @@ type OpenCodeSessionRow = {
 }
 
 const maxJsonlReadBytes = 4 * 1024 * 1024
+const maxCollectedSessionFiles = 2400
 
 const cleanPath = (value: unknown) => cleanOptionalText(value)?.replace(/^~(?=$|\/)/, defaultHomeDir()) || undefined
 
@@ -117,6 +121,100 @@ const safeReadJson = (value: string): Record<string, unknown> | null => {
   } catch {
     return null
   }
+}
+
+const valueAtPointer = (value: unknown, pointer?: string) => {
+  if (!pointer || pointer === '/') return value
+  let current = value
+  for (const rawSegment of pointer.replace(/^\$/, '').split('/').filter(Boolean)) {
+    const segment = rawSegment.replace(/~1/g, '/').replace(/~0/g, '~')
+    if (Array.isArray(current)) current = current[Number(segment)]
+    else if (current && typeof current === 'object') current = (current as Record<string, unknown>)[segment]
+    else return undefined
+  }
+  return current
+}
+
+const scalarTextAtPointer = (value: unknown, pointer?: string) => cleanOptionalText(valueAtPointer(value, pointer))
+
+const expandParserPath = (value: string, home: string) =>
+  value.replace(/^~(?=$|[\\/])/, home).replace(/\$\{HOME\}/g, home)
+
+const normalizedGlobPath = (value: string) => resolve(value).replace(/\\/g, '/')
+
+const globRegexFor = (pattern: string) => {
+  const normalized = normalizedGlobPath(pattern)
+  let expression = '^'
+  for (let index = 0; index < normalized.length; index += 1) {
+    const character = normalized[index]
+    if (character === '*' && normalized[index + 1] === '*') {
+      index += 1
+      if (normalized[index + 1] === '/') {
+        index += 1
+        expression += '(?:.*/)?'
+      } else expression += '.*'
+    } else if (character === '*') expression += '[^/]*'
+    else if (character === '?') expression += '[^/]'
+    else expression += character.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  }
+  return new RegExp(`${expression}$`)
+}
+
+const filesForParserPath = async (pattern: string, extension: string) => {
+  const wildcardIndex = pattern.search(/[?*]/)
+  if (wildcardIndex < 0) {
+    const info = await stat(pattern).catch(() => null)
+    if (!info) return []
+    if (info.isFile()) return [{ path: pattern, mtimeMs: info.mtimeMs, size: info.size }]
+    return collectFiles(pattern, extension)
+  }
+  const prefix = pattern.slice(0, wildcardIndex)
+  const root = prefix.slice(0, Math.max(prefix.lastIndexOf('/'), prefix.lastIndexOf('\\'))) || dirname(prefix)
+  const matcher = globRegexFor(pattern)
+  return (await collectFiles(root, extension)).filter((file) => matcher.test(normalizedGlobPath(file.path)))
+}
+
+const firstCustomParserRecord = async (definition: AgentSessionParserDefinition, path: string) => {
+  if (definition.storage.kind === 'jsonl') return (await readJsonLines(path))[0] || null
+  try {
+    const parsed = JSON.parse(await readFile(path, 'utf-8'))
+    if (Array.isArray(parsed)) return parsed.find((item) => item && typeof item === 'object') as Record<string, unknown> | undefined || null
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null
+  } catch {
+    return null
+  }
+}
+
+const importCustomParserSessions = async (config: AgentSessionImportRuntimeConfig) => {
+  const home = config.getHomeDir()
+  const candidates: CandidateBase[] = []
+  for (const definition of config.getParserDefinitions()) {
+    if (!definition.source.startsWith('custom:')) continue
+    if (definition.storage.kind !== 'jsonl' && definition.storage.kind !== 'json') continue
+    const extension = definition.storage.kind === 'jsonl' ? '.jsonl' : '.json'
+    const groups = await Promise.all((definition.storage.paths || []).map((pattern) => filesForParserPath(expandParserPath(pattern, home), extension)))
+    const seenPaths = new Set<string>()
+    for (const file of groups.flat().sort((first, second) => second.mtimeMs - first.mtimeMs)) {
+      if (seenPaths.has(file.path)) continue
+      seenPaths.add(file.path)
+      const record = await firstCustomParserRecord(definition, file.path)
+      if (!record) continue
+      const fallbackId = resolve(file.path).replace(/\.[^.]+$/, '').split(/[\\/]/).pop() || randomUUID()
+      const rawTimestamp = valueAtPointer(record, definition.storage.timestampPointer)
+      const parsedTimestamp = typeof rawTimestamp === 'number' ? rawTimestamp : Date.parse(cleanOptionalText(rawTimestamp) || '')
+      candidates.push({
+        source: definition.source,
+        sessionId: scalarTextAtPointer(record, definition.storage.sessionIdPointer) || fallbackId,
+        title: scalarTextAtPointer(record, definition.storage.titlePointer) || definition.displayName,
+        summary: scalarTextAtPointer(record, definition.storage.summaryPointer),
+        cwd: scalarTextAtPointer(record, definition.storage.cwdPointer),
+        transcriptPath: file.path,
+        modifiedAt: Number.isFinite(parsedTimestamp) && parsedTimestamp > 0 ? parsedTimestamp : file.mtimeMs,
+        restorable: false
+      })
+    }
+  }
+  return candidates
 }
 
 const normalizeImportedTitle = (source: AiAgentSessionSource, title: unknown, cwd?: string) => {
@@ -325,7 +423,7 @@ const readJsonLines = async (path: string, maxBytes = maxJsonlReadBytes) => {
 const collectFiles = async (root: string, extension = '.jsonl') => {
   const out: CollectedSessionFile[] = []
   const stack = [root]
-  while (stack.length) {
+  while (stack.length && out.length < maxCollectedSessionFiles) {
     const current = stack.pop()!
     let entries: Dirent[]
     try {
@@ -342,6 +440,7 @@ const collectFiles = async (root: string, extension = '.jsonl') => {
         try {
           const fileStat = await stat(path)
           out.push({ path, mtimeMs: fileStat.mtimeMs, size: fileStat.size })
+          if (out.length >= maxCollectedSessionFiles) break
         } catch {
           continue
         }
@@ -734,7 +833,8 @@ export const createAgentSessionImportRuntime = (config: Partial<AgentSessionImpo
     enabled: process.env.AIOPSTERM_AGENT_SESSION_IMPORT_DISABLED !== '1',
     cacheTtlMs: 30_000,
     openSqliteDatabase,
-    jsonlParseCache
+    jsonlParseCache,
+    getParserDefinitions: config.getParserDefinitions || (() => [])
   }
   let runtimeConfig: AgentSessionImportRuntimeConfig = { ...defaultConfig, ...config, jsonlParseCache: config.jsonlParseCache || jsonlParseCache }
   let cachedAt = 0
@@ -747,6 +847,11 @@ export const createAgentSessionImportRuntime = (config: Partial<AgentSessionImpo
       cachedAt = 0
       cachedSessions = []
     },
+    invalidateCache: () => {
+      cachedAt = 0
+      cachedSessions = []
+      jsonlParseCache.clear()
+    },
     importSessions: async () => {
       if (runtimeConfig.importSessions) return runtimeConfig.importSessions()
       if (!runtimeConfig.enabled) return []
@@ -757,7 +862,8 @@ export const createAgentSessionImportRuntime = (config: Partial<AgentSessionImpo
       const imported = await Promise.all([
         importCodexSessions(runtimeConfig),
         importClaudeSessions(runtimeConfig),
-        importOpenCodeSessions(runtimeConfig)
+        importOpenCodeSessions(runtimeConfig),
+        importCustomParserSessions(runtimeConfig)
       ])
       const seen = new Set<string>()
       const importedSessions = imported

@@ -18,6 +18,8 @@ import type {
   ManagedAiSessionContentUpdateResult
 } from '@shared/contracts/managedAiSessionContent'
 import type { AiAgentSessionSource, ManagedAiSessionRecord } from '@shared/contracts/managedAiSessions'
+import type { AgentSessionParserDefinition } from '@shared/contracts/agentSessionParsers'
+import { builtinAgentSessionParserDefinitions } from '@shared/agentSessionParserDefaults'
 import {
   cleanOptionalText,
   cleanText,
@@ -39,6 +41,7 @@ type AgentSessionContentRuntimeConfig = {
   getHomeDir: () => string
   getEnv: () => NodeJS.ProcessEnv
   now: () => number
+  getParserDefinition?: (source: AiAgentSessionSource) => AgentSessionParserDefinition | null
 }
 
 type TextPointer = {
@@ -105,6 +108,7 @@ const maxScanFiles = 2400
 const editableSources = new Set<AiAgentSessionSource>(['codex', 'claude-code', 'opencode'])
 const jsonlSources = new Set<AiAgentSessionSource>(['codex', 'claude-code'])
 const contentMutationQueues = new Map<string, Promise<void>>()
+const builtinParsersBySource = new Map(builtinAgentSessionParserDefinitions.map((definition) => [definition.source, definition]))
 const skippedJsonStringKeys = new Set([
   'id',
   'uuid',
@@ -231,6 +235,12 @@ const sourceEditState = (source: AiAgentSessionSource) => {
   if (!editableSources.has(source)) return { editable: false, reason: 'This AI source does not expose editable local conversation content yet.' }
   return { editable: true }
 }
+
+const parserForSource = (config: AgentSessionContentRuntimeConfig, source: AiAgentSessionSource) =>
+  config.getParserDefinition?.(source) || builtinParsersBySource.get(source) || null
+
+const sourceUsesJsonl = (config: AgentSessionContentRuntimeConfig, source: AiAgentSessionSource) =>
+  jsonlSources.has(source) || parserForSource(config, source)?.storage.kind === 'jsonl'
 
 const safeBackupSegment = (value: string) => value.replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 90) || 'session'
 
@@ -412,10 +422,14 @@ const buildOpenCodeRecords = (input: {
     if (!messageId || !partId) return
     const messageData = row.message_data ? safeJsonParse(row.message_data) : null
     const partData = row.part_data ? safeJsonParse(row.part_data) : null
-    const text = typeof partData?.text === 'string' ? partData.text : ''
+    const text = typeof partData?.text === 'string' && partData.text.trim()
+      ? partData.text
+      : partData
+        ? JSON.stringify(partData, null, 2)
+        : ''
     if (!text.trim()) return
     const type = cleanText(partData?.type) || 'part'
-    const partEditable = input.sessionEditable && (type === 'text' || type === 'reasoning')
+    const partEditable = input.sessionEditable && typeof partData?.text === 'string' && (type === 'text' || type === 'reasoning')
     const truncated = truncateContent(text, input.maxContentChars)
     records.push({
       source: input.source,
@@ -541,6 +555,7 @@ const readJsonlContentPage = async (
     sessionEditable: editState.editable,
     ...(editState.reason ? { editBlockedReason: editState.reason } : {}),
     maxContentChars,
+    ...(parserForSource(config, session.source) ? { parserDefinition: parserForSource(config, session.source)! } : {}),
     offset,
     limit,
     ...(query ? { query } : {})
@@ -573,7 +588,8 @@ const readJsonlContentRecord = async (
     sessionEditable: editState.editable,
     ...(editState.reason ? { editBlockedReason: editState.reason } : {}),
     maxContentChars,
-    recordId
+    recordId,
+    ...(parserForSource(config, session.source) ? { parserDefinition: parserForSource(config, session.source)! } : {})
   })
   return result.record
 }
@@ -645,7 +661,7 @@ const readContentPageForSession = async (
   limit: number,
   query: string
 ): Promise<ReadSessionContentPageResult> => {
-  if (jsonlSources.has(session.source)) {
+  if (sourceUsesJsonl(config, session.source)) {
     const jsonl = await readJsonlContentPage(config, session, maxContentChars, offset, limit, query)
     if (jsonl) return jsonl
   }
@@ -660,7 +676,7 @@ const readContentPageForSession = async (
 }
 
 const getFullRecord = async (config: AgentSessionContentRuntimeConfig, session: ManagedAiSessionRecord, recordId: string, maxContentChars: number) => {
-  if (jsonlSources.has(session.source)) {
+  if (sourceUsesJsonl(config, session.source)) {
     const jsonlRecord = await readJsonlContentRecord(config, session, recordId, maxContentChars)
     if (jsonlRecord !== undefined) return jsonlRecord
   }

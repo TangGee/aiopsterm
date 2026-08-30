@@ -5,6 +5,7 @@ import {
   isAgentHookInstallerSnapshot,
   isExportMcpInstallOperationData,
   isExportMcpInstallerSnapshot,
+  isAiAgentSessionSource,
   isManagedAiSessionBulkData,
   isManagedAiSessionContentDeleteData,
   isManagedAiSessionHibernateData,
@@ -111,6 +112,12 @@ const exportMcpSnapshot: ExportMcpInstallerSnapshot = {
 }
 
 describe('managedAiBackendGuards', () => {
+  it('accepts registered custom Agent source identifiers', () => {
+    expect(isAiAgentSessionSource('custom:aider')).toBe(true)
+    expect(isAiAgentSessionSource('custom:')).toBe(false)
+    expect(isAiAgentSessionSource('custom:Aider')).toBe(false)
+  })
+
   it('validates managed AI session snapshots and mutation envelopes', () => {
     expect(isManagedAiSessionSnapshot(snapshot)).toBe(true)
     expect(isManagedAiSessionSnapshot({ sessions: [{ ...session, source: 'unknown' }] })).toBe(false)

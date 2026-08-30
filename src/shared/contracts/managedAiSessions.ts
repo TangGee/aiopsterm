@@ -1,6 +1,6 @@
 import type { AiopsMutationResult } from './common'
 
-export type AiAgentSessionSource =
+export type BuiltinAiAgentSessionSource =
   | 'codex'
   | 'claude-code'
   | 'cursor'
@@ -20,6 +20,10 @@ export type AiAgentSessionSource =
   | 'omp'
   | 'kimi-code'
   | 'deepseek-harness'
+
+export type CustomAiAgentSessionSource = `custom:${string}`
+
+export type AiAgentSessionSource = BuiltinAiAgentSessionSource | CustomAiAgentSessionSource
 
 export type AiAgentSessionEventName =
   | 'session_start'

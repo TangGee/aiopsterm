@@ -11,12 +11,15 @@ import {
   getManagedAiSessionContentRecord,
   hibernateManagedAiSession,
   jumpToUnreadManagedAiNotification,
+  importManagedAiSessionParser,
   listManagedAiSessionContent,
+  listManagedAiSessionParsers,
   listManagedAiNotifications,
   listManagedAiSessions,
   markManagedAiNotificationRead,
   openManagedAiNotification,
   publishAiAgentSessionEvent,
+  removeManagedAiSessionParser,
   renameManagedAiSession,
   replyManagedAiSession,
   setAgentHibernationConfig,
@@ -50,6 +53,9 @@ export const registerManagedAiSessionsIpc = (ipcMain: IpcMain, input: RegisterMa
   ipcMain.handle('ai-agent:sessions:content:get-record', (_event, recordInput) => getManagedAiSessionContentRecord(recordInput))
   ipcMain.handle('ai-agent:sessions:content:update-record', (_event, updateInput) => updateManagedAiSessionContentRecord(updateInput))
   ipcMain.handle('ai-agent:sessions:content:delete-record', (_event, deleteInput) => deleteManagedAiSessionContentRecord(deleteInput))
+  ipcMain.handle('ai-agent:session-parsers:list', () => listManagedAiSessionParsers())
+  ipcMain.handle('ai-agent:session-parsers:import', (_event, parserInput) => importManagedAiSessionParser(parserInput))
+  ipcMain.handle('ai-agent:session-parsers:remove', (_event, parserInput) => removeManagedAiSessionParser(parserInput))
   ipcMain.handle('ai-agent:notifications:list', (_event, listInput) => listManagedAiNotifications(listInput))
   ipcMain.handle('ai-agent:notifications:mark-read', (_event, markReadInput) => markManagedAiNotificationRead(markReadInput))
   ipcMain.handle('ai-agent:notifications:dismiss', (_event, dismissInput) => dismissManagedAiNotification(dismissInput))

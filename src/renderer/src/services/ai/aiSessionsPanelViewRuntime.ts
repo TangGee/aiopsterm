@@ -86,7 +86,7 @@ export const aiSessionsEventFilterOptions: Array<{ key: ManagedAiRequestKindFilt
   { key: 'telemetry', labelKey: 'aiSessions.eventFilter.telemetry' }
 ]
 
-const sourceLabels: Record<AiAgentSessionSource, string> = {
+const sourceLabels: Partial<Record<AiAgentSessionSource, string>> = {
   'claude-code': 'Claude Code',
   antigravity: 'Antigravity',
   amp: 'Amp',
@@ -108,7 +108,7 @@ const sourceLabels: Record<AiAgentSessionSource, string> = {
   'deepseek-harness': 'DeepSeek Harness'
 }
 
-export const managedAiSourceLabel = (source: AiAgentSessionSource) => sourceLabels[source] || source
+export const managedAiSourceLabel = (source: AiAgentSessionSource) => sourceLabels[source] || source.replace(/^custom:/, '')
 
 export const managedAiSessionStateLabelKey = (state: ManagedAiSessionState): I18nKey => {
   if (state === 'needsInput') return 'aiSessions.filter.needsInput'

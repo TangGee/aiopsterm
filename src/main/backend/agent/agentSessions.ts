@@ -25,6 +25,12 @@ import { createCodexTranscriptMonitorRuntime } from './agentSessionCodexTranscri
 import { createAgentSessionGitRuntime, type ManagedAiSessionGitInfo } from './agentSessionGitRuntime'
 import { createAgentSessionStoreRuntime } from './agentSessionStoreRuntime'
 import {
+  configureAgentSessionParserRegistry,
+  getAgentSessionParserDefinition,
+  listCustomAgentSessionParserDefinitions
+} from './agentSessionParserRegistry'
+import { createAgentSessionParserOperationsRuntime } from './agentSessionParserOperationsRuntime'
+import {
   autoTitleFor,
   cleanOptionalText,
   cleanText,
@@ -166,7 +172,9 @@ const storeRuntime = createAgentSessionStoreRuntime({
     agentHibernationConfig = loaded.agentHibernationConfig
   }
 })
-const importRuntime = createAgentSessionImportRuntime()
+const importRuntime = createAgentSessionImportRuntime({
+  getParserDefinitions: () => listCustomAgentSessionParserDefinitions()
+})
 const gitRuntime = createAgentSessionGitRuntime()
 const autoNamingRuntime = createAgentSessionAutoNamingRuntime({
   getSession: (key) => sessions.get(key),
@@ -286,7 +294,8 @@ const contentRuntime = createAgentSessionContentRuntime({
   getUserDataPath: () => storeUserDataPath,
   getHomeDir: () => process.env.HOME || process.env.USERPROFILE || '',
   getEnv: () => process.env,
-  now: () => Date.now()
+  now: () => Date.now(),
+  getParserDefinition: (source) => getAgentSessionParserDefinition(source)
 })
 
 // 内存 sessions 为权威数据；hook 事件高频触发时按去抖窗口合并整库落盘，进程退出时同步兜底一次。
@@ -347,11 +356,29 @@ export const configureAiAgentSessionStore = async (userDataPath: string) => {
   agentTerminalBindingRuntime.clear()
   codexTranscriptMonitorRuntime.reset()
   auditRuntime.configure(auditPathFor(userDataPath))
+  await configureAgentSessionParserRegistry(userDataPath)
   importRuntime.configure({
     enabled: process.env.NODE_ENV !== 'test' && process.env.AIOPSTERM_AGENT_SESSION_IMPORT_DISABLED !== '1'
   })
   await storeRuntime.configure(userDataPath)
 }
+
+const parserOperationsRuntime = createAgentSessionParserOperationsRuntime({
+  loadStoreIfNeeded: () => loadStoreIfNeeded(),
+  refreshImportedSessions: async () => {
+    importRuntime.invalidateCache()
+    importScanGeneration += 1
+    cancelScheduledImportScan()
+    lastImportScanCompletedAt = 0
+    await importExternalManagedAiSessionsOnce(importScanGeneration)
+  },
+  removeSessionsForSource: (source) => {
+    sessions = new Map([...sessions].filter(([, session]) => session.source !== source))
+    persistSnapshot()
+  }
+})
+
+export const { list: listManagedAiSessionParsers, import: importManagedAiSessionParser, remove: removeManagedAiSessionParser } = parserOperationsRuntime
 
 export const configureManagedAiSessionImportRuntime = (config?: Parameters<typeof importRuntime.configure>[0]) => {
   importScanGeneration += 1

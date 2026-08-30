@@ -92,6 +92,51 @@ const createClaudeProject = async (claudeHome: string) => {
 }
 
 describe('agentSessionImportRuntime', () => {
+  it('discovers sessions for a custom Agent parser definition', async () => {
+    const { createAgentSessionImportRuntime } = await loadRuntime()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-custom-agent-import-'))
+    try {
+      const sessionDir = join(root, '.aider', 'sessions')
+      await mkdir(sessionDir, { recursive: true })
+      const transcriptPath = join(sessionDir, 'session.jsonl')
+      await writeFile(transcriptPath, `${JSON.stringify({ session: { id: 'aider-1', title: 'Aider task', cwd: '/work/aider' }, type: 'user', content: 'hello' })}\n`, 'utf-8')
+      const runtime = createAgentSessionImportRuntime({
+        getHomeDir: () => root,
+        getEnv: () => ({ CODEX_HOME: join(root, 'missing-codex'), CLAUDE_CONFIG_DIR: join(root, 'missing-claude'), OPENCODE_CONFIG_DIR: join(root, 'missing-opencode') }) as NodeJS.ProcessEnv,
+        cacheTtlMs: 0,
+        getParserDefinitions: () => [{
+          schemaVersion: 1,
+          id: 'aider',
+          source: 'custom:aider',
+          displayName: 'Aider',
+          storage: {
+            kind: 'jsonl',
+            paths: ['${HOME}/.aider/sessions/**/*.jsonl'],
+            sessionIdPointer: '/session/id',
+            titlePointer: '/session/title',
+            cwdPointer: '/session/cwd'
+          },
+          rules: [],
+          fallback: 'raw-json'
+        }]
+      })
+
+      const sessions = await runtime.importSessions()
+      expect(sessions).toEqual([
+        expect.objectContaining({
+          id: 'aider-1',
+          source: 'custom:aider',
+          title: 'Aider task',
+          cwd: '/work/aider',
+          transcriptPath,
+          restorable: false
+        })
+      ])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('imports restorable Codex and Claude Code sessions from local state stores', async () => {
     const { createAgentSessionImportRuntime } = await loadRuntime()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-import-'))

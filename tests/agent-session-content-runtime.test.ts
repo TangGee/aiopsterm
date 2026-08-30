@@ -6,6 +6,7 @@ import { join } from 'path'
 import { describe, expect, it } from 'vitest'
 import type { ManagedAiSessionContentRecord } from '../src/shared/contracts/managedAiSessionContent'
 import type { AiAgentSessionSource, ManagedAiSessionRecord } from '../src/shared/contracts/managedAiSessions'
+import type { AgentSessionParserDefinition } from '../src/shared/contracts/agentSessionParsers'
 
 const loadRuntime = async () => {
   const modulePath = '../src/main/backend/agent/agentSessionContentRuntime'
@@ -73,14 +74,15 @@ describe('agentSessionContentRuntime', () => {
 
       const listed = await runtime.list({ source: 'codex', sessionId: session.id })
       expect(listed.ok).toBe(true)
-      expect(listed.data).toEqual(expect.objectContaining({ total: 2, matchTotal: 2 }))
+      expect(listed.data).toEqual(expect.objectContaining({ total: 3, matchTotal: 3 }))
+      expect(listed.data?.records[0]).toEqual(expect.objectContaining({ messageType: 'raw-json', editable: false }))
       const userRecord = listed.data?.records.find((record: ManagedAiSessionContentRecord) => record.content === 'fix the api')
       expect(userRecord).toEqual(expect.objectContaining({ role: 'user', editable: true }))
 
       const searched = await runtime.list({ source: 'codex', sessionId: session.id, query: 'api', offset: 0, limit: 1 })
-      expect(searched.data).toEqual(expect.objectContaining({ total: 2, matchTotal: 1, offset: 0, limit: 1 }))
+      expect(searched.data).toEqual(expect.objectContaining({ total: 3, matchTotal: 1, offset: 0, limit: 1 }))
       expect(searched.data?.records).toEqual([
-        expect.objectContaining({ content: 'fix the api', ordinal: 0 })
+        expect.objectContaining({ content: 'fix the api', ordinal: 1 })
       ])
 
       const updated = await runtime.updateRecord({
@@ -123,7 +125,7 @@ describe('agentSessionContentRuntime', () => {
       expect(deletedLines[2]).toBe('')
       expect(deletedRaw).not.toContain('fix the billing api')
       const relisted = await runtime.list({ source: 'codex', sessionId: session.id })
-      expect(relisted.data?.records.map((record: ManagedAiSessionContentRecord) => record.content)).toEqual(['done'])
+      expect(relisted.data?.records.map((record: ManagedAiSessionContentRecord) => record.messageType)).toEqual(['raw-json', 'message'])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -170,8 +172,13 @@ describe('agentSessionContentRuntime', () => {
       const listed = await runtime.list({ source: 'codex', sessionId: session.id })
       expect(listed.ok).toBe(true)
       const contents = listed.data?.records.map((record: ManagedAiSessionContentRecord) => record.content) || []
-      expect(contents).toEqual([
-        'base instructions text',
+      expect(listed.data?.records.slice(0, 2)).toEqual([
+        expect.objectContaining({ messageType: 'raw-json', editable: false }),
+        expect.objectContaining({ messageType: 'raw-json', editable: false })
+      ])
+      expect(contents[0]).toContain('base instructions text')
+      expect(contents[1]).toContain('"summary": "auto"')
+      expect(contents.slice(2)).toEqual([
         'developer instructions',
         '# AGENTS.md instructions for /work/app\n\ncontext',
         'real user prompt',
@@ -198,6 +205,94 @@ describe('agentSessionContentRuntime', () => {
       expect(listed.data?.records.find((record: ManagedAiSessionContentRecord) => record.content === 'tool output text')).toEqual(
         expect.objectContaining({ role: 'tool', messageType: 'tool result: exec_command', locationLabel: 'line 7 /payload/output' })
       )
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('shows custom tool input and unknown records instead of silently dropping them', async () => {
+    const { createAgentSessionContentRuntime } = await loadRuntime()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-session-content-fallback-'))
+    try {
+      const transcriptPath = join(root, 'codex-fallback.jsonl')
+      await writeFile(
+        transcriptPath,
+        [
+          JSON.stringify({ type: 'response_item', payload: { type: 'custom_tool_call', name: 'terminal', input: 'create hello_cat.py' } }),
+          JSON.stringify({ type: 'future_behavior', payload: { opaque: { instruction: 'unknown message body' } } }),
+          '{broken json'
+        ].join('\n') + '\n',
+        'utf-8'
+      )
+      const session = makeSession({ id: 'codex-fallback', source: 'codex', transcriptPath })
+      const runtime = createAgentSessionContentRuntime({
+        loadStoreIfNeeded: async () => undefined,
+        getSession: () => session,
+        getUserDataPath: () => root,
+        getHomeDir: () => root,
+        getEnv: () => ({ CODEX_HOME: join(root, 'codex-home') }) as NodeJS.ProcessEnv,
+        now: () => 1781884900000
+      })
+
+      const listed = await runtime.list({ source: 'codex', sessionId: session.id })
+      expect(listed.data?.records).toEqual([
+        expect.objectContaining({ content: 'create hello_cat.py', role: 'tool', messageType: 'tool call: terminal', editable: true }),
+        expect.objectContaining({ messageType: 'raw-json', editable: false }),
+        expect.objectContaining({ messageType: 'raw-text', content: '{broken json', editable: false })
+      ])
+      expect(listed.data?.records[1]?.content).toContain('unknown message body')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('uses an imported custom Agent parser and keeps unmatched records visible', async () => {
+    const { createAgentSessionContentRuntime } = await loadRuntime()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-session-content-custom-'))
+    try {
+      const transcriptPath = join(root, 'aider.jsonl')
+      await writeFile(
+        transcriptPath,
+        [
+          JSON.stringify({ event: 'chat', actor: 'human', body: 'review the patch' }),
+          JSON.stringify({ event: 'usage', tokens: 120 })
+        ].join('\n') + '\n',
+        'utf-8'
+      )
+      const parser: AgentSessionParserDefinition = {
+        schemaVersion: 1,
+        id: 'aider',
+        source: 'custom:aider',
+        displayName: 'Aider',
+        storage: { kind: 'jsonl', paths: [transcriptPath] },
+        fallback: 'raw-json',
+        rules: [
+          {
+            id: 'chat-message',
+            match: { '/event': 'chat' },
+            kind: 'message',
+            rolePointer: '/actor',
+            contentPointers: ['/body']
+          }
+        ]
+      }
+      const session = makeSession({ id: 'aider', source: 'custom:aider', transcriptPath })
+      const runtime = createAgentSessionContentRuntime({
+        loadStoreIfNeeded: async () => undefined,
+        getSession: () => session,
+        getUserDataPath: () => root,
+        getHomeDir: () => root,
+        getEnv: () => ({}) as NodeJS.ProcessEnv,
+        getParserDefinition: () => parser,
+        now: () => 1781884900000
+      })
+
+      const listed = await runtime.list({ source: 'custom:aider', sessionId: session.id })
+      expect(listed.data?.records).toEqual([
+        expect.objectContaining({ content: 'review the patch', messageType: 'message', editable: false }),
+        expect.objectContaining({ messageType: 'raw-json', editable: false })
+      ])
+      expect(listed.data?.records[1]?.content).toContain('"tokens": 120')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -324,6 +419,12 @@ describe('agentSessionContentRuntime', () => {
         'opencode-session-1',
         JSON.stringify({ type: 'text', text: 'original opencode answer' })
       )
+      db.prepare('INSERT INTO part (id, message_id, session_id, data) VALUES (?, ?, ?, ?)').run(
+        'part-2',
+        'message-1',
+        'opencode-session-1',
+        JSON.stringify({ type: 'tool', tool: 'shell', state: { input: { command: 'pwd' }, output: '/work/app' } })
+      )
       db.close()
 
       const session = makeSession({ id: 'opencode-session-1', source: 'opencode' })
@@ -339,6 +440,8 @@ describe('agentSessionContentRuntime', () => {
       const listed = await runtime.list({ source: 'opencode', sessionId: session.id })
       const record = listed.data?.records[0]
       expect(record).toEqual(expect.objectContaining({ role: 'assistant', content: 'original opencode answer', editable: true }))
+      expect(listed.data?.records[1]).toEqual(expect.objectContaining({ messageType: 'tool', editable: false }))
+      expect(listed.data?.records[1]?.content).toContain('pwd')
 
       const updated = await runtime.updateRecord({
         source: 'opencode',

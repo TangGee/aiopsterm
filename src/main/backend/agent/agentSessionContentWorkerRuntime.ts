@@ -1,6 +1,7 @@
 import { Worker } from 'node:worker_threads'
 import type { ManagedAiSessionContentRecord } from '@shared/contracts/managedAiSessionContent'
 import type { AiAgentSessionSource } from '@shared/contracts/managedAiSessions'
+import type { AgentSessionParserDefinition } from '@shared/contracts/agentSessionParsers'
 
 type JsonlWorkerReadInput = {
   path: string
@@ -9,6 +10,7 @@ type JsonlWorkerReadInput = {
   sessionEditable: boolean
   editBlockedReason?: string
   maxContentChars: number
+  parserDefinition?: AgentSessionParserDefinition
 }
 
 export type JsonlWorkerPageInput = JsonlWorkerReadInput & {
@@ -131,6 +133,80 @@ const collectTextPointers = (value, basePointer = '', contextKey = '') => {
     return collectTextPointers(item, basePointer + '/' + pointerSegment(key), jsonTextValueKeys.has(normalizedKey) ? normalizedKey : '')
   })
 }
+const valueContent = (value) => {
+  if (typeof value === 'string') return value
+  if (value === undefined) return ''
+  try { return JSON.stringify(value, null, 2) }
+  catch { return String(value) }
+}
+const pointerJoin = (base, pointer) => {
+  if (!base || base === '/') return pointer || '/'
+  if (!pointer || pointer === '/') return base
+  return base.replace(/\/$/, '') + '/' + pointer.replace(/^\//, '')
+}
+const valuesAtPattern = (root, pattern, basePointer = '') => {
+  const segments = String(pattern || '/').replace(/^\$/, '').split('/').filter(Boolean).map(decodePointerSegment)
+  const walk = (current, index, pointer) => {
+    if (index >= segments.length) return [{ pointer: pointer || '/', value: current }]
+    const segment = segments[index]
+    if (segment === '*') {
+      if (Array.isArray(current)) return current.flatMap((item, itemIndex) => walk(item, index + 1, pointerJoin(pointer, '/' + itemIndex)))
+      if (isRecord(current)) return Object.entries(current).flatMap(([key, item]) => walk(item, index + 1, pointerJoin(pointer, '/' + pointerSegment(key))))
+      return []
+    }
+    const next = Array.isArray(current) ? current[Number(segment)] : isRecord(current) ? current[segment] : undefined
+    return next === undefined ? [] : walk(next, index + 1, pointerJoin(pointer, '/' + pointerSegment(segment)))
+  }
+  return walk(root, 0, basePointer)
+}
+const ruleValue = (line, scope, pointer) => {
+  if (String(pointer || '').startsWith('$')) return valueAtPointer(line, String(pointer).slice(1) || '/')
+  return valueAtPointer(scope, pointer)
+}
+const ruleMatches = (line, scope, match) => Object.entries(match || {}).every(([pointer, expected]) => {
+  const actual = ruleValue(line, scope, pointer)
+  return Array.isArray(expected) ? expected.includes(actual) : actual === expected
+})
+const roleFromRule = (line, scope, rule, fallback) => {
+  const role = cleanText(rule.role || (rule.rolePointer && ruleValue(line, scope, rule.rolePointer))).toLowerCase()
+  return ['system', 'developer', 'user', 'assistant', 'tool'].includes(role) ? role : fallback
+}
+const configuredTextPointers = (line, parser) => {
+  if (!parser || !Array.isArray(parser.rules)) return []
+  const configured = []
+  const rules = [...parser.rules].sort((first, second) => Number(Boolean(second.scopePointer)) - Number(Boolean(first.scopePointer)))
+  let scopedContentFound = false
+  for (const rule of rules) {
+    if (!rule.scopePointer && scopedContentFound) continue
+    const scopes = rule.scopePointer ? valuesAtPattern(line, rule.scopePointer) : [{ pointer: '', value: line }]
+    let ruleProduced = false
+    for (const scopeEntry of scopes) {
+      if (!ruleMatches(line, scopeEntry.value, rule.match)) continue
+      for (const contentPointer of rule.contentPointers || []) {
+        const absolute = String(contentPointer).startsWith('$')
+        const values = absolute
+          ? valuesAtPattern(line, String(contentPointer).slice(1) || '/')
+          : valuesAtPattern(scopeEntry.value, contentPointer, scopeEntry.pointer)
+        for (const item of values) {
+          const content = valueContent(item.value)
+          if (!content.trim()) continue
+          const fallbackRole = inferJsonRole(line, item.pointer, content)
+          const label = cleanText(rule.label || (rule.labelPointer && ruleValue(line, scopeEntry.value, rule.labelPointer)))
+          configured.push({
+            pointer: item.pointer,
+            value: content,
+            role: isInjectedSessionContextText(content) ? 'developer' : roleFromRule(line, scopeEntry.value, rule, fallbackRole),
+            messageType: label ? rule.kind + ': ' + label : rule.kind,
+            editable: rule.editable !== false
+          })
+          ruleProduced = true
+        }
+      }
+    }
+    if (rule.scopePointer && ruleProduced) scopedContentFound = true
+  }
+  return configured.filter((item, index, items) => items.findIndex((candidate) => candidate.pointer === item.pointer && candidate.messageType === item.messageType) === index)
+}
 const valueAtPointer = (value, pointer) => {
   if (pointer === '/' || pointer === '') return value
   let current = value
@@ -215,7 +291,7 @@ const inferJsonRole = (record, pointer, content = '') => {
 }
 const codexPayloadFor = (line) => line.parsed && line.parsed.payload && isRecord(line.parsed.payload) ? line.parsed.payload : null
 const codexPayloadTypeFor = (line) => cleanText(codexPayloadFor(line) && codexPayloadFor(line).type)
-const isCodexFunctionCallLine = (line) => line.parsed && line.parsed.type === 'response_item' && codexPayloadTypeFor(line) === 'function_call'
+const isCodexFunctionCallLine = (line) => line.parsed && line.parsed.type === 'response_item' && ['function_call', 'custom_tool_call'].includes(codexPayloadTypeFor(line))
 const codexCallIdFor = (line) => cleanText(codexPayloadFor(line) && codexPayloadFor(line).call_id)
 const collectCodexToolNamesByCallId = (lines) => {
   const namesByCallId = new Map()
@@ -249,6 +325,7 @@ const readJsonlLines = async (path, keepRawLines = false) => {
     trailingNewline,
     lines: rawLines.map((line, index) => ({
       lineNumber: index + 1,
+      raw: line,
       parsed: line.trim() ? safeJsonParse(line) : null
     }))
   }
@@ -261,15 +338,25 @@ const selectJsonlRecords = (request, lines, sourceRevision) => {
   const query = cleanText(request.query).toLowerCase()
   const toolNamesByCallId = request.source === 'codex' ? collectCodexToolNamesByCallId(lines) : undefined
   lines.forEach((line) => {
-    if (!line.parsed) return
-    collectTextPointers(line.parsed).forEach((item) => {
-      if (shouldSkipJsonTextPointer(line, item)) return
+    if (!line.parsed && !cleanText(line.raw)) return
+    const parsed = line.parsed || {}
+    const configuredItems = line.parsed ? configuredTextPointers(parsed, request.parserDefinition) : []
+    const legacyItems = line.parsed && !request.parserDefinition ? collectTextPointers(parsed) : []
+    const items = [...configuredItems, ...legacyItems]
+    const selectedItems = items.length
+      ? items
+      : [{ pointer: '/', value: line.parsed ? valueContent(parsed) : line.raw, role: 'unknown', messageType: line.parsed ? 'raw-json' : 'raw-text', editable: false }]
+    selectedItems.forEach((item) => {
+      if (line.parsed && shouldSkipJsonTextPointer(line, item)) return
       const ordinal = total
       total += 1
       const recordId = jsonlRecordId(line.lineNumber, item.pointer)
       const locationLabel = 'line ' + line.lineNumber + ' ' + item.pointer
-      const role = inferJsonRole(line.parsed, item.pointer, item.value)
-      const messageType = jsonMessageType(line.parsed, toolNamesByCallId)
+      const role = item.role || inferJsonRole(parsed, item.pointer, item.value)
+      const inferredMessageType = jsonMessageType(parsed, toolNamesByCallId)
+      const messageType = item.messageType === 'tool result' && inferredMessageType.startsWith('tool result:')
+        ? inferredMessageType
+        : item.messageType || inferredMessageType
       const matchesQuery = request.kind === 'record' || !query || [role, messageType, locationLabel, item.value].some((value) => String(value).toLowerCase().includes(query))
       if (!matchesQuery) return
       const matchOrdinal = matchTotal
@@ -291,7 +378,7 @@ const selectJsonlRecords = (request, lines, sourceRevision) => {
         content: truncated.content,
         contentTruncated: truncated.contentTruncated,
         fullLength: truncated.fullLength,
-        editable: request.sessionEditable,
+        editable: request.sessionEditable && item.editable !== false && item.pointer !== '/',
         sourceRevision
       }
       if (request.editBlockedReason) record.editBlockedReason = request.editBlockedReason
