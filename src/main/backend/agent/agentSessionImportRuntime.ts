@@ -174,22 +174,23 @@ const filesForParserPath = async (pattern: string, extension: string) => {
   return (await collectFiles(root, extension)).filter((file) => matcher.test(normalizedGlobPath(file.path)))
 }
 
-const firstCustomParserRecord = async (definition: AgentSessionParserDefinition, path: string) => {
-  if (definition.storage.kind === 'jsonl') return (await readJsonLines(path))[0] || null
+const parserSessionRecords = async (definition: AgentSessionParserDefinition, path: string) => {
+  if (definition.storage.kind === 'jsonl') return readJsonLines(path)
   try {
     const parsed = JSON.parse(await readFile(path, 'utf-8'))
-    if (Array.isArray(parsed)) return parsed.find((item) => item && typeof item === 'object') as Record<string, unknown> | undefined || null
-    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null
+    if (Array.isArray(parsed)) return parsed.filter((item) => item && typeof item === 'object') as Record<string, unknown>[]
+    return parsed && typeof parsed === 'object' ? [parsed as Record<string, unknown>] : []
   } catch {
-    return null
+    return []
   }
 }
 
-const importCustomParserSessions = async (config: AgentSessionImportRuntimeConfig) => {
+const importParserConfiguredSessions = async (config: AgentSessionImportRuntimeConfig) => {
   const home = config.getHomeDir()
   const candidates: CandidateBase[] = []
   for (const definition of config.getParserDefinitions()) {
-    if (!definition.source.startsWith('custom:')) continue
+    const isCustomSource = definition.source.startsWith('custom:')
+    if (!isCustomSource && definition.storage.discover !== true) continue
     if (definition.storage.kind !== 'jsonl' && definition.storage.kind !== 'json') continue
     const extension = definition.storage.kind === 'jsonl' ? '.jsonl' : '.json'
     const groups = await Promise.all((definition.storage.paths || []).map((pattern) => filesForParserPath(expandParserPath(pattern, home), extension)))
@@ -197,17 +198,34 @@ const importCustomParserSessions = async (config: AgentSessionImportRuntimeConfi
     for (const file of groups.flat().sort((first, second) => second.mtimeMs - first.mtimeMs)) {
       if (seenPaths.has(file.path)) continue
       seenPaths.add(file.path)
-      const record = await firstCustomParserRecord(definition, file.path)
-      if (!record) continue
-      const fallbackId = resolve(file.path).replace(/\.[^.]+$/, '').split(/[\\/]/).pop() || randomUUID()
-      const rawTimestamp = valueAtPointer(record, definition.storage.timestampPointer)
+      const records = await parserSessionRecords(definition, file.path)
+      if (!records.length) continue
+      const firstScalarAt = (pointer?: string) => {
+        if (!pointer) return undefined
+        for (const record of records) {
+          const value = scalarTextAtPointer(record, pointer)
+          if (value) return value
+        }
+        return undefined
+      }
+      const fallbackId = isCustomSource
+        ? resolve(file.path).replace(/\.[^.]+$/, '').split(/[\\/]/).pop() || randomUUID()
+        : createHash('sha1').update(resolve(file.path)).digest('hex')
+      let rawTimestamp: unknown
+      if (definition.storage.timestampPointer) {
+        for (const record of records) {
+          rawTimestamp = valueAtPointer(record, definition.storage.timestampPointer)
+          if (rawTimestamp !== undefined && rawTimestamp !== null && rawTimestamp !== '') break
+        }
+      }
       const parsedTimestamp = typeof rawTimestamp === 'number' ? rawTimestamp : Date.parse(cleanOptionalText(rawTimestamp) || '')
+      const cwd = firstScalarAt(definition.storage.cwdPointer)
       candidates.push({
         source: definition.source,
-        sessionId: scalarTextAtPointer(record, definition.storage.sessionIdPointer) || fallbackId,
-        title: scalarTextAtPointer(record, definition.storage.titlePointer) || definition.displayName,
-        summary: scalarTextAtPointer(record, definition.storage.summaryPointer),
-        cwd: scalarTextAtPointer(record, definition.storage.cwdPointer),
+        sessionId: firstScalarAt(definition.storage.sessionIdPointer) || fallbackId,
+        title: firstScalarAt(definition.storage.titlePointer) || (cwd ? undefined : definition.displayName),
+        summary: firstScalarAt(definition.storage.summaryPointer),
+        cwd,
         transcriptPath: file.path,
         modifiedAt: Number.isFinite(parsedTimestamp) && parsedTimestamp > 0 ? parsedTimestamp : file.mtimeMs,
         restorable: false
@@ -863,7 +881,7 @@ export const createAgentSessionImportRuntime = (config: Partial<AgentSessionImpo
         importCodexSessions(runtimeConfig),
         importClaudeSessions(runtimeConfig),
         importOpenCodeSessions(runtimeConfig),
-        importCustomParserSessions(runtimeConfig)
+        importParserConfiguredSessions(runtimeConfig)
       ])
       const seen = new Set<string>()
       const importedSessions = imported

@@ -137,6 +137,60 @@ describe('agentSessionImportRuntime', () => {
     }
   })
 
+  it('discovers a built-in JSONL Agent when its parser config enables discovery', async () => {
+    const { createAgentSessionImportRuntime } = await loadRuntime()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-builtin-parser-import-'))
+    try {
+      const sessionDir = join(root, '.kimi-code', 'sessions', 'workspace', 'session-one', 'agents', 'main')
+      await mkdir(sessionDir, { recursive: true })
+      const transcriptPath = join(sessionDir, 'wire.jsonl')
+      await writeFile(
+        transcriptPath,
+        [
+          JSON.stringify({ type: 'metadata', created_at: '2026-08-30T08:00:00.000Z' }),
+          JSON.stringify({ type: 'config.update', cwd: '/work/kimi-app' }),
+          JSON.stringify({ type: 'context.append_message', message: { role: 'user', content: [{ type: 'text', text: 'hello' }] } })
+        ].join('\n') + '\n',
+        'utf-8'
+      )
+      const runtime = createAgentSessionImportRuntime({
+        getHomeDir: () => root,
+        getEnv: () => ({ CODEX_HOME: join(root, 'missing-codex'), CLAUDE_CONFIG_DIR: join(root, 'missing-claude'), OPENCODE_CONFIG_DIR: join(root, 'missing-opencode') }) as NodeJS.ProcessEnv,
+        cacheTtlMs: 0,
+        getParserDefinitions: () => [{
+          schemaVersion: 1,
+          id: 'kimi-code',
+          source: 'kimi-code',
+          displayName: 'Kimi Code',
+          storage: {
+            kind: 'jsonl',
+            paths: ['${HOME}/.kimi-code/sessions/**/agents/main/wire.jsonl'],
+            discover: true,
+            cwdPointer: '/cwd',
+            timestampPointer: '/created_at'
+          },
+          rules: [],
+          fallback: 'raw-json'
+        }]
+      })
+
+      const sessions = await runtime.importSessions()
+      expect(sessions).toEqual([
+        expect.objectContaining({
+          source: 'kimi-code',
+          title: expect.stringMatching(/^Kimi Code .*kimi-app$/),
+          cwd: '/work/kimi-app',
+          transcriptPath,
+          lastActivityAt: Date.parse('2026-08-30T08:00:00.000Z'),
+          restorable: false
+        })
+      ])
+      expect(sessions[0]?.id).toMatch(/^[a-f0-9]{40}$/)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('imports restorable Codex and Claude Code sessions from local state stores', async () => {
     const { createAgentSessionImportRuntime } = await loadRuntime()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-import-'))

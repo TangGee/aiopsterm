@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import type { ManagedAiSessionContentRecord } from '../src/shared/contracts/managedAiSessionContent'
 import type { AiAgentSessionSource, ManagedAiSessionRecord } from '../src/shared/contracts/managedAiSessions'
 import type { AgentSessionParserDefinition } from '../src/shared/contracts/agentSessionParsers'
+import { builtinAgentSessionParserDefinitions } from '../src/shared/agentSessionParserConfigRuntime'
 
 const loadRuntime = async () => {
   const modulePath = '../src/main/backend/agent/agentSessionContentRuntime'
@@ -292,6 +293,51 @@ describe('agentSessionContentRuntime', () => {
         expect.objectContaining({ messageType: 'raw-json', editable: false })
       ])
       expect(listed.data?.records[1]?.content).toContain('"tokens": 120')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('parses Kimi Code messages, reasoning, and tools through its built-in JSON rules', async () => {
+    const { createAgentSessionContentRuntime } = await loadRuntime()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-session-content-kimi-'))
+    try {
+      const transcriptPath = join(root, 'wire.jsonl')
+      await writeFile(
+        transcriptPath,
+        [
+          JSON.stringify({ type: 'config.update', systemPrompt: 'kimi system prompt' }),
+          JSON.stringify({ type: 'context.append_message', message: { role: 'user', content: [{ type: 'text', text: 'hello kimi' }] } }),
+          JSON.stringify({ type: 'context.append_loop_event', event: { type: 'content.part', part: { type: 'think', think: 'kimi reasoning' } } }),
+          JSON.stringify({ type: 'context.append_loop_event', event: { type: 'content.part', part: { type: 'text', text: 'kimi answer' } } }),
+          JSON.stringify({ type: 'context.append_loop_event', event: { type: 'tool.call', name: 'Read', args: { path: '/tmp/file' } } }),
+          JSON.stringify({ type: 'context.append_loop_event', event: { type: 'tool.result', result: { output: 'file body' } } }),
+          JSON.stringify({ type: 'usage.record', usage: { inputTokens: 10 } })
+        ].join('\n') + '\n',
+        'utf-8'
+      )
+      const parser = builtinAgentSessionParserDefinitions.find((definition) => definition.source === 'kimi-code')!
+      const session = makeSession({ id: 'kimi-session', source: 'kimi-code', transcriptPath })
+      const runtime = createAgentSessionContentRuntime({
+        loadStoreIfNeeded: async () => undefined,
+        getSession: () => session,
+        getUserDataPath: () => root,
+        getHomeDir: () => root,
+        getEnv: () => ({}) as NodeJS.ProcessEnv,
+        getParserDefinition: () => parser,
+        now: () => 1781884900000
+      })
+
+      const listed = await runtime.list({ source: 'kimi-code', sessionId: session.id })
+      expect(listed.data?.records).toEqual([
+        expect.objectContaining({ content: 'kimi system prompt', role: 'system', messageType: 'system prompt', editable: false }),
+        expect.objectContaining({ content: 'hello kimi', role: 'user', messageType: 'message', editable: false }),
+        expect.objectContaining({ content: 'kimi reasoning', role: 'assistant', messageType: 'reasoning', editable: false }),
+        expect.objectContaining({ content: 'kimi answer', role: 'assistant', messageType: 'message', editable: false }),
+        expect.objectContaining({ role: 'tool', messageType: 'tool call: Read', editable: false }),
+        expect.objectContaining({ role: 'tool', messageType: 'tool result', editable: false }),
+        expect.objectContaining({ messageType: 'raw-json', editable: false })
+      ])
     } finally {
       await rm(root, { recursive: true, force: true })
     }

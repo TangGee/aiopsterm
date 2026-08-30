@@ -3,7 +3,66 @@
   "id": "kimi-code",
   "source": "kimi-code",
   "displayName": "Kimi Code",
-  "storage": { "kind": "events" },
-  "rules": [],
+  "storage": {
+    "kind": "jsonl",
+    "paths": ["${HOME}/.kimi-code/sessions/**/agents/main/wire.jsonl"],
+    "discover": true,
+    "cwdPointer": "/cwd",
+    "timestampPointer": "/created_at"
+  },
+  "rules": [
+    {
+      "id": "system-prompt",
+      "match": { "/type": "config.update" },
+      "kind": "system prompt",
+      "role": "system",
+      "contentPointers": ["/systemPrompt"]
+    },
+    {
+      "id": "user-message",
+      "scopePointer": "/message/content/*",
+      "match": { "$/type": "context.append_message", "/type": "text" },
+      "kind": "message",
+      "rolePointer": "$/message/role",
+      "contentPointers": ["/text"]
+    },
+    {
+      "id": "steering-message",
+      "scopePointer": "/input/*",
+      "match": { "$/type": "turn.steer", "/type": "text" },
+      "kind": "message",
+      "role": "user",
+      "contentPointers": ["/text"]
+    },
+    {
+      "id": "assistant-message",
+      "match": { "/type": "context.append_loop_event", "/event/type": "content.part", "/event/part/type": "text" },
+      "kind": "message",
+      "role": "assistant",
+      "contentPointers": ["/event/part/text"]
+    },
+    {
+      "id": "assistant-reasoning",
+      "match": { "/type": "context.append_loop_event", "/event/type": "content.part", "/event/part/type": "think" },
+      "kind": "reasoning",
+      "role": "assistant",
+      "contentPointers": ["/event/part/think"]
+    },
+    {
+      "id": "tool-call",
+      "match": { "/type": "context.append_loop_event", "/event/type": "tool.call" },
+      "kind": "tool call",
+      "role": "tool",
+      "contentPointers": ["/event/args"],
+      "labelPointer": "/event/name"
+    },
+    {
+      "id": "tool-result",
+      "match": { "/type": "context.append_loop_event", "/event/type": "tool.result" },
+      "kind": "tool result",
+      "role": "tool",
+      "contentPointers": ["/event/result"]
+    }
+  ],
   "fallback": "raw-json"
 }

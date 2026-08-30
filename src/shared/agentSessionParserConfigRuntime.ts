@@ -148,6 +148,7 @@ export const validateAgentSessionParserDefinition = (value: unknown): AgentSessi
   const storage = {
     kind,
     ...(paths ? { paths } : {}),
+    ...(typeof value.storage.discover === 'boolean' ? { discover: value.storage.discover } : {}),
     ...(value.storage.sessionIdPointer ? { sessionIdPointer: validatePointer(value.storage.sessionIdPointer, 'storage.sessionIdPointer') } : {}),
     ...(value.storage.titlePointer ? { titlePointer: validatePointer(value.storage.titlePointer, 'storage.titlePointer') } : {}),
     ...(value.storage.summaryPointer ? { summaryPointer: validatePointer(value.storage.summaryPointer, 'storage.summaryPointer') } : {}),

@@ -27,7 +27,7 @@ import { createAgentSessionStoreRuntime } from './agentSessionStoreRuntime'
 import {
   configureAgentSessionParserRegistry,
   getAgentSessionParserDefinition,
-  listCustomAgentSessionParserDefinitions
+  listEffectiveAgentSessionParserDefinitions
 } from './agentSessionParserRegistry'
 import { createAgentSessionParserOperationsRuntime } from './agentSessionParserOperationsRuntime'
 import {
@@ -173,7 +173,7 @@ const storeRuntime = createAgentSessionStoreRuntime({
   }
 })
 const importRuntime = createAgentSessionImportRuntime({
-  getParserDefinitions: () => listCustomAgentSessionParserDefinitions()
+  getParserDefinitions: () => listEffectiveAgentSessionParserDefinitions()
 })
 const gitRuntime = createAgentSessionGitRuntime()
 const autoNamingRuntime = createAgentSessionAutoNamingRuntime({

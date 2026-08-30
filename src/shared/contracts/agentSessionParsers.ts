@@ -22,6 +22,7 @@ export type AgentSessionParserRule = {
 export type AgentSessionParserStorage = {
   kind: AgentSessionParserStorageKind
   paths?: string[]
+  discover?: boolean
   sessionIdPointer?: string
   titlePointer?: string
   summaryPointer?: string

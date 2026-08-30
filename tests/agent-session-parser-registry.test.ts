@@ -4,7 +4,7 @@ import { join } from 'path'
 import { describe, expect, it } from 'vitest'
 import { builtinAgentSessionParserDefinitions } from '../src/shared/agentSessionParserConfigRuntime'
 import codexConfig from '../src/shared/agentSessionParserConfigs/codex.json'
-import type { AgentSessionParserProfile } from '../src/shared/contracts/agentSessionParsers'
+import type { AgentSessionParserDefinition, AgentSessionParserProfile } from '../src/shared/contracts/agentSessionParsers'
 
 const loadRuntime = async () => {
   const modulePath = '../src/main/backend/agent/agentSessionParserRegistry'
@@ -16,6 +16,9 @@ describe('agentSessionParserRegistry', () => {
     expect(builtinAgentSessionParserDefinitions).toHaveLength(19)
     expect(new Set(builtinAgentSessionParserDefinitions.map((definition) => definition.source)).size).toBe(19)
     expect(builtinAgentSessionParserDefinitions.find((definition) => definition.source === 'codex')).toEqual(codexConfig)
+    expect(builtinAgentSessionParserDefinitions.find((definition) => definition.source === 'kimi-code')?.storage).toEqual(
+      expect.objectContaining({ kind: 'jsonl', discover: true })
+    )
   })
 
   it('imports a custom Agent parser and restores the registry after removal', async () => {
@@ -99,6 +102,9 @@ describe('agentSessionParserRegistry', () => {
 
       const imported = await runtime.importAgentSessionParser({ filePath: rulePath, expectedSource: 'codex' })
       expect(imported.data?.parser).toEqual(expect.objectContaining({ source: 'codex', origin: 'user', ruleCount: 1 }))
+      expect(runtime.listEffectiveAgentSessionParserDefinitions().find((definition: AgentSessionParserDefinition) => definition.source === 'codex')).toEqual(
+        expect.objectContaining({ displayName: 'Codex Customized', rules: [expect.objectContaining({ id: 'message' })] })
+      )
 
       const removed = await runtime.removeAgentSessionParser({ source: 'codex' })
       expect(removed.data?.snapshot.parsers.find((parser: AgentSessionParserProfile) => parser.source === 'codex')).toEqual(

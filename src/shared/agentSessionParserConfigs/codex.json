@@ -45,6 +45,99 @@
       "contentPointers": ["/text"]
     },
     {
+      "id": "completed-user-message",
+      "scopePointer": "/payload/item/content/*",
+      "match": {
+        "$/type": "event_msg",
+        "$/payload/type": "item_completed",
+        "$/payload/item/type": "UserMessage",
+        "/type": ["text", "Text"]
+      },
+      "kind": "message",
+      "role": "user",
+      "contentPointers": ["/text"]
+    },
+    {
+      "id": "completed-assistant-message",
+      "scopePointer": "/payload/item/content/*",
+      "match": {
+        "$/type": "event_msg",
+        "$/payload/type": "item_completed",
+        "$/payload/item/type": "AgentMessage",
+        "/type": ["text", "Text"]
+      },
+      "kind": "message",
+      "role": "assistant",
+      "contentPointers": ["/text"]
+    },
+    {
+      "id": "completed-plan",
+      "match": { "/type": "event_msg", "/payload/type": "item_completed", "/payload/item/type": "Plan" },
+      "kind": "plan",
+      "role": "assistant",
+      "contentPointers": ["/payload/item/text"]
+    },
+    {
+      "id": "completed-hook-prompt",
+      "scopePointer": "/payload/item/fragments/*",
+      "match": {
+        "$/type": "event_msg",
+        "$/payload/type": "item_completed",
+        "$/payload/item/type": "HookPrompt"
+      },
+      "kind": "system prompt",
+      "role": "developer",
+      "contentPointers": ["/text"]
+    },
+    {
+      "id": "command-execution-call",
+      "match": { "/type": "event_msg", "/payload/type": "item_completed", "/payload/item/type": "CommandExecution" },
+      "kind": "tool call",
+      "role": "tool",
+      "contentPointers": ["/payload/item/command"],
+      "label": "CommandExecution"
+    },
+    {
+      "id": "command-execution-result",
+      "match": { "/type": "event_msg", "/payload/type": "item_completed", "/payload/item/type": "CommandExecution" },
+      "kind": "tool result",
+      "role": "tool",
+      "contentPointers": ["/payload/item/aggregated_output", "/payload/item/stderr"],
+      "label": "CommandExecution"
+    },
+    {
+      "id": "file-change-result",
+      "match": { "/type": "event_msg", "/payload/type": "item_completed", "/payload/item/type": "FileChange" },
+      "kind": "tool result",
+      "role": "tool",
+      "contentPointers": ["/payload/item/changes", "/payload/item/stdout"],
+      "label": "FileChange"
+    },
+    {
+      "id": "image-view",
+      "match": { "/type": "event_msg", "/payload/type": "item_completed", "/payload/item/type": "ImageView" },
+      "kind": "tool call",
+      "role": "tool",
+      "contentPointers": ["/payload/item/path"],
+      "label": "ImageView"
+    },
+    {
+      "id": "completed-mcp-call",
+      "match": { "/type": "event_msg", "/payload/type": "item_completed", "/payload/item/type": "McpToolCall" },
+      "kind": "tool call",
+      "role": "tool",
+      "contentPointers": ["/payload/item/arguments"],
+      "labelPointer": "/payload/item/tool"
+    },
+    {
+      "id": "completed-mcp-result",
+      "match": { "/type": "event_msg", "/payload/type": "item_completed", "/payload/item/type": "McpToolCall" },
+      "kind": "tool result",
+      "role": "tool",
+      "contentPointers": ["/payload/item/result"],
+      "labelPointer": "/payload/item/tool"
+    },
+    {
       "id": "function-call",
       "match": { "/type": "response_item", "/payload/type": "function_call" },
       "kind": "tool call",
@@ -88,7 +181,105 @@
       "match": { "/type": "response_item", "/payload/type": "web_search_call" },
       "kind": "tool call",
       "role": "tool",
-      "contentPointers": ["/payload/query"]
+      "contentPointers": ["/payload/action"],
+      "label": "web search"
+    },
+    {
+      "id": "tool-search-call",
+      "match": { "/type": "response_item", "/payload/type": "tool_search_call" },
+      "kind": "tool call",
+      "role": "tool",
+      "contentPointers": ["/payload/arguments"],
+      "label": "tool search"
+    },
+    {
+      "id": "tool-search-result",
+      "match": { "/type": "response_item", "/payload/type": "tool_search_output" },
+      "kind": "tool result",
+      "role": "tool",
+      "contentPointers": ["/payload/tools"],
+      "label": "tool search"
+    },
+    {
+      "id": "mcp-tool-call-end-result",
+      "match": { "/type": "event_msg", "/payload/type": "mcp_tool_call_end" },
+      "kind": "tool result",
+      "role": "tool",
+      "contentPointers": ["/payload/result"],
+      "labelPointer": "/payload/invocation/tool"
+    },
+    {
+      "id": "patch-apply-result",
+      "match": { "/type": "event_msg", "/payload/type": "patch_apply_end" },
+      "kind": "tool result",
+      "role": "tool",
+      "contentPointers": ["/payload/changes", "/payload/stdout"],
+      "label": "patch apply"
+    },
+    {
+      "id": "web-search-result",
+      "match": { "/type": "event_msg", "/payload/type": "web_search_end" },
+      "kind": "tool result",
+      "role": "tool",
+      "contentPointers": ["/payload/results"],
+      "label": "web search"
+    },
+    {
+      "id": "image-generation-result",
+      "match": { "/type": "event_msg", "/payload/type": "image_generation_end" },
+      "kind": "tool result",
+      "role": "tool",
+      "contentPointers": ["/payload/result", "/payload/saved_path", "/payload/revised_prompt"],
+      "label": "image generation"
+    },
+    {
+      "id": "task-complete-message",
+      "match": { "/type": "event_msg", "/payload/type": "task_complete" },
+      "kind": "result",
+      "role": "assistant",
+      "contentPointers": ["/payload/last_agent_message", "/payload/error"]
+    },
+    {
+      "id": "turn-aborted",
+      "match": { "/type": "event_msg", "/payload/type": "turn_aborted" },
+      "kind": "event",
+      "role": "system",
+      "contentPointers": ["/payload/reason"]
+    },
+    {
+      "id": "thread-goal",
+      "match": { "/type": "event_msg", "/payload/type": "thread_goal_updated" },
+      "kind": "goal",
+      "role": "system",
+      "contentPointers": ["/payload/goal/objective"]
+    },
+    {
+      "id": "extension-result",
+      "match": { "/type": "event_msg", "/payload/type": "item_completed", "/payload/item/type": "Extension" },
+      "kind": "tool result",
+      "role": "tool",
+      "contentPointers": ["/payload/item/results", "/payload/item/query"],
+      "labelPointer": "/payload/item/kind"
+    },
+    {
+      "id": "compacted-history",
+      "scopePointer": "/payload/replacement_history/*",
+      "match": { "$/type": "compacted", "/type": "message" },
+      "kind": "compacted message",
+      "rolePointer": "/role",
+      "contentPointers": ["/content/*/text"]
+    },
+    {
+      "id": "world-state-context",
+      "match": { "/type": "world_state" },
+      "kind": "system context",
+      "role": "system",
+      "contentPointers": [
+        "/payload/state/agents_md/text",
+        "/payload/state/host_skills/body",
+        "/payload/state/permissions/instructions",
+        "/payload/state/multi_agent_usage_hint"
+      ]
     }
   ],
   "fallback": "raw-json"

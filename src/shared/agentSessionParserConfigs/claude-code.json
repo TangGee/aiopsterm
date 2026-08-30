@@ -54,6 +54,95 @@
       "kind": "result",
       "role": "assistant",
       "contentPointers": ["/result"]
+    },
+    {
+      "id": "queued-user-message",
+      "match": { "/type": "queue-operation", "/operation": "enqueue" },
+      "kind": "message",
+      "role": "user",
+      "contentPointers": ["/content"]
+    },
+    {
+      "id": "last-prompt-snapshot",
+      "match": { "/type": "last-prompt" },
+      "kind": "message snapshot",
+      "role": "user",
+      "contentPointers": ["/lastPrompt"]
+    },
+    {
+      "id": "queued-command",
+      "match": { "/type": "attachment", "/attachment/type": "queued_command" },
+      "kind": "message",
+      "role": "user",
+      "contentPointers": ["/attachment/prompt"]
+    },
+    {
+      "id": "system-content",
+      "match": { "/type": "system", "/subtype": ["away_summary", "local_command", "compact_boundary"] },
+      "kind": "system message",
+      "role": "system",
+      "contentPointers": ["/content"]
+    },
+    {
+      "id": "stop-hook-errors",
+      "match": { "/type": "system", "/subtype": "stop_hook_summary" },
+      "kind": "system message",
+      "role": "system",
+      "contentPointers": ["/hookErrors", "/hookAdditionalContext"]
+    },
+    {
+      "id": "hook-result",
+      "match": { "/type": "attachment", "/attachment/type": "hook_success" },
+      "kind": "tool result",
+      "role": "tool",
+      "contentPointers": ["/attachment/stdout", "/attachment/stderr"],
+      "labelPointer": "/attachment/hookName"
+    },
+    {
+      "id": "hook-blocking-error",
+      "match": { "/type": "attachment", "/attachment/type": "hook_blocking_error" },
+      "kind": "tool result",
+      "role": "tool",
+      "contentPointers": ["/attachment/blockingError"],
+      "labelPointer": "/attachment/hookName"
+    },
+    {
+      "id": "task-reminder",
+      "match": { "/type": "attachment", "/attachment/type": "task_reminder" },
+      "kind": "system context",
+      "role": "system",
+      "contentPointers": ["/attachment/content"]
+    },
+    {
+      "id": "skill-listing",
+      "match": { "/type": "attachment", "/attachment/type": "skill_listing" },
+      "kind": "system context",
+      "role": "system",
+      "contentPointers": ["/attachment/content"]
+    },
+    {
+      "id": "edited-file",
+      "match": { "/type": "attachment", "/attachment/type": "edited_text_file" },
+      "kind": "tool result",
+      "role": "tool",
+      "contentPointers": ["/attachment/snippet"],
+      "labelPointer": "/attachment/filename"
+    },
+    {
+      "id": "plan-file",
+      "match": { "/type": "attachment", "/attachment/type": "plan_file_reference" },
+      "kind": "system context",
+      "role": "system",
+      "contentPointers": ["/attachment/planContent"],
+      "labelPointer": "/attachment/planFilePath"
+    },
+    {
+      "id": "attached-file",
+      "match": { "/type": "attachment", "/attachment/type": "file" },
+      "kind": "attachment",
+      "role": "user",
+      "contentPointers": ["/attachment/content/file/content"],
+      "labelPointer": "/attachment/filename"
     }
   ],
   "fallback": "raw-json"

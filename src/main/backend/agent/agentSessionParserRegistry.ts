@@ -78,6 +78,11 @@ export const getAgentSessionParserDefinition = (source: AiAgentSessionSource) =>
 export const listCustomAgentSessionParserDefinitions = () =>
   [...userDefinitions.values()].filter((definition) => definition.source.startsWith('custom:'))
 
+export const listEffectiveAgentSessionParserDefinitions = () => {
+  const sources = new Set<AiAgentSessionSource>([...builtinsBySource.keys(), ...userDefinitions.keys()])
+  return [...sources].map((source) => userDefinitions.get(source) || builtinsBySource.get(source)!).filter(Boolean)
+}
+
 export const listAgentSessionParsers = (): AgentSessionParserListResult => ({ ok: true, data: snapshot() })
 
 export const importAgentSessionParser = async (input: AgentSessionParserImportInput): Promise<AgentSessionParserImportResult> => {
