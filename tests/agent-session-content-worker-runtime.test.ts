@@ -170,4 +170,64 @@ describe('agentSessionContentWorkerRuntime', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+
+  it('updates structured values and deletes raw records without a read-only guard', async () => {
+    const {
+      listJsonlSessionContentInWorker,
+      rewriteJsonlSessionContentInWorker
+    } = await loadWorkerRuntime()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-session-content-worker-structured-'))
+    try {
+      const path = join(root, 'session.jsonl')
+      const updatePath = join(root, '.update.tmp')
+      const deletePath = join(root, '.delete.tmp')
+      await writeFile(
+        path,
+        [
+          JSON.stringify({ type: 'tool', payload: { input: { command: 'pwd' } } }),
+          '{broken json'
+        ].join('\n') + '\n',
+        'utf-8'
+      )
+      const parserDefinition = {
+        schemaVersion: 1 as const,
+        id: 'structured-test',
+        source: 'codex' as const,
+        displayName: 'Structured test',
+        storage: { kind: 'jsonl' as const, paths: [path] },
+        fallback: 'raw-json' as const,
+        rules: [{ id: 'tool', match: { '/type': 'tool' }, kind: 'tool call' as const, contentPointers: ['/payload/input'] }]
+      }
+      const page = await listJsonlSessionContentInWorker({ ...pageInput(path, 'structured'), parserDefinition })
+      expect(page.records).toEqual([
+        expect.objectContaining({ locationLabel: 'line 1 /payload/input', editable: true }),
+        expect.objectContaining({ locationLabel: 'line 2 /', messageType: 'raw-text', editable: true })
+      ])
+
+      await rewriteJsonlSessionContentInWorker({
+        path,
+        tempPath: updatePath,
+        sourceRevision: page.sourceRevision,
+        lineNumber: 1,
+        pointer: '/payload/input',
+        operation: 'update',
+        content: '{"command":"ls"}'
+      })
+      const updated = await readFile(updatePath, 'utf-8')
+      expect(JSON.parse(updated.split('\n')[0]).payload.input).toEqual({ command: 'ls' })
+
+      const updatedPage = await listJsonlSessionContentInWorker({ ...pageInput(updatePath, 'structured'), parserDefinition })
+      await rewriteJsonlSessionContentInWorker({
+        path: updatePath,
+        tempPath: deletePath,
+        sourceRevision: updatedPage.sourceRevision,
+        lineNumber: 2,
+        pointer: '/',
+        operation: 'delete'
+      })
+      expect(await readFile(deletePath, 'utf-8')).not.toContain('{broken json')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })

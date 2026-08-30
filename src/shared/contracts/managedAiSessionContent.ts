@@ -45,6 +45,7 @@ export type ManagedAiSessionContentUpdateInput = {
   recordId: string
   content: string
   sourceRevision: string
+  force?: boolean
 }
 
 export type ManagedAiSessionContentDeleteInput = {
@@ -52,6 +53,7 @@ export type ManagedAiSessionContentDeleteInput = {
   sessionId: string
   recordId: string
   sourceRevision: string
+  force?: boolean
 }
 
 export type ManagedAiSessionContentSnapshot = {
@@ -81,11 +83,9 @@ export type ManagedAiSessionContentListResult = AiopsMutationResult<ManagedAiSes
 export type ManagedAiSessionContentUpdateResult = AiopsMutationResult<{
   record: ManagedAiSessionContentRecord
   sourceRevision: string
-  backupPath?: string
 }>
 
 export type ManagedAiSessionContentDeleteResult = AiopsMutationResult<{
   recordId: string
   sourceRevision: string
-  backupPath?: string
 }>

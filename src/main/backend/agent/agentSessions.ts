@@ -1268,8 +1268,7 @@ export const deleteManagedAiSessionContentRecord = async (input: ManagedAiSessio
       ok: result.ok,
       ...(result.ok && result.data
         ? {
-            sourceRevision: result.data.sourceRevision,
-            backedUp: Boolean(result.data.backupPath)
+            sourceRevision: result.data.sourceRevision
           }
         : {
             errorCode: result.errorCode

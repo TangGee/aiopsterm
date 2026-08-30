@@ -276,8 +276,7 @@ export const isManagedAiSessionContentRecordData = (value: unknown): value is Ma
 export const isManagedAiSessionContentDeleteData = (value: unknown): value is ManagedAiSessionContentDeleteData =>
   isRecord(value) &&
   isNonEmptyString(value.recordId) &&
-  isNonEmptyString(value.sourceRevision) &&
-  isOptionalField(value, 'backupPath', (item) => typeof item === 'string')
+  isNonEmptyString(value.sourceRevision)
 
 export const isAgentHookInstallerStatus = (value: unknown): value is AgentHookInstallerStatus =>
   isRecord(value) &&

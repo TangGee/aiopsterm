@@ -748,13 +748,17 @@ const saveRecord = async (record: ManagedAiSessionContentRecord) => {
   saveNotice.value = ''
   let mutationSucceeded = false
   try {
-    const result = await updateRecord({
+    const mutationInput = {
       source: props.source,
       sessionId: props.sessionId,
       recordId: record.recordId,
       content: drafts[record.recordId] ?? '',
       sourceRevision: current.sourceRevision
-    })
+    }
+    let result = await updateRecord(mutationInput)
+    if (!result?.ok && result?.errorCode === 'MANAGED_AI_CONTENT_REVISION_CONFLICT' && window.confirm(t('aiSessions.content.overwriteConflict'))) {
+      result = await updateRecord({ ...mutationInput, force: true })
+    }
     if (!result?.ok || !isManagedAiSessionContentRecordData(result.data)) {
       error.value = result?.errorMessage || t('aiSessions.content.saveFailed')
       return
@@ -796,12 +800,16 @@ const deleteRecord = async (record: ManagedAiSessionContentRecord) => {
   saveNotice.value = ''
   let mutationSucceeded = false
   try {
-    const result = await deleteContentRecord({
+    const mutationInput = {
       source: props.source,
       sessionId: props.sessionId,
       recordId: deletedRecordId,
       sourceRevision: current.sourceRevision
-    })
+    }
+    let result = await deleteContentRecord(mutationInput)
+    if (!result?.ok && result?.errorCode === 'MANAGED_AI_CONTENT_REVISION_CONFLICT' && window.confirm(t('aiSessions.content.overwriteConflict'))) {
+      result = await deleteContentRecord({ ...mutationInput, force: true })
+    }
     if (!result?.ok || !isManagedAiSessionContentDeleteData(result.data)) {
       error.value = result?.errorMessage || t('aiSessions.content.deleteFailed')
       return

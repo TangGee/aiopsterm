@@ -1,5 +1,4 @@
 import Database from 'better-sqlite3'
-import { existsSync } from 'fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -49,7 +48,7 @@ const makeSession = (input: {
 })
 
 describe('agentSessionContentRuntime', () => {
-  it('lists and edits JSONL transcript text records with backups and revision conflicts', async () => {
+  it('lists, confirms stale overwrite, and deletes JSONL transcript records without backups', async () => {
     const { createAgentSessionContentRuntime } = await loadRuntime()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-session-content-jsonl-'))
     try {
@@ -76,7 +75,7 @@ describe('agentSessionContentRuntime', () => {
       const listed = await runtime.list({ source: 'codex', sessionId: session.id })
       expect(listed.ok).toBe(true)
       expect(listed.data).toEqual(expect.objectContaining({ total: 3, matchTotal: 3 }))
-      expect(listed.data?.records[0]).toEqual(expect.objectContaining({ messageType: 'raw-json', editable: false }))
+      expect(listed.data?.records[0]).toEqual(expect.objectContaining({ messageType: 'raw-json', editable: true }))
       const userRecord = listed.data?.records.find((record: ManagedAiSessionContentRecord) => record.content === 'fix the api')
       expect(userRecord).toEqual(expect.objectContaining({ role: 'user', editable: true }))
 
@@ -95,7 +94,6 @@ describe('agentSessionContentRuntime', () => {
       })
       expect(updated.ok).toBe(true)
       expect(updated.data?.record.content).toBe('fix the billing api')
-      expect(existsSync(updated.data?.backupPath || '')).toBe(true)
       const updatedRaw = await readFile(transcriptPath, 'utf-8')
       expect(updatedRaw.endsWith('\n')).toBe(true)
       const lines = updatedRaw.split(/\n/)
@@ -112,19 +110,29 @@ describe('agentSessionContentRuntime', () => {
       })
       expect(conflict).toEqual(expect.objectContaining({ ok: false, errorCode: 'MANAGED_AI_CONTENT_REVISION_CONFLICT' }))
 
+      const overwritten = await runtime.updateRecord({
+        source: 'codex',
+        sessionId: session.id,
+        recordId: userRecord!.recordId,
+        content: 'confirmed overwrite',
+        sourceRevision: userRecord!.sourceRevision,
+        force: true
+      })
+      expect(overwritten).toEqual(expect.objectContaining({ ok: true }))
+      expect(overwritten.data?.record.content).toBe('confirmed overwrite')
+
       const deleted = await runtime.deleteRecord({
         source: 'codex',
         sessionId: session.id,
-        recordId: updated.data!.record.recordId,
-        sourceRevision: updated.data!.sourceRevision
+        recordId: overwritten.data!.record.recordId,
+        sourceRevision: overwritten.data!.sourceRevision
       })
       expect(deleted.ok).toBe(true)
-      expect(existsSync(deleted.data?.backupPath || '')).toBe(true)
       const deletedRaw = await readFile(transcriptPath, 'utf-8')
       const deletedLines = deletedRaw.split(/\n/)
       expect(deletedLines).toHaveLength(3)
       expect(deletedLines[2]).toBe('')
-      expect(deletedRaw).not.toContain('fix the billing api')
+      expect(deletedRaw).not.toContain('confirmed overwrite')
       const relisted = await runtime.list({ source: 'codex', sessionId: session.id })
       expect(relisted.data?.records.map((record: ManagedAiSessionContentRecord) => record.messageType)).toEqual(['raw-json', 'message'])
     } finally {
@@ -202,7 +210,7 @@ describe('agentSessionContentRuntime', () => {
       const contents = listed.data?.records.map((record: ManagedAiSessionContentRecord) => record.content) || []
       expect(listed.data?.records.slice(0, 2)).toEqual([
         expect.objectContaining({ content: 'base instructions text', role: 'system', messageType: 'system prompt', editable: true }),
-        expect.objectContaining({ messageType: 'raw-json', editable: false })
+        expect.objectContaining({ messageType: 'raw-json', editable: true })
       ])
       expect(contents[1]).toContain('"summary": "auto"')
       expect(contents.slice(2)).toEqual([
@@ -289,10 +297,31 @@ describe('agentSessionContentRuntime', () => {
       const listed = await runtime.list({ source: 'codex', sessionId: session.id })
       expect(listed.data?.records).toEqual([
         expect.objectContaining({ content: 'create hello_cat.py', role: 'tool', messageType: 'tool call: terminal', editable: true }),
-        expect.objectContaining({ messageType: 'raw-json', editable: false }),
-        expect.objectContaining({ messageType: 'raw-text', content: '{broken json', editable: false })
+        expect.objectContaining({ messageType: 'raw-json', editable: true }),
+        expect.objectContaining({ messageType: 'raw-text', content: '{broken json', editable: true })
       ])
       expect(listed.data?.records[1]?.content).toContain('unknown message body')
+
+      const rawJsonRecord = listed.data!.records[1]
+      const rawTextRecord = listed.data!.records[2]
+      const updatedRawJson = await runtime.updateRecord({
+        source: 'codex',
+        sessionId: session.id,
+        recordId: rawJsonRecord.recordId,
+        content: JSON.stringify({ type: 'future_behavior', payload: { message: 'now parsed' } }),
+        sourceRevision: rawJsonRecord.sourceRevision
+      })
+      expect(updatedRawJson).toEqual(expect.objectContaining({ ok: true }))
+      expect(await readFile(transcriptPath, 'utf-8')).toContain('now parsed')
+
+      const deletedRawText = await runtime.deleteRecord({
+        source: 'codex',
+        sessionId: session.id,
+        recordId: rawTextRecord.recordId,
+        sourceRevision: updatedRawJson.data!.sourceRevision
+      })
+      expect(deletedRawText).toEqual(expect.objectContaining({ ok: true }))
+      expect(await readFile(transcriptPath, 'utf-8')).not.toContain('{broken json')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -341,8 +370,8 @@ describe('agentSessionContentRuntime', () => {
 
       const listed = await runtime.list({ source: 'custom:aider', sessionId: session.id })
       expect(listed.data?.records).toEqual([
-        expect.objectContaining({ content: 'review the patch', messageType: 'message', editable: false }),
-        expect.objectContaining({ messageType: 'raw-json', editable: false })
+        expect.objectContaining({ content: 'review the patch', messageType: 'message', editable: true }),
+        expect.objectContaining({ messageType: 'raw-json', editable: true })
       ])
       expect(listed.data?.records[1]?.content).toContain('"tokens": 120')
     } finally {
@@ -382,21 +411,21 @@ describe('agentSessionContentRuntime', () => {
 
       const listed = await runtime.list({ source: 'kimi-code', sessionId: session.id })
       expect(listed.data?.records).toEqual([
-        expect.objectContaining({ content: 'kimi system prompt', role: 'system', messageType: 'system prompt', editable: false }),
-        expect.objectContaining({ content: 'hello kimi', role: 'user', messageType: 'message', editable: false }),
-        expect.objectContaining({ content: 'kimi reasoning', role: 'assistant', messageType: 'reasoning', editable: false }),
-        expect.objectContaining({ content: 'kimi answer', role: 'assistant', messageType: 'message', editable: false }),
-        expect.objectContaining({ role: 'tool', messageType: 'tool call: Read', editable: false }),
-        expect.objectContaining({ content: 'file body', role: 'tool', messageType: 'tool result', editable: false }),
-        expect.objectContaining({ content: 'complete', role: 'tool', messageType: 'tool result', editable: false }),
-        expect.objectContaining({ messageType: 'raw-json', editable: false })
+        expect.objectContaining({ content: 'kimi system prompt', role: 'system', messageType: 'system prompt', editable: true }),
+        expect.objectContaining({ content: 'hello kimi', role: 'user', messageType: 'message', editable: true }),
+        expect.objectContaining({ content: 'kimi reasoning', role: 'assistant', messageType: 'reasoning', editable: true }),
+        expect.objectContaining({ content: 'kimi answer', role: 'assistant', messageType: 'message', editable: true }),
+        expect.objectContaining({ role: 'tool', messageType: 'tool call: Read', editable: true }),
+        expect.objectContaining({ content: 'file body', role: 'tool', messageType: 'tool result', editable: true }),
+        expect.objectContaining({ content: 'complete', role: 'tool', messageType: 'tool result', editable: true }),
+        expect.objectContaining({ messageType: 'raw-json', editable: true })
       ])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
   })
 
-  it('extracts Claude Code array tool-result text and keeps object tool input read-only', async () => {
+  it('extracts Claude Code array tool-result text and allows object tool input editing', async () => {
     const { createAgentSessionContentRuntime } = await loadRuntime()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-session-content-claude-tools-'))
     try {
@@ -421,7 +450,7 @@ describe('agentSessionContentRuntime', () => {
 
       const listed = await runtime.list({ source: 'claude-code', sessionId: session.id })
       expect(listed.data?.records).toEqual([
-        expect.objectContaining({ role: 'tool', messageType: 'tool call: Read', editable: false }),
+        expect.objectContaining({ role: 'tool', messageType: 'tool call: Read', editable: true }),
         expect.objectContaining({ content: 'file body', role: 'tool', messageType: 'tool result', editable: true })
       ])
       expect(listed.data?.records.some((record: ManagedAiSessionContentRecord) => record.content.includes('hidden'))).toBe(false)
@@ -462,7 +491,6 @@ describe('agentSessionContentRuntime', () => {
         sourceRevision: record!.sourceRevision
       })
       expect(updated).toEqual(expect.objectContaining({ ok: true }))
-      expect(existsSync(updated.data?.backupPath || '')).toBe(true)
       const deleted = await runtime.deleteRecord({
         source: 'claude-code',
         sessionId: session.id,
@@ -470,13 +498,12 @@ describe('agentSessionContentRuntime', () => {
         sourceRevision: updated.data!.sourceRevision
       })
       expect(deleted).toEqual(expect.objectContaining({ ok: true }))
-      expect(existsSync(deleted.data?.backupPath || '')).toBe(true)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
   })
 
-  it('serializes concurrent edits against the same JSONL revision', async () => {
+  it('serializes concurrent edits and reports a stale revision', async () => {
     const { createAgentSessionContentRuntime } = await loadRuntime()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-session-content-concurrent-'))
     try {
@@ -572,7 +599,7 @@ describe('agentSessionContentRuntime', () => {
       const listed = await runtime.list({ source: 'opencode', sessionId: session.id })
       const record = listed.data?.records[0]
       expect(record).toEqual(expect.objectContaining({ role: 'assistant', content: 'original opencode answer', editable: true }))
-      expect(listed.data?.records[1]).toEqual(expect.objectContaining({ messageType: 'tool', editable: false }))
+      expect(listed.data?.records[1]).toEqual(expect.objectContaining({ messageType: 'tool', editable: true }))
       expect(listed.data?.records[1]?.content).toContain('pwd')
 
       const updated = await runtime.updateRecord({
@@ -587,20 +614,33 @@ describe('agentSessionContentRuntime', () => {
       const part = verifyDb.prepare('SELECT data FROM part WHERE id = ?').get('part-1') as { data: string }
       verifyDb.close()
       expect(JSON.parse(part.data).text).toBe('edited opencode answer')
-      expect(existsSync(updated.data?.backupPath || '')).toBe(true)
+
+      const toolRecord = listed.data!.records[1]
+      const updatedTool = await runtime.updateRecord({
+        source: 'opencode',
+        sessionId: session.id,
+        recordId: toolRecord.recordId,
+        content: JSON.stringify({ type: 'tool', tool: 'shell', state: { input: { command: 'ls' }, output: 'file.txt' } }),
+        sourceRevision: toolRecord.sourceRevision,
+        force: true
+      })
+      expect(updatedTool).toEqual(expect.objectContaining({ ok: true }))
+      const verifyToolDb = new Database(dbPath, { readonly: true })
+      const toolPart = verifyToolDb.prepare('SELECT data FROM part WHERE id = ?').get('part-2') as { data: string }
+      verifyToolDb.close()
+      expect(JSON.parse(toolPart.data).state.input.command).toBe('ls')
 
       const deleted = await runtime.deleteRecord({
         source: 'opencode',
         sessionId: session.id,
         recordId: record!.recordId,
-        sourceRevision: updated.data!.sourceRevision
+        sourceRevision: updatedTool.data!.sourceRevision
       })
       expect(deleted.ok).toBe(true)
       const deletedDb = new Database(dbPath, { readonly: true })
       const remainingPart = deletedDb.prepare('SELECT data FROM part WHERE id = ?').get('part-1')
       deletedDb.close()
       expect(remainingPart).toBeUndefined()
-      expect(existsSync(deleted.data?.backupPath || '')).toBe(true)
     } finally {
       await rm(root, { recursive: true, force: true })
     }

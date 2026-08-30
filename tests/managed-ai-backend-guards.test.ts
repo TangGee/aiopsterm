@@ -138,7 +138,6 @@ describe('managedAiBackendGuards', () => {
 
   it('validates managed AI content delete data', () => {
     expect(isManagedAiSessionContentDeleteData({ recordId: 'record-1', sourceRevision: 'revision-1' })).toBe(true)
-    expect(isManagedAiSessionContentDeleteData({ recordId: 'record-1', sourceRevision: 'revision-1', backupPath: '/tmp/backup' })).toBe(true)
     expect(isManagedAiSessionContentDeleteData({ recordId: '', sourceRevision: 'revision-1' })).toBe(false)
     expect(isManagedAiSessionContentDeleteData({ recordId: 'record-1', sourceRevision: '' })).toBe(false)
   })

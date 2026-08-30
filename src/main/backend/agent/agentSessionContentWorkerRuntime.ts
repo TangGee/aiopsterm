@@ -197,7 +197,7 @@ const configuredTextPointers = (line, parser) => {
             value: content,
             role: isInjectedSessionContextText(content) ? 'developer' : roleFromRule(line, scopeEntry.value, rule, fallbackRole),
             messageType: label ? rule.kind + ': ' + label : rule.kind,
-            editable: rule.editable !== false && typeof item.value === 'string',
+            editable: true,
             structured: typeof item.value !== 'string'
           })
           ruleProduced = true
@@ -238,11 +238,11 @@ const setValueAtPointer = (value, pointer, nextValue) => {
   if (last === undefined) return false
   if (Array.isArray(current)) {
     const index = Number(last)
-    if (!Number.isInteger(index) || typeof current[index] !== 'string') return false
+    if (!Number.isInteger(index) || index < 0 || index >= current.length) return false
     current[index] = nextValue
     return true
   }
-  if (!isRecord(current) || typeof current[last] !== 'string') return false
+  if (!isRecord(current) || !Object.prototype.hasOwnProperty.call(current, last)) return false
   current[last] = nextValue
   return true
 }
@@ -260,11 +260,11 @@ const removeValueAtPointer = (value, pointer) => {
   if (last === undefined) return false
   if (Array.isArray(current)) {
     const index = Number(last)
-    if (!Number.isInteger(index) || typeof current[index] !== 'string') return false
+    if (!Number.isInteger(index) || index < 0 || index >= current.length) return false
     current.splice(index, 1)
     return true
   }
-  if (!isRecord(current) || typeof current[last] !== 'string') return false
+  if (!isRecord(current) || !Object.prototype.hasOwnProperty.call(current, last)) return false
   delete current[last]
   return true
 }
@@ -351,7 +351,7 @@ const selectJsonlRecords = (request, lines, sourceRevision) => {
     const items = [...configuredItems, ...legacyItems]
     const selectedItems = items.length
       ? items
-      : [{ pointer: '/', value: line.parsed ? valueContent(parsed) : line.raw, role: 'unknown', messageType: line.parsed ? 'raw-json' : 'raw-text', editable: false }]
+      : [{ pointer: '/', value: line.parsed ? valueContent(parsed) : line.raw, role: 'unknown', messageType: line.parsed ? 'raw-json' : 'raw-text', editable: true }]
     selectedItems.forEach((item) => {
       if (line.parsed && shouldSkipJsonTextPointer(line, item)) return
       const ordinal = total
@@ -384,7 +384,7 @@ const selectJsonlRecords = (request, lines, sourceRevision) => {
         content: truncated.content,
         contentTruncated: truncated.contentTruncated,
         fullLength: truncated.fullLength,
-        editable: request.sessionEditable && item.editable !== false && item.pointer !== '/',
+        editable: request.sessionEditable,
         sourceRevision
       }
       if (request.editBlockedReason) record.editBlockedReason = request.editBlockedReason
@@ -411,36 +411,67 @@ const executeRead = async (request) => {
   }
 }
 const executeRewrite = async (request) => {
-  const sourceRevision = await revisionForPath(request.path)
-  if (sourceRevision !== request.sourceRevision) {
-    throw workerError('MANAGED_AI_CONTENT_REVISION_CONFLICT', 'Conversation content changed on disk. Reload before saving.')
-  }
   const { lines, rawLines, trailingNewline } = await readJsonlLines(request.path, true)
-  if (await revisionForPath(request.path) !== request.sourceRevision) {
-    throw workerError('MANAGED_AI_CONTENT_REVISION_CONFLICT', 'Conversation content changed on disk. Reload before saving.')
-  }
   if (!rawLines) throw workerError('MANAGED_AI_CONTENT_WORKER_FAILED', 'Managed AI content worker did not retain source lines.')
   const line = lines.find((item) => item.lineNumber === request.lineNumber)
-  if (!line || !line.parsed || typeof valueAtPointer(line.parsed, request.pointer) !== 'string') {
+  if (!line || (!line.parsed && !line.raw.trim())) {
     throw workerError('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')
   }
-  if (request.operation === 'update') {
-    if (typeof request.content !== 'string' || !setValueAtPointer(line.parsed, request.pointer, request.content)) {
-      throw workerError('MANAGED_AI_CONTENT_RECORD_READ_ONLY', 'Managed AI content record is read-only.')
+  const rootPointer = request.pointer === '/' || request.pointer === ''
+  let nextParsed = line.parsed
+  let nextRaw = line.raw
+  let keepLine = true
+  if (request.operation === 'delete' && rootPointer) {
+    keepLine = false
+  } else if (request.operation === 'update' && rootPointer) {
+    if (typeof request.content !== 'string') {
+      throw workerError('MANAGED_AI_CONTENT_REQUIRED', 'Managed AI content must be text.')
     }
-  } else if (!removeValueAtPointer(line.parsed, request.pointer)) {
-    throw workerError('MANAGED_AI_CONTENT_RECORD_READ_ONLY', 'Managed AI content record is read-only.')
+    if (line.parsed) {
+      nextParsed = safeJsonParse(request.content)
+      if (!nextParsed) {
+        throw workerError('MANAGED_AI_CONTENT_INVALID_JSON', 'Structured conversation content must be valid JSON object text.')
+      }
+      nextRaw = JSON.stringify(nextParsed)
+    } else {
+      nextRaw = request.content
+    }
+  } else {
+    if (!line.parsed || valueAtPointer(line.parsed, request.pointer) === undefined) {
+      throw workerError('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')
+    }
+    if (request.operation === 'update') {
+      if (typeof request.content !== 'string') {
+        throw workerError('MANAGED_AI_CONTENT_REQUIRED', 'Managed AI content must be text.')
+      }
+      const currentValue = valueAtPointer(line.parsed, request.pointer)
+      let nextValue = request.content
+      if (typeof currentValue !== 'string') {
+        try {
+          nextValue = JSON.parse(request.content)
+        } catch {
+          throw workerError('MANAGED_AI_CONTENT_INVALID_JSON', 'Structured conversation content must be valid JSON text.')
+        }
+      }
+      if (!setValueAtPointer(line.parsed, request.pointer, nextValue)) {
+        throw workerError('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')
+      }
+    } else if (!removeValueAtPointer(line.parsed, request.pointer)) {
+      throw workerError('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')
+    }
+    nextParsed = line.parsed
+    nextRaw = JSON.stringify(nextParsed)
+    keepLine = request.operation === 'update' || collectTextPointers(nextParsed).some((item) => !shouldSkipJsonTextPointer({ ...line, parsed: nextParsed }, item))
   }
-  const keepLine = request.operation === 'update' || collectTextPointers(line.parsed).some((item) => !shouldSkipJsonTextPointer(line, item))
   const nextLines = []
   rawLines.forEach((raw, index) => {
     const originalLineNumber = index + 1
     if (originalLineNumber !== line.lineNumber) nextLines.push(raw)
-    else if (keepLine) nextLines.push(JSON.stringify(line.parsed))
+    else if (keepLine) nextLines.push(nextRaw)
   })
   const suffix = trailingNewline && (request.operation !== 'delete' || nextLines.length) ? '\n' : ''
   await writeFile(request.tempPath, nextLines.join('\n') + suffix, 'utf-8')
-  return { workerThreadId: threadId, workerIsMainThread: isMainThread, sourceRevision }
+  return { workerThreadId: threadId, workerIsMainThread: isMainThread, sourceRevision: request.sourceRevision }
 }
 const handleRequest = async (request) => {
   try {

@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import { existsSync, readdirSync, statSync } from 'fs'
-import { copyFile, mkdir, rename, rm, stat } from 'fs/promises'
+import { rename, rm, stat } from 'fs/promises'
 import { basename, dirname, join, resolve } from 'path'
 import { openSqliteDatabase, type SqliteDatabase } from '@shared/databaseSqliteRuntime'
 import type {
@@ -105,7 +105,6 @@ const maxLimit = 500
 const defaultMaxContentChars = 16_000
 const maxContentCharsLimit = 1_000_000
 const maxScanFiles = 2400
-const editableSources = new Set<AiAgentSessionSource>(['codex', 'claude-code', 'opencode'])
 const jsonlSources = new Set<AiAgentSessionSource>(['codex', 'claude-code'])
 const contentMutationQueues = new Map<string, Promise<void>>()
 const builtinParsersBySource = new Map(builtinAgentSessionParserDefinitions.map((definition) => [definition.source, definition]))
@@ -231,62 +230,17 @@ const serializeContentMutation = async <T>(key: string, operation: () => Promise
   }
 }
 
-const sourceEditState = (source: AiAgentSessionSource) => {
-  if (!editableSources.has(source)) return { editable: false, reason: 'This AI source does not expose editable local conversation content yet.' }
-  return { editable: true }
-}
-
 const parserForSource = (config: AgentSessionContentRuntimeConfig, source: AiAgentSessionSource) =>
   config.getParserDefinition?.(source) || builtinParsersBySource.get(source) || null
 
 const sourceUsesJsonl = (config: AgentSessionContentRuntimeConfig, source: AiAgentSessionSource) =>
   jsonlSources.has(source) || parserForSource(config, source)?.storage.kind === 'jsonl'
 
-const safeBackupSegment = (value: string) => value.replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 90) || 'session'
-
-const backupDirFor = (userDataPath: string, source: AiAgentSessionSource, sessionId: string) =>
-  join(userDataPath || defaultHomeDir(), 'agent-sessions', 'content-backups', source, safeBackupSegment(sessionId))
-
-const cleanupBackups = async (backupDir: string) => {
-  let entries: string[]
-  try {
-    entries = readdirSync(backupDir)
-  } catch {
-    return
+const sourceEditState = (config: AgentSessionContentRuntimeConfig, source: AiAgentSessionSource) => {
+  if (source !== 'opencode' && !sourceUsesJsonl(config, source)) {
+    return { editable: false, reason: 'This AI source does not expose writable local conversation content.' }
   }
-  const files = entries
-    .map((entry) => {
-      const path = join(backupDir, entry)
-      try {
-        const item = statSync(path)
-        return item.isFile() ? { path, mtimeMs: item.mtimeMs } : null
-      } catch {
-        return null
-      }
-    })
-    .filter(Boolean) as Array<{ path: string; mtimeMs: number }>
-  await Promise.all(files.sort((first, second) => second.mtimeMs - first.mtimeMs).slice(20).map((file) => rm(file.path, { force: true })))
-}
-
-const backupFiles = async (input: {
-  userDataPath: string
-  source: AiAgentSessionSource
-  sessionId: string
-  paths: string[]
-  now: number
-}) => {
-  const backupDir = backupDirFor(input.userDataPath, input.source, input.sessionId)
-  await mkdir(backupDir, { recursive: true })
-  const stamp = new Date(input.now).toISOString().replace(/[:.]/g, '-')
-  let firstBackupPath = ''
-  for (const path of input.paths) {
-    if (!existsSync(path)) continue
-    const target = join(backupDir, `${stamp}-${safeBackupSegment(basename(path))}.bak`)
-    await copyFile(path, target)
-    if (!firstBackupPath) firstBackupPath = target
-  }
-  await cleanupBackups(backupDir)
-  return firstBackupPath || undefined
+  return { editable: true }
 }
 
 const collectFiles = (root: string, extension = '.jsonl') => {
@@ -429,7 +383,7 @@ const buildOpenCodeRecords = (input: {
         : ''
     if (!text.trim()) return
     const type = cleanText(partData?.type) || 'part'
-    const partEditable = input.sessionEditable && typeof partData?.text === 'string' && (type === 'text' || type === 'reasoning')
+    const partEditable = input.sessionEditable
     const truncated = truncateContent(text, input.maxContentChars)
     records.push({
       source: input.source,
@@ -444,7 +398,7 @@ const buildOpenCodeRecords = (input: {
       contentTruncated: truncated.contentTruncated,
       fullLength: truncated.fullLength,
       editable: partEditable,
-      ...(partEditable ? {} : { editBlockedReason: input.editBlockedReason || `${type} parts are read-only.` }),
+      ...(partEditable ? {} : { editBlockedReason: input.editBlockedReason }),
       sourceRevision: input.sourceRevision,
       ...(typeof row.message_created === 'number' ? { createdAt: row.message_created } : {})
     })
@@ -547,7 +501,7 @@ const readJsonlContentPage = async (
 ): Promise<ReadSessionContentPageResult | null> => {
   const path = findJsonlTranscriptPath(session, session.source, config)
   if (!path) return null
-  const editState = sourceEditState(session.source)
+  const editState = sourceEditState(config, session.source)
   const page = await listJsonlSessionContentInWorker({
     path,
     source: session.source,
@@ -580,7 +534,7 @@ const readJsonlContentRecord = async (
 ) => {
   const path = findJsonlTranscriptPath(session, session.source, config)
   if (!path) return undefined
-  const editState = sourceEditState(session.source)
+  const editState = sourceEditState(config, session.source)
   const result = await getJsonlSessionContentRecordInWorker({
     path,
     source: session.source,
@@ -598,7 +552,7 @@ const readOpenCodeContent = async (config: AgentSessionContentRuntimeConfig, ses
   const dbPath = openCodeDbPath(config)
   if (!existsSync(dbPath)) return null
   const sourceRevision = await revisionForFiles(opencodeRevisionPaths(dbPath))
-  const editState = sourceEditState(session.source)
+  const editState = sourceEditState(config, session.source)
   let db: SqliteDatabase | null = null
   try {
     db = openSqliteDatabase(dbPath, true)
@@ -640,7 +594,7 @@ const readNonJsonlContentForSession = async (config: AgentSessionContentRuntimeC
   }
   const sourceRevision = `${session.updatedAt}:${session.events.length}`
   const records = buildEventRecords({ session, sourceRevision, maxContentChars })
-  const unsupportedReason = editableSources.has(session.source)
+  const unsupportedReason = sourceEditState(config, session.source).editable
     ? 'The local transcript store for this session was not found.'
     : 'This AI source is indexed as events only in this version.'
   return {
@@ -708,8 +662,8 @@ const updateJsonlRecord = async (
   const path = findJsonlTranscriptPath(session, session.source, config)
   if (!path) return contentError<ManagedAiSessionContentUpdateResult>('MANAGED_AI_CONTENT_STORE_MISSING', 'Managed AI transcript file was not found.')
   const currentRevision = await revisionForFiles([path])
-  if (input.sourceRevision !== currentRevision) {
-    return contentError<ManagedAiSessionContentUpdateResult>('MANAGED_AI_CONTENT_REVISION_CONFLICT', 'Conversation content changed on disk. Reload before saving.')
+  if (!input.force && input.sourceRevision !== currentRevision) {
+    return contentError<ManagedAiSessionContentUpdateResult>('MANAGED_AI_CONTENT_REVISION_CONFLICT', 'Conversation content changed on disk. Confirm overwrite to continue.')
   }
   const tempPath = join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`)
   let renamed = false
@@ -717,31 +671,34 @@ const updateJsonlRecord = async (
     await rewriteJsonlSessionContentInWorker({
       path,
       tempPath,
-      sourceRevision: input.sourceRevision,
+      sourceRevision: currentRevision,
       lineNumber: locator.lineNumber,
       pointer: locator.pointer,
       operation: 'update',
       content: input.content
     })
-    if (await revisionForFiles([path]) !== input.sourceRevision) {
-      return contentError<ManagedAiSessionContentUpdateResult>('MANAGED_AI_CONTENT_REVISION_CONFLICT', 'Conversation content changed on disk. Reload before saving.')
-    }
-    const backupPath = await backupFiles({
-      userDataPath: config.getUserDataPath(),
-      source: session.source,
-      sessionId: session.id,
-      paths: [path],
-      now: config.now()
-    })
-    if (await revisionForFiles([path]) !== input.sourceRevision) {
-      return contentError<ManagedAiSessionContentUpdateResult>('MANAGED_AI_CONTENT_REVISION_CONFLICT', 'Conversation content changed on disk. Reload before saving.')
-    }
     await rename(tempPath, path)
     renamed = true
     const nextRevision = await revisionForFiles([path])
     const record = await getFullRecord(config, session, input.recordId, maxContentCharsLimit)
-    if (!record) return contentError<ManagedAiSessionContentUpdateResult>('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found after saving.')
-    return { ok: true, data: { record: { ...record, sourceRevision: nextRevision }, sourceRevision: nextRevision, ...(backupPath ? { backupPath } : {}) } }
+    const savedRecord: ManagedAiSessionContentRecord = record
+      ? { ...record, sourceRevision: nextRevision }
+      : {
+          source: session.source,
+          sessionId: session.id,
+          format: 'jsonl',
+          recordId: input.recordId,
+          ordinal: Math.max(0, locator.lineNumber - 1),
+          locationLabel: `line ${locator.lineNumber} ${locator.pointer}`,
+          role: 'unknown',
+          messageType: locator.pointer === '/' && safeJsonParse(input.content) ? 'raw-json' : 'message',
+          content: input.content,
+          contentTruncated: false,
+          fullLength: input.content.length,
+          editable: true,
+          sourceRevision: nextRevision
+        }
+    return { ok: true, data: { record: savedRecord, sourceRevision: nextRevision } }
   } catch (error) {
     const result = workerMutationError<ManagedAiSessionContentUpdateResult>(error, 'save')
     if (result) return result
@@ -762,49 +719,36 @@ const updateOpenCodeRecord = async (
   if (!existsSync(dbPath)) return contentError<ManagedAiSessionContentUpdateResult>('MANAGED_AI_CONTENT_STORE_MISSING', 'OpenCode database was not found.')
   const revisionPaths = opencodeRevisionPaths(dbPath)
   const currentRevision = await revisionForFiles(revisionPaths)
-  if (input.sourceRevision !== currentRevision) {
-    return contentError<ManagedAiSessionContentUpdateResult>('MANAGED_AI_CONTENT_REVISION_CONFLICT', 'Conversation content changed on disk. Reload before saving.')
+  if (!input.force && input.sourceRevision !== currentRevision) {
+    return contentError<ManagedAiSessionContentUpdateResult>('MANAGED_AI_CONTENT_REVISION_CONFLICT', 'Conversation content changed on disk. Confirm overwrite to continue.')
   }
   let db: SqliteDatabase | null = null
-  let backupPath: string | undefined
   let transactionOpen = false
   try {
     db = openSqliteDatabase(dbPath, false)
     db.prepare('BEGIN IMMEDIATE').run()
     transactionOpen = true
-    if (await revisionForFiles(revisionPaths) !== input.sourceRevision) {
-      return contentError<ManagedAiSessionContentUpdateResult>('MANAGED_AI_CONTENT_REVISION_CONFLICT', 'Conversation content changed on disk. Reload before saving.')
-    }
     const rows = queryRows<{ data?: string }>(db, 'SELECT data FROM part WHERE id = ? AND message_id = ? AND session_id = ?', [
       locator.partId,
       locator.messageId,
       session.id
     ])
     const data = rows[0]?.data ? safeJsonParse(rows[0].data) : null
-    if (!data || typeof data.text !== 'string') {
+    if (!data) {
       return contentError<ManagedAiSessionContentUpdateResult>('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')
     }
-    const type = cleanText(data.type)
-    if (type !== 'text' && type !== 'reasoning') {
-      return contentError<ManagedAiSessionContentUpdateResult>('MANAGED_AI_CONTENT_RECORD_READ_ONLY', 'Only OpenCode text and reasoning parts are editable.')
+    const nextData = typeof data.text === 'string' ? { ...data, text: input.content } : safeJsonParse(input.content)
+    if (!nextData) {
+      return contentError<ManagedAiSessionContentUpdateResult>('MANAGED_AI_CONTENT_INVALID_JSON', 'Structured conversation content must be valid JSON object text.')
     }
-    backupPath = await backupFiles({
-      userDataPath: config.getUserDataPath(),
-      source: session.source,
-      sessionId: session.id,
-      paths: revisionPaths,
-      now: config.now()
-    })
-    data.text = input.content
-    const updated = db.prepare('UPDATE part SET data = ? WHERE id = ? AND message_id = ? AND session_id = ? AND data = ?').run(
-      JSON.stringify(data),
+    const updated = db.prepare('UPDATE part SET data = ? WHERE id = ? AND message_id = ? AND session_id = ?').run(
+      JSON.stringify(nextData),
       locator.partId,
       locator.messageId,
-      session.id,
-      rows[0]!.data
+      session.id
     )
     if (updated.changes !== 1) {
-      return contentError<ManagedAiSessionContentUpdateResult>('MANAGED_AI_CONTENT_REVISION_CONFLICT', 'Conversation content changed on disk. Reload before saving.')
+      return contentError<ManagedAiSessionContentUpdateResult>('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')
     }
     db.prepare('COMMIT').run()
     transactionOpen = false
@@ -819,7 +763,7 @@ const updateOpenCodeRecord = async (
   const nextRevision = await revisionForFiles(revisionPaths)
   const record = await getFullRecord(config, session, input.recordId, maxContentCharsLimit)
   if (!record) return contentError<ManagedAiSessionContentUpdateResult>('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found after saving.')
-  return { ok: true, data: { record: { ...record, sourceRevision: nextRevision }, sourceRevision: nextRevision, ...(backupPath ? { backupPath } : {}) } }
+  return { ok: true, data: { record: { ...record, sourceRevision: nextRevision }, sourceRevision: nextRevision } }
 }
 
 const deleteJsonlRecord = async (
@@ -832,8 +776,8 @@ const deleteJsonlRecord = async (
   const path = findJsonlTranscriptPath(session, session.source, config)
   if (!path) return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_STORE_MISSING', 'Managed AI transcript file was not found.')
   const currentRevision = await revisionForFiles([path])
-  if (input.sourceRevision !== currentRevision) {
-    return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_REVISION_CONFLICT', 'Conversation content changed on disk. Reload before deleting.')
+  if (!input.force && input.sourceRevision !== currentRevision) {
+    return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_REVISION_CONFLICT', 'Conversation content changed on disk. Confirm overwrite to continue.')
   }
   const tempPath = join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`)
   let renamed = false
@@ -841,28 +785,15 @@ const deleteJsonlRecord = async (
     await rewriteJsonlSessionContentInWorker({
       path,
       tempPath,
-      sourceRevision: input.sourceRevision,
+      sourceRevision: currentRevision,
       lineNumber: locator.lineNumber,
       pointer: locator.pointer,
       operation: 'delete'
     })
-    if (await revisionForFiles([path]) !== input.sourceRevision) {
-      return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_REVISION_CONFLICT', 'Conversation content changed on disk. Reload before deleting.')
-    }
-    const backupPath = await backupFiles({
-      userDataPath: config.getUserDataPath(),
-      source: session.source,
-      sessionId: session.id,
-      paths: [path],
-      now: config.now()
-    })
-    if (await revisionForFiles([path]) !== input.sourceRevision) {
-      return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_REVISION_CONFLICT', 'Conversation content changed on disk. Reload before deleting.')
-    }
     await rename(tempPath, path)
     renamed = true
     const nextRevision = await revisionForFiles([path])
-    return { ok: true, data: { recordId: input.recordId, sourceRevision: nextRevision, ...(backupPath ? { backupPath } : {}) } }
+    return { ok: true, data: { recordId: input.recordId, sourceRevision: nextRevision } }
   } catch (error) {
     const result = workerMutationError<ManagedAiSessionContentDeleteResult>(error, 'delete')
     if (result) return result
@@ -883,39 +814,23 @@ const deleteOpenCodeRecord = async (
   if (!existsSync(dbPath)) return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_STORE_MISSING', 'OpenCode database was not found.')
   const revisionPaths = opencodeRevisionPaths(dbPath)
   const currentRevision = await revisionForFiles(revisionPaths)
-  if (input.sourceRevision !== currentRevision) {
-    return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_REVISION_CONFLICT', 'Conversation content changed on disk. Reload before deleting.')
+  if (!input.force && input.sourceRevision !== currentRevision) {
+    return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_REVISION_CONFLICT', 'Conversation content changed on disk. Confirm overwrite to continue.')
   }
   let db: SqliteDatabase | null = null
-  let backupPath: string | undefined
   let transactionOpen = false
   try {
     db = openSqliteDatabase(dbPath, false)
     db.prepare('BEGIN IMMEDIATE').run()
     transactionOpen = true
-    if (await revisionForFiles(revisionPaths) !== input.sourceRevision) {
-      return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_REVISION_CONFLICT', 'Conversation content changed on disk. Reload before deleting.')
-    }
     const rows = queryRows<{ data?: string }>(db, 'SELECT data FROM part WHERE id = ? AND message_id = ? AND session_id = ?', [
       locator.partId,
       locator.messageId,
       session.id
     ])
-    const data = rows[0]?.data ? safeJsonParse(rows[0].data) : null
-    if (!data || typeof data.text !== 'string') {
+    if (!rows[0]?.data) {
       return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')
     }
-    const type = cleanText(data.type)
-    if (type !== 'text' && type !== 'reasoning') {
-      return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_READ_ONLY', 'Only OpenCode text and reasoning parts can be deleted.')
-    }
-    backupPath = await backupFiles({
-      userDataPath: config.getUserDataPath(),
-      source: session.source,
-      sessionId: session.id,
-      paths: revisionPaths,
-      now: config.now()
-    })
     const deleted = db.prepare('DELETE FROM part WHERE id = ? AND message_id = ? AND session_id = ? AND data = ?').run(
       locator.partId,
       locator.messageId,
@@ -923,7 +838,7 @@ const deleteOpenCodeRecord = async (
       rows[0]!.data
     )
     if (deleted.changes !== 1) {
-      return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_REVISION_CONFLICT', 'Conversation content changed on disk. Reload before deleting.')
+      return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')
     }
     db.prepare('COMMIT').run()
     transactionOpen = false
@@ -936,7 +851,7 @@ const deleteOpenCodeRecord = async (
     db?.close()
   }
   const nextRevision = await revisionForFiles(revisionPaths)
-  return { ok: true, data: { recordId: input.recordId, sourceRevision: nextRevision, ...(backupPath ? { backupPath } : {}) } }
+  return { ok: true, data: { recordId: input.recordId, sourceRevision: nextRevision } }
 }
 
 export const createAgentSessionContentRuntime = (config: AgentSessionContentRuntimeConfig) => {
@@ -999,14 +914,14 @@ export const createAgentSessionContentRuntime = (config: AgentSessionContentRunt
     if (!recordId) return contentError<ManagedAiSessionContentUpdateResult>('MANAGED_AI_CONTENT_RECORD_ID_REQUIRED', 'Managed AI content record id is required.')
     if (typeof input?.content !== 'string') return contentError<ManagedAiSessionContentUpdateResult>('MANAGED_AI_CONTENT_REQUIRED', 'Managed AI content must be text.')
     if (!cleanOptionalText(input?.sourceRevision)) return contentError<ManagedAiSessionContentUpdateResult>('MANAGED_AI_CONTENT_REVISION_REQUIRED', 'Managed AI content source revision is required.')
-    const editState = sourceEditState(resolved.source)
+    const editState = sourceEditState(config, resolved.source)
     if (!editState.editable) {
       return contentError<ManagedAiSessionContentUpdateResult>('MANAGED_AI_CONTENT_READ_ONLY', editState.reason || 'Managed AI session content is read-only.')
     }
     try {
       return await serializeContentMutation(contentMutationKey(config, resolved.session), async () => {
         if (resolved.source === 'opencode') return updateOpenCodeRecord(config, resolved.session, input)
-        if (jsonlSources.has(resolved.source)) return updateJsonlRecord(config, resolved.session, input)
+        if (sourceUsesJsonl(config, resolved.source)) return updateJsonlRecord(config, resolved.session, input)
         return contentError<ManagedAiSessionContentUpdateResult>('MANAGED_AI_CONTENT_UNSUPPORTED', 'This AI source does not support content editing yet.')
       })
     } catch (error) {
@@ -1023,14 +938,14 @@ export const createAgentSessionContentRuntime = (config: AgentSessionContentRunt
     const recordId = cleanOptionalText(input?.recordId)
     if (!recordId) return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_ID_REQUIRED', 'Managed AI content record id is required.')
     if (!cleanOptionalText(input?.sourceRevision)) return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_REVISION_REQUIRED', 'Managed AI content source revision is required.')
-    const editState = sourceEditState(resolved.source)
+    const editState = sourceEditState(config, resolved.source)
     if (!editState.editable) {
       return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_READ_ONLY', editState.reason || 'Managed AI session content is read-only.')
     }
     try {
       return await serializeContentMutation(contentMutationKey(config, resolved.session), async () => {
         if (resolved.source === 'opencode') return deleteOpenCodeRecord(config, resolved.session, input)
-        if (jsonlSources.has(resolved.source)) return deleteJsonlRecord(config, resolved.session, input)
+        if (sourceUsesJsonl(config, resolved.source)) return deleteJsonlRecord(config, resolved.session, input)
         return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_UNSUPPORTED', 'This AI source does not support content deletion yet.')
       })
     } catch (error) {

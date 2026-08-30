@@ -191,7 +191,7 @@ describe('ManagedAiSessionContentWorkspace', () => {
         .mockResolvedValueOnce({ ok: true, data: makeSnapshot([savedRecord], 'revision-2') }),
       updateManagedAiSessionContentRecord: vi.fn(async () => ({
         ok: true,
-        data: { record: savedRecord, sourceRevision: 'revision-2', backupPath: '/tmp/backup.jsonl' }
+        data: { record: savedRecord, sourceRevision: 'revision-2' }
       }))
     }
     const wrapper = mountWorkspace()
@@ -221,7 +221,7 @@ describe('ManagedAiSessionContentWorkspace', () => {
         .mockResolvedValueOnce({ ok: true, data: makeSnapshot(previousPage, 'revision-2', 20) }),
       deleteManagedAiSessionContentRecord: vi.fn(async () => ({
         ok: true,
-        data: { recordId: lastRecord.recordId, sourceRevision: 'revision-2', backupPath: '/tmp/backup.jsonl' }
+        data: { recordId: lastRecord.recordId, sourceRevision: 'revision-2' }
       }))
     }
     vi.spyOn(window, 'confirm').mockReturnValue(true)
@@ -236,7 +236,7 @@ describe('ManagedAiSessionContentWorkspace', () => {
     wrapper.unmount()
   })
 
-  it('keeps revision conflict errors and does not show a restart notice', async () => {
+  it('asks before forcing a stale save and keeps the conflict when declined', async () => {
     const initialRecord = makeRecord('before', 'revision-1')
     window.aiops = {
       ...originalAiops,
@@ -249,12 +249,42 @@ describe('ManagedAiSessionContentWorkspace', () => {
     }
     const wrapper = mountWorkspace()
     await flushPromises()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     await wrapper.find('textarea').setValue('after')
     await wrapper.find('.managed-ai-session-record-actions .primary').trigger('click')
     await flushPromises()
 
     expect(wrapper.find('.managed-ai-session-content-error').text()).toBe('reload first')
     expect(wrapper.find('.managed-ai-session-content-status .notice').exists()).toBe(false)
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('覆盖'))
+    wrapper.unmount()
+  })
+
+  it('retries a stale save with force after confirmation', async () => {
+    const initialRecord = makeRecord('before', 'revision-1')
+    const savedRecord = makeRecord('after', 'revision-3')
+    const updateRecord = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, errorCode: 'MANAGED_AI_CONTENT_REVISION_CONFLICT', errorMessage: 'reload first' })
+      .mockResolvedValueOnce({ ok: true, data: { record: savedRecord, sourceRevision: 'revision-3' } })
+    window.aiops = {
+      ...originalAiops,
+      listManagedAiSessionContent: vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, data: makeSnapshot([initialRecord], 'revision-1') })
+        .mockResolvedValueOnce({ ok: true, data: makeSnapshot([savedRecord], 'revision-3') }),
+      updateManagedAiSessionContentRecord: updateRecord
+    }
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mountWorkspace()
+    await flushPromises()
+    await wrapper.find('textarea').setValue('after')
+    await wrapper.find('.managed-ai-session-record-actions .primary').trigger('click')
+    await flushPromises()
+
+    expect(updateRecord).toHaveBeenCalledTimes(2)
+    expect(updateRecord).toHaveBeenLastCalledWith(expect.objectContaining({ force: true, sourceRevision: 'revision-1' }))
+    expect(wrapper.find('.managed-ai-session-content-status .notice').text()).toContain('重启该 AI 对话后修改才会生效')
     wrapper.unmount()
   })
 })
