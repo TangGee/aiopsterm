@@ -12,6 +12,22 @@ const evalBuildCodexCliModule = async (source: string) => {
 }
 
 describe('package configuration audit', () => {
+  it('uses GitHub source distribution without npm publication', () => {
+    const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as {
+      private?: boolean
+      repository?: { url?: string }
+      bugs?: { url?: string }
+      scripts?: Record<string, string>
+    }
+    const codexSource = JSON.parse(readFileSync('codex-source.json', 'utf8')) as { repository?: string }
+
+    expect(packageJson.private).toBe(true)
+    expect(packageJson.repository?.url).toBe('git+https://github.com/TangGee/aiopsterm.git')
+    expect(packageJson.bugs?.url).toBe('https://github.com/TangGee/aiopsterm/issues')
+    expect(packageJson.scripts?.['package:source']).toBeUndefined()
+    expect(codexSource.repository).toBe('https://github.com/TangGee/aiopsterm-codex.git')
+  })
+
   it('runs package target npm scripts through Node on Windows', async () => {
     const stdout = await evalBuildCodexCliModule(`
       import { npmScriptInvocation } from './scripts/package-targets.mjs'

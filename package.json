@@ -9,11 +9,11 @@
     "email": "support@aiopsterm.com"
   },
   "homepage": "https://aiopsterm.com",
-  "repository": { "type": "git", "url": "git+ssh://git@gitee.com/tanggee2/aiopsterm.git" },
-  "bugs": { "url": "https://gitee.com/tanggee2/aiopsterm/issues" },
+  "repository": { "type": "git", "url": "git+https://github.com/TangGee/aiopsterm.git" },
+  "bugs": { "url": "https://github.com/TangGee/aiopsterm/issues" },
   "keywords": ["terminal", "ssh", "devops", "ai", "mcp", "electron"],
   "license": "Apache-2.0",
-  "private": false,
+  "private": true,
   "scripts": {
     "dev": "npm run native:ensure:electron && electron-vite dev",
     "start": "npm run native:ensure:electron && electron-vite preview",
@@ -39,7 +39,6 @@
     "build:windows:one-click": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1",
     "package:build": "node scripts/build-package-target.mjs",
     "package:build:matrix": "node scripts/build-package-matrix.mjs",
-    "package:source": "bash scripts/package-source.sh",
     "package:verify": "node scripts/verify-package-target.mjs",
     "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.sidecar.json",
     "test": "npm run audit:i18n && npm run audit:state-ownership && npm run audit:best-practices-docs && npm run native:ensure:node && vitest run",

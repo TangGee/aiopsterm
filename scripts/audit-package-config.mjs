@@ -22,6 +22,15 @@ const clineNodeRuntimeIntegrities = {
 }
 
 const packageScripts = packageJson.scripts || {}
+if (packageJson.private !== true) {
+  throw new Error('The desktop application must remain private to prevent accidental npm publication.')
+}
+if (packageJson.repository?.url !== 'git+https://github.com/TangGee/aiopsterm.git') {
+  throw new Error('The source repository metadata must point to the public GitHub repository.')
+}
+if (packageScripts['package:source']) {
+  throw new Error('Source releases must use the Git repository instead of a local source archive script.')
+}
 const requiredScripts = [
   'build:codex',
   'build:cline-sidecar',

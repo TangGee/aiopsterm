@@ -23,4 +23,4 @@ npm test
 
 ## 反馈与 License
 
-普通问题请提交 https://gitee.com/tanggee2/aiopsterm/issues。aiopsterm 自有代码采用 Apache License 2.0，见 LICENSE；第三方依赖许可见 THIRD-PARTY-NOTICES.txt。
+普通问题请提交 https://github.com/TangGee/aiopsterm/issues。aiopsterm 自有代码采用 Apache License 2.0，见 LICENSE；第三方依赖许可见 THIRD-PARTY-NOTICES.txt。

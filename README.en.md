@@ -23,4 +23,4 @@ Anonymous telemetry is enabled by default and can be disabled in Settings. Telem
 
 ## Feedback And License
 
-Please report issues at https://gitee.com/tanggee2/aiopsterm/issues. aiopsterm-owned code is licensed under the Apache License 2.0; see [LICENSE](LICENSE). Third-party dependency notices are listed in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
+Please report issues at https://github.com/TangGee/aiopsterm/issues. aiopsterm-owned code is licensed under the Apache License 2.0; see [LICENSE](LICENSE). Third-party dependency notices are listed in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
