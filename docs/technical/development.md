@@ -329,15 +329,9 @@ npm run build:win
 npm run build:win:dir
 ```
 
-Create a contributor-ready source archive with:
+Source is published through the Git repositories rather than npm or a generated source archive. The desktop application uses the `master` branch of `https://github.com/TangGee/aiopsterm`, and the embedded Codex source keeps its complete history on the `main` branch of `https://github.com/TangGee/aiopsterm-codex`.
 
-```bash
-npm run package:source
-```
-
-The archive includes the main repository and local `codex/` repository Git metadata so the extracted source remains usable as a Git checkout. The packager creates temporary snapshot commits inside the archive only, leaving the current repositories untouched while ensuring both extracted worktrees have a clean `git status`. It excludes all local reference-only source trees and their Git objects. The generated archive and checksum are written below `release/source/` by default.
-
-The embedded Codex source is maintained as the separate `tanggee2/aiopsterm-codex` Git repository. `codex-source.json` records the exact commit used by the application. Run `npm run codex:ensure-source` before development or packaging; it validates an existing `codex/` checkout without overwriting it, and clones the locked commit only when the directory is absent. Codex changes keep their own history and use `codex:` commit messages; after pushing a Codex commit, update the lock file in the main repository.
+`codex-source.json` records the exact Codex commit used by the application. Run `npm run codex:ensure-source` before development or packaging; it validates an existing `codex/` checkout without overwriting it, and clones the locked commit only when the directory is absent. Codex changes keep their own history and use `codex:` commit messages; after pushing a Codex commit, update the lock file in the main repository.
 
 Use the target wrappers when validating the four installable package outputs independently:
 

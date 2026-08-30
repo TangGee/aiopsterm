@@ -11,7 +11,6 @@ This document records the source ownership, runtime boundaries, and maintainer w
 | Website API | `https://api.aiopsterm.com` |
 | Website source | `https://github.com/TangGee/aiopsterm-web` |
 | Desktop public source | `https://github.com/TangGee/aiopsterm` |
-| Desktop Gitee remote | `https://gitee.com/tanggee2/aiopsterm` |
 | Product support | `support@aiopsterm.com` |
 | Private security reports | `security@aiopsterm.com` |
 | Privacy requests | `privacy@aiopsterm.com` |
@@ -37,7 +36,7 @@ The Worker uses a Cloudflare D1 database whose schema and migrations live under 
 
 | Method and path | Responsibility |
 | --- | --- |
-| `POST /v1/telemetry/active` | Record consented anonymous activity after hashing the installation identifier. |
+| `POST /v1/telemetry/active` | Record anonymous activity for installations that have telemetry enabled after hashing the installation identifier. |
 | `POST /v1/telemetry/revoke` | Remove activity associated with an installation identifier. |
 | `POST /v1/events/download` | Record aggregate download source information. |
 | `GET /v1/releases/stable` | Return the stable release manifest used by the download page. |
