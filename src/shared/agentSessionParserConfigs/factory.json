@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "factory",
+  "source": "factory",
+  "displayName": "Factory Droid",
+  "storage": { "kind": "events" },
+  "rules": [],
+  "fallback": "raw-json"
+}

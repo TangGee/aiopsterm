@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "codebuddy",
+  "source": "codebuddy",
+  "displayName": "CodeBuddy",
+  "storage": { "kind": "events" },
+  "rules": [],
+  "fallback": "raw-json"
+}

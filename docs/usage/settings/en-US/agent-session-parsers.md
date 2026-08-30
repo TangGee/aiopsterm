@@ -2,7 +2,9 @@
 
 This page documents the parser controls under `Settings -> AI Notifications -> Agent Hook Installer`. The question-mark button in the card header opens this document directly.
 
-Rules describe an Agent's session-file structure. The generic aiopsterm parser reads JSONL, evaluates JSON Pointer conditions, extracts content and roles, and creates the conversation cards. Rules cannot execute JavaScript, shell commands, SQL, or dynamic modules.
+Parser rules are UTF-8 JSON files whose root is one parser configuration object. Rules describe an Agent's session-file structure. The generic aiopsterm parser reads JSONL, evaluates JSON Pointer conditions, extracts content and roles, and creates the conversation cards. Rules cannot execute JavaScript, shell commands, SQL, or dynamic modules.
+
+Built-in Agents and imported user rules use the same format, validator, and parser framework. Built-in configuration files live under `src/shared/agentSessionParserConfigs/*.json`. TypeScript only loads and validates configuration, selects user overrides, and executes rules; it does not contain Agent-specific field paths.
 
 ## Settings Actions
 
@@ -113,7 +115,7 @@ The first Codex system prompt is stored at `session_meta.payload.base_instructio
 
 Codex `response_item/message` records use `rolePointer: "$/payload/role"` for `developer`, `user`, and `assistant`. Tool rules use the fixed `tool` role and can read the tool name with `labelPointer: "/payload/name"`.
 
-Importing a rule for a built-in Agent replaces the complete default definition. It does not append one rule. Start a Codex override from this complete default configuration:
+Importing a rule for a built-in Agent replaces the complete default definition. It does not append one rule. Start a Codex override from `src/shared/agentSessionParserConfigs/codex.json` or this complete default configuration:
 
 ```json
 {

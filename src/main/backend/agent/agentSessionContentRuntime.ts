@@ -19,7 +19,7 @@ import type {
 } from '@shared/contracts/managedAiSessionContent'
 import type { AiAgentSessionSource, ManagedAiSessionRecord } from '@shared/contracts/managedAiSessions'
 import type { AgentSessionParserDefinition } from '@shared/contracts/agentSessionParsers'
-import { builtinAgentSessionParserDefinitions } from '@shared/agentSessionParserDefaults'
+import { builtinAgentSessionParserDefinitions } from '@shared/agentSessionParserConfigRuntime'
 import {
   cleanOptionalText,
   cleanText,

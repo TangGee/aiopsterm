@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "grok",
+  "source": "grok",
+  "displayName": "Grok CLI",
+  "storage": { "kind": "events" },
+  "rules": [],
+  "fallback": "raw-json"
+}

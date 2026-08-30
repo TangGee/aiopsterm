@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "id": "claude-code",
+  "source": "claude-code",
+  "displayName": "Claude Code",
+  "storage": {
+    "kind": "jsonl",
+    "paths": ["${HOME}/.claude/projects/**/*.jsonl"]
+  },
+  "rules": [
+    {
+      "id": "plain-message",
+      "match": { "/type": ["user", "assistant"] },
+      "kind": "message",
+      "rolePointer": "/message/role",
+      "contentPointers": ["/message/content"]
+    },
+    {
+      "id": "text-block",
+      "scopePointer": "/message/content/*",
+      "match": { "/type": "text" },
+      "kind": "message",
+      "rolePointer": "$/message/role",
+      "contentPointers": ["/text"]
+    },
+    {
+      "id": "thinking-block",
+      "scopePointer": "/message/content/*",
+      "match": { "/type": "thinking" },
+      "kind": "reasoning",
+      "role": "assistant",
+      "contentPointers": ["/thinking"]
+    },
+    {
+      "id": "tool-use-block",
+      "scopePointer": "/message/content/*",
+      "match": { "/type": ["tool_use", "server_tool_use"] },
+      "kind": "tool call",
+      "role": "tool",
+      "contentPointers": ["/input"],
+      "labelPointer": "/name"
+    },
+    {
+      "id": "tool-result-block",
+      "scopePointer": "/message/content/*",
+      "match": { "/type": "tool_result" },
+      "kind": "tool result",
+      "role": "tool",
+      "contentPointers": ["/content"]
+    },
+    {
+      "id": "agent-result",
+      "match": { "/type": "result" },
+      "kind": "result",
+      "role": "assistant",
+      "contentPointers": ["/result"]
+    }
+  ],
+  "fallback": "raw-json"
+}

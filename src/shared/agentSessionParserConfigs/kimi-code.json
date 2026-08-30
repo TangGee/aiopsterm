@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "kimi-code",
+  "source": "kimi-code",
+  "displayName": "Kimi Code",
+  "storage": { "kind": "events" },
+  "rules": [],
+  "fallback": "raw-json"
+}

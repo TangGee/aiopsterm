@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "pi",
+  "source": "pi",
+  "displayName": "Pi",
+  "storage": { "kind": "events" },
+  "rules": [],
+  "fallback": "raw-json"
+}

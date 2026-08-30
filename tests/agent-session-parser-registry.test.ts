@@ -2,6 +2,8 @@ import { mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { describe, expect, it } from 'vitest'
+import { builtinAgentSessionParserDefinitions } from '../src/shared/agentSessionParserConfigRuntime'
+import codexConfig from '../src/shared/agentSessionParserConfigs/codex.json'
 import type { AgentSessionParserProfile } from '../src/shared/contracts/agentSessionParsers'
 
 const loadRuntime = async () => {
@@ -10,6 +12,12 @@ const loadRuntime = async () => {
 }
 
 describe('agentSessionParserRegistry', () => {
+  it('loads built-in Agents from the same JSON configuration format used by imports', () => {
+    expect(builtinAgentSessionParserDefinitions).toHaveLength(19)
+    expect(new Set(builtinAgentSessionParserDefinitions.map((definition) => definition.source)).size).toBe(19)
+    expect(builtinAgentSessionParserDefinitions.find((definition) => definition.source === 'codex')).toEqual(codexConfig)
+  })
+
   it('imports a custom Agent parser and restores the registry after removal', async () => {
     const runtime = await loadRuntime()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-parser-registry-'))

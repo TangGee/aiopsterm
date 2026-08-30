@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "hermes-agent",
+  "source": "hermes-agent",
+  "displayName": "Hermes Agent",
+  "storage": { "kind": "events" },
+  "rules": [],
+  "fallback": "raw-json"
+}

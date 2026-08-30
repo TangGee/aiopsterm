@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "antigravity",
+  "source": "antigravity",
+  "displayName": "Antigravity",
+  "storage": { "kind": "events" },
+  "rules": [],
+  "fallback": "raw-json"
+}

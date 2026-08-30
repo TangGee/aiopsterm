@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "cursor",
+  "source": "cursor",
+  "displayName": "Cursor Agent",
+  "storage": { "kind": "events" },
+  "rules": [],
+  "fallback": "raw-json"
+}

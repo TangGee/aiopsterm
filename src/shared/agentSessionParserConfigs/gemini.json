@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "gemini",
+  "source": "gemini",
+  "displayName": "Gemini CLI",
+  "storage": { "kind": "events" },
+  "rules": [],
+  "fallback": "raw-json"
+}

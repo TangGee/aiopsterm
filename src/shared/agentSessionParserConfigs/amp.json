@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "amp",
+  "source": "amp",
+  "displayName": "Amp",
+  "storage": { "kind": "events" },
+  "rules": [],
+  "fallback": "raw-json"
+}

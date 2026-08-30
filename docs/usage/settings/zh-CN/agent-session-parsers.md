@@ -2,7 +2,9 @@
 
 本页对应 `设置 -> AI 通知 -> Agent Hook 安装器` 中的会话解析规则功能。点击卡片标题区域右侧的问号按钮可以直接打开本文档。
 
-解析规则只描述 Agent 会话文件的结构。aiopsterm 的通用解析框架负责读取 JSONL、执行 JSON Pointer 匹配、提取内容和角色并生成会话内容卡片。规则不会执行 JavaScript、Shell、SQL 或动态模块。
+解析规则是 UTF-8 JSON 文件，文件根节点是一个解析配置对象。解析规则只描述 Agent 会话文件的结构。aiopsterm 的通用解析框架负责读取 JSONL、执行 JSON Pointer 匹配、提取内容和角色并生成会话内容卡片。规则不会执行 JavaScript、Shell、SQL 或动态模块。
+
+内置 Agent 和用户导入规则使用完全相同的格式、校验器和解析框架。项目内置配置位于 `src/shared/agentSessionParserConfigs/*.json`；TypeScript 只负责装载、校验、选择用户覆盖配置和执行规则，不保存 Agent 专用字段路径。
 
 ## 设置操作
 
@@ -123,7 +125,7 @@ Codex 首条记录的系统提示位于 `session_meta.payload.base_instructions.
 
 Codex 的 `response_item/message` 使用 `rolePointer: "$/payload/role"` 读取 `developer`、`user` 或 `assistant`。工具调用使用固定 `role: "tool"`，并通过 `labelPointer: "/payload/name"` 显示工具名称。
 
-导入内置 Agent 规则会替换整份默认配置，不是只追加一条规则。修改 Codex 时应从下面的完整默认配置开始：
+导入内置 Agent 规则会替换整份默认配置，不是只追加一条规则。修改 Codex 时应从项目中的 `src/shared/agentSessionParserConfigs/codex.json` 或下面的完整默认配置开始：
 
 ```json
 {

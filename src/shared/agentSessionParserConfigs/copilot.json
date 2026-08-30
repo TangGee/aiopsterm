@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "copilot",
+  "source": "copilot",
+  "displayName": "GitHub Copilot",
+  "storage": { "kind": "events" },
+  "rules": [],
+  "fallback": "raw-json"
+}

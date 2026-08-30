@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "qoder",
+  "source": "qoder",
+  "displayName": "Qoder CLI",
+  "storage": { "kind": "events" },
+  "rules": [],
+  "fallback": "raw-json"
+}

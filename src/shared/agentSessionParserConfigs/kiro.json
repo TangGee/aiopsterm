@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "kiro",
+  "source": "kiro",
+  "displayName": "Kiro CLI",
+  "storage": { "kind": "events" },
+  "rules": [],
+  "fallback": "raw-json"
+}

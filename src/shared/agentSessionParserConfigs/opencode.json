@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "opencode",
+  "source": "opencode",
+  "displayName": "OpenCode",
+  "storage": {
+    "kind": "opencode-sqlite"
+  },
+  "rules": [
+    {
+      "id": "text-part",
+      "match": { "/type": ["text", "reasoning"] },
+      "kind": "message",
+      "contentPointers": ["/text"],
+      "editable": true
+    },
+    {
+      "id": "tool-part",
+      "match": { "/type": ["tool", "tool-call", "tool_result"] },
+      "kind": "tool",
+      "role": "tool",
+      "contentPointers": ["/state", "/input", "/output"]
+    }
+  ],
+  "fallback": "raw-json"
+}

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "omp",
+  "source": "omp",
+  "displayName": "OMP",
+  "storage": { "kind": "events" },
+  "rules": [],
+  "fallback": "raw-json"
+}

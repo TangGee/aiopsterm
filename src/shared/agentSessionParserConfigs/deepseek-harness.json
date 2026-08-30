@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "deepseek-harness",
+  "source": "deepseek-harness",
+  "displayName": "DeepSeek Harness",
+  "storage": { "kind": "events" },
+  "rules": [],
+  "fallback": "raw-json"
+}
