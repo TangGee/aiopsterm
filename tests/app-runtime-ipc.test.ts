@@ -161,6 +161,13 @@ describe('app runtime IPC registrar', () => {
     })
 
     backendMocks.openSettingsDocumentation.mockClear()
+    await handlers.get('settings:open-documentation')?.({}, { page: 'agentSessionParsers', locale: 'zh-CN' })
+    expect(backendMocks.openSettingsDocumentation).toHaveBeenCalledWith(runtime, {
+      page: 'agentSessionParsers',
+      locale: 'zh-CN'
+    })
+
+    backendMocks.openSettingsDocumentation.mockClear()
     await handlers.get('settings:open-documentation')?.({}, { page: '../general', locale: 1, documentPath: 2, basePath: null })
     expect(backendMocks.openSettingsDocumentation).toHaveBeenCalledWith(runtime, {})
 

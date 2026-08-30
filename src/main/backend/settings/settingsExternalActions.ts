@@ -47,6 +47,7 @@ const settingsDocumentationFiles: Record<SettingsDocumentationPage, string> = {
   models: 'models.md',
   billing: 'billing.md',
   aiNotifications: 'ai-notifications.md',
+  agentSessionParsers: 'agent-session-parsers.md',
   aiRemoteHostManagement: 'ai-remote-host-management.md',
   commandSecurity: 'command-security.md',
   mcp: 'mcp.md',

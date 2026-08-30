@@ -8,6 +8,7 @@
 - [模型设置](models.md)
 - [计费概览](billing.md)
 - [AI 通知](ai-notifications.md)
+  - [Agent 会话解析规则](agent-session-parsers.md)
 - [主机Agent](ai-remote-host-management.md)
   - [命令安全设置](command-security.md)
   - [MCP 设置](mcp.md)

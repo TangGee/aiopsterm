@@ -16,6 +16,7 @@
 ## Agent Hook 安装器
 
 - 会话管理 Hook：把 aiopsterm 的 Hook Helper 显式写入支持的 Agent 用户级 Hook 配置，用于让左侧 `AI 会话` 面板发现通过 aiopsterm 本地连接终端启动的 AI 会话。
+- 会话解析规则：每个 Agent 可以导入声明式 JSON 规则，用于从本地会话文件提取内容、角色和消息类型；也可以通过“添加 Agent”接入新的只读 JSONL 来源。完整字段和示例见 [Agent 会话解析规则](agent-session-parsers.md)。
 - CLI：显示是否在当前 `PATH` 中检测到对应命令，例如 `codex`、`claude`、`cursor-agent`、`gemini`、`copilot`、`grok`、`opencode`、`codebuddy`、`droid`、`qodercli`、`amp`、`pi`、`omp`、`kiro-cli`、`acli`、`kimi` 或 `dsh`。
 - Hook 配置：安装器只插入带 aiopsterm marker 的命令，不删除其它用户 Hook。
 - Kimi Code：安装器把受标记的 `[[hooks]]` 区块写入 `~/.kimi-code/config.toml`，覆盖会话、回合、权限、工具、完成、失败与退出事件，同时保留用户的模型和其它 Hook 配置。

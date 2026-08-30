@@ -173,10 +173,9 @@ describe('agentSessionContentRuntime', () => {
       expect(listed.ok).toBe(true)
       const contents = listed.data?.records.map((record: ManagedAiSessionContentRecord) => record.content) || []
       expect(listed.data?.records.slice(0, 2)).toEqual([
-        expect.objectContaining({ messageType: 'raw-json', editable: false }),
+        expect.objectContaining({ content: 'base instructions text', role: 'system', messageType: 'system prompt', editable: true }),
         expect.objectContaining({ messageType: 'raw-json', editable: false })
       ])
-      expect(contents[0]).toContain('base instructions text')
       expect(contents[1]).toContain('"summary": "auto"')
       expect(contents.slice(2)).toEqual([
         'developer instructions',

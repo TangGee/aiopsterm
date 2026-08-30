@@ -16,6 +16,7 @@ For operator workflows, see [AI Session Management](../../best-practices/en-US/0
 ## Agent Hook Installer
 
 - Session Management Hook: Writes the aiopsterm Hook Helper into supported agent user-level hook configuration so the `AI Sessions` panel can discover AI sessions launched from aiopsterm local-connection terminals.
+- Session Parser Rules: Each Agent can import a declarative JSON rule that extracts content, roles, and message types from local session files. Add Agent can register a new read-only JSONL source. See [Agent Session Parser Rules](agent-session-parsers.md) for the schema and examples.
 - CLI: Shows whether the matching command is visible in the current `PATH`, such as `codex`, `claude`, `cursor-agent`, `gemini`, `copilot`, `grok`, `opencode`, `codebuddy`, `droid`, `qodercli`, `amp`, `pi`, `omp`, `kiro-cli`, `acli`, `kimi`, or `dsh`.
 - Hook Config: The installer only inserts aiopsterm-marked commands and preserves other user hooks.
 - Kimi Code: The installer adds a marked `[[hooks]]` block to `~/.kimi-code/config.toml` for session, turn, permission, tool, completion, failure, and exit events while preserving model and user hook configuration.

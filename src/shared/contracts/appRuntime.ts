@@ -362,6 +362,7 @@ export type SettingsDocumentationPage =
   | 'models'
   | 'billing'
   | 'aiNotifications'
+  | 'agentSessionParsers'
   | 'aiRemoteHostManagement'
   | 'commandSecurity'
   | 'mcp'

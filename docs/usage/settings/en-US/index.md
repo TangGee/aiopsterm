@@ -8,6 +8,7 @@ The question-mark button next to each settings page title opens the detailed doc
 - [Model Settings](models.md)
 - [Billing Overview](billing.md)
 - [AI Notifications](ai-notifications.md)
+  - [Agent Session Parser Rules](agent-session-parsers.md)
 - [Host Agent](ai-remote-host-management.md)
   - [Command Security Settings](command-security.md)
   - [MCP Settings](mcp.md)

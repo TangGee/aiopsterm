@@ -16,6 +16,7 @@ export const createSettingsWorkspaceModelAiPages = (
 ) => {
   const {
     SettingsCheckbox,
+    SettingsPageHelpButton,
     agentHibernationLimits,
     agentHookInstallerRows,
     automationSnippetRows,
@@ -720,6 +721,7 @@ export const createSettingsWorkspaceModelAiPages = (
               h('small', t('settings.ai.agentHook.subtitle'))
             ]),
             h('div', { class: 'export-mcp-card-actions' }, [
+              h(SettingsPageHelpButton, { helpKey: 'agentSessionParsers' }),
               h(
                 'button',
                 {

@@ -31,7 +31,10 @@ export const builtinAgentSessionParserDefinitions: AgentSessionParserDefinition[
     storage: { kind: 'jsonl', paths: ['${HOME}/.codex/sessions/**/*.jsonl'] },
     fallback: 'raw-json',
     rules: [
-      rule({ id: 'event-message', match: { '/type': 'event_msg', '/payload/type': ['user_message', 'agent_message', 'assistant_message', 'agent_reasoning'] }, kind: 'message', rolePointer: '/payload/role', contentPointers: ['/payload/message', '/payload/text'] }),
+      rule({ id: 'system-prompt', match: { '/type': 'session_meta' }, kind: 'system prompt', role: 'system', contentPointers: ['/payload/base_instructions/text'] }),
+      rule({ id: 'user-event-message', match: { '/type': 'event_msg', '/payload/type': 'user_message' }, kind: 'message', role: 'user', contentPointers: ['/payload/message'] }),
+      rule({ id: 'assistant-event-message', match: { '/type': 'event_msg', '/payload/type': ['agent_message', 'assistant_message'] }, kind: 'message', role: 'assistant', contentPointers: ['/payload/message'] }),
+      rule({ id: 'assistant-event-reasoning', match: { '/type': 'event_msg', '/payload/type': 'agent_reasoning' }, kind: 'reasoning', role: 'assistant', contentPointers: ['/payload/text'] }),
       rule({ id: 'response-message', scopePointer: '/payload/content/*', match: { '/type': ['input_text', 'output_text'] }, kind: 'message', rolePointer: '$/payload/role', contentPointers: ['/text'] }),
       rule({ id: 'function-call', match: { '/type': 'response_item', '/payload/type': 'function_call' }, kind: 'tool call', role: 'tool', contentPointers: ['/payload/arguments'], labelPointer: '/payload/name' }),
       rule({ id: 'custom-tool-call', match: { '/type': 'response_item', '/payload/type': 'custom_tool_call' }, kind: 'tool call', role: 'tool', contentPointers: ['/payload/input'], labelPointer: '/payload/name' }),

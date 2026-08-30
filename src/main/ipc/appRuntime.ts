@@ -40,6 +40,7 @@ const settingsDocumentationPages = new Set<SettingsDocumentationPage>([
   'models',
   'billing',
   'aiNotifications',
+  'agentSessionParsers',
   'aiRemoteHostManagement',
   'commandSecurity',
   'mcp',

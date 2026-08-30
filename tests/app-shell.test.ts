@@ -18228,6 +18228,13 @@ describe('AppShell', () => {
     expect(window.aiops.installAgentHook).toHaveBeenCalledWith({ source: 'codex' })
     expect(store.agentHookInstallers.find((installer) => installer.source === 'codex')?.installed).toBe(true)
     expect(workspace.text()).toContain('已安装')
+
+    vi.mocked(window.aiops.openSettingsDocumentation).mockClear()
+    const parserHelpButton = workspace.find('.agent-hook-installer-card .settings-page-help-button')
+    expect(parserHelpButton.exists()).toBe(true)
+    await parserHelpButton.trigger('click')
+    await flushPromises()
+    expect(window.aiops.openSettingsDocumentation).toHaveBeenCalledWith({ page: 'agentSessionParsers', locale: 'zh-CN' })
   })
 
   it('persists AI hibernation and notification settings from the AI notifications page', async () => {
