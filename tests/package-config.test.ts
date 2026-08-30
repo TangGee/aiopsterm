@@ -105,6 +105,14 @@ describe('package configuration audit', () => {
     expect(args).toContain('--rg-bin')
   })
 
+  it('keeps an existing Codex checkout on the locked source repository', () => {
+    const source = readFileSync('scripts/ensure-codex-source.mjs', 'utf8')
+
+    expect(source).toContain("['remote', 'get-url', 'origin']")
+    expect(source).toContain("['remote', 'add', 'origin', lock.repository]")
+    expect(source).toContain("['remote', 'set-url', 'origin', lock.repository]")
+  })
+
   it('reads the Codex Rust toolchain channel from rust-toolchain TOML', async () => {
     const toolchain = await evalBuildCodexCliModule(`
       import { readCodexRustToolchainFromText } from './scripts/build-codex-cli.mjs'

@@ -17,6 +17,19 @@ if (!existsSync(resolve(codexRoot, '.git'))) {
   execFileSync('git', ['checkout', '--detach', expected], { cwd: codexRoot, stdio: 'inherit' })
 }
 
+let currentRepository = ''
+try {
+  currentRepository = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: codexRoot, encoding: 'utf8' }).trim()
+} catch {
+  execFileSync('git', ['remote', 'add', 'origin', lock.repository], { cwd: codexRoot, stdio: 'inherit' })
+  currentRepository = lock.repository
+}
+
+if (currentRepository !== lock.repository) {
+  execFileSync('git', ['remote', 'set-url', 'origin', lock.repository], { cwd: codexRoot, stdio: 'inherit' })
+  console.log(`[aiopsterm] Codex origin updated from ${currentRepository} to ${lock.repository}`)
+}
+
 const actual = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: codexRoot, encoding: 'utf8' }).trim()
 if (!actual.startsWith(expected)) {
   throw new Error(`Codex source commit mismatch: expected ${expected}, found ${actual}. Update codex-source.json or checkout the locked commit.`)
