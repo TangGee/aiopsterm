@@ -15,7 +15,7 @@ const validRequest = (message) => {
   if (message.action !== 'active' && message.action !== 'revoke') return false
   if (typeof message.endpoint !== 'string' || message.endpoint.length > 512) return false
   if (!message.body || typeof message.body !== 'object' || Array.isArray(message.body)) return false
-  return Number.isInteger(message.timeoutMs) && message.timeoutMs >= 250 && message.timeoutMs <= 2500
+  return Number.isInteger(message.timeoutMs) && message.timeoutMs >= 250 && message.timeoutMs <= 15000
 }
 
 parentPort.on('message', async (message) => {

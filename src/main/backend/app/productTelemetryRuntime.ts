@@ -89,8 +89,8 @@ const utcDay = (date: Date) => date.toISOString().slice(0, 10)
 export const createProductTelemetryRuntime = (options: ProductTelemetryRuntimeOptions) => {
   const initialDelayMs = Math.max(60_000, options.initialDelayMs ?? 60_000)
   const jitterMs = Math.max(0, options.jitterMs ?? 30_000)
-  const requestTimeoutMs = Math.max(250, options.requestTimeoutMs ?? 2_000)
-  const workerTimeoutMs = Math.max(requestTimeoutMs + 250, options.workerTimeoutMs ?? 3_000)
+  const requestTimeoutMs = Math.max(250, options.requestTimeoutMs ?? 10_000)
+  const workerTimeoutMs = Math.max(requestTimeoutMs + 250, options.workerTimeoutMs ?? 12_000)
   const now = options.now || (() => new Date())
   const createId = options.createId || randomUUID
   let timer: NodeJS.Timeout | null = null
