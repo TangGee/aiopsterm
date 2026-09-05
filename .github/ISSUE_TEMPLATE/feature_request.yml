@@ -1,0 +1,48 @@
+name: Feature Request / 功能建议
+description: Suggest an idea or improvement for aiopsterm. 为 aiopsterm 提出新功能或改进建议。
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tell us what you'd like to see. Chinese is fine, English is fine too.
+        欢迎提出你的想法。可以直接用中文填写，也可以使用英文。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Motivation / 问题与动机
+      description: |
+        What problem does this feature solve? What workflow is painful today?
+        这个功能解决什么问题？目前的使用场景中有什么不便？
+      placeholder: I'm always frustrated when ... / 当……时我感到很麻烦
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution / 期望的方案
+      description: |
+        Describe the behavior or UI you'd like. 描述你期望的行为或界面。
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered / 替代方案
+      description: |
+        Any workarounds or alternative designs you've considered. 你考虑过哪些替代方案或临时解决办法？
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context / 补充说明
+      description: |
+        Screenshots, mockups, links, or anything else that helps. 截图、示意、相关链接等任何有帮助的信息。
+    validations:
+      required: false

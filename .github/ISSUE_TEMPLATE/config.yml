@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation / 使用文档
+    url: https://aiopsterm.com/zh-cn/docs
+    about: Usage guides and product documentation. 使用指南与产品文档，提问前建议先查阅。
+  - name: Email Support / 邮件支持
+    url: mailto:support@aiopsterm.com
+    about: For private or account-related questions, email us. 涉及隐私或不便公开的问题，请通过邮件联系。

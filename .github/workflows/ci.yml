@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Audit, typecheck and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Ensure native runtime (node)
+        run: npm run native:ensure:node
+
+      - name: Audit i18n coverage
+        run: npm run audit:i18n
+
+      - name: Audit state ownership
+        run: npm run audit:state-ownership
+
+      - name: Audit best-practices docs
+        run: npm run audit:best-practices-docs
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # `npm test` would re-run the audits above; run vitest directly instead.
+      # E2E (Playwright), live-environment tests, and electron-builder packaging
+      # are intentionally excluded from this workflow.
+      - name: Unit tests (vitest)
+        run: npx vitest run

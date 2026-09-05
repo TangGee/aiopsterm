@@ -1,0 +1,82 @@
+name: Bug Report / 缺陷反馈
+description: Report a reproducible problem in aiopsterm. 报告 aiopsterm 中可复现的问题。
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill in the fields below — Chinese is fine, English is fine too.
+        感谢你花时间反馈问题。可以直接用中文填写，也可以使用英文。
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System / 操作系统
+      description: Which OS are you running aiopsterm on? 你在哪个操作系统上运行 aiopsterm？
+      options:
+        - macOS
+        - Windows
+        - Linux
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS Version / 系统版本
+      description: e.g. macOS 15.2, Windows 11 23H2, Ubuntu 24.04. 例如 macOS 15.2、Windows 11 23H2、Ubuntu 24.04。
+      placeholder: macOS 15.2
+    validations:
+      required: true
+
+  - type: input
+    id: app-version
+    attributes:
+      label: App Version / 应用版本
+      description: |
+        Find it in Settings → About or the app menu. 在「设置 → 关于」或应用菜单中查看版本号。
+      placeholder: 0.1.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro-steps
+    attributes:
+      label: Steps to Reproduce / 复现步骤
+      description: |
+        List the exact steps so we can reproduce the problem.
+        请列出可稳定复现问题的具体操作步骤。
+      placeholder: |
+        1. Open ... 打开……
+        2. Click ... 点击……
+        3. See error ... 出现错误……
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior / 期望行为
+      description: What did you expect to happen? 你期望发生什么？
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior / 实际行为
+      description: What actually happened? Include screenshots if helpful. 实际发生了什么？方便的话请附截图。
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / 日志
+      description: |
+        Paste relevant logs or console output. Please redact credentials, host names and private paths.
+        粘贴相关日志或控制台输出。请注意脱敏：不要包含凭据、主机名或私有路径。
+      render: shell
+    validations:
+      required: false
