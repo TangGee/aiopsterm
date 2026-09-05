@@ -63,7 +63,7 @@ Per-tool enabled state is stored separately by aiopsterm, so editing a server co
 
 ## Filesystem Scope
 
-`@modelcontextprotocol/server-filesystem` works on the local filesystem of the process that starts it. In aiopsterm, that means the app host running the MCP server, for example `/home/tlinux` when the configured argument is `/home/tlinux`.
+`@modelcontextprotocol/server-filesystem` works on the local filesystem of the process that starts it. In aiopsterm, that means the app host running the MCP server, for example `/home/tester` when the configured argument is `/home/tester`.
 
 It does not use aiopsterm's SSH/SFTP asset connections, does not attach to the active terminal session, and does not follow a manual `relay ssh -> ssh target` chain. For files on a relay-connected remote shell, use terminal commands in that shell, or a purpose-built aiopsterm MCP server that explicitly bridges to a known asset SFTP channel or terminal session.
 

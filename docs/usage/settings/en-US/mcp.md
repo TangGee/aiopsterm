@@ -35,7 +35,7 @@ This page lives under `Settings -> Host Agent -> MCP`. It manages MCP Servers, T
 
 ## Filesystem Scope
 
-`@modelcontextprotocol/server-filesystem` only accesses the local filesystem of the process that starts the MCP server. For example, when the configured argument is `/home/tlinux`, it accesses `/home/tlinux` on the machine running aiopsterm.
+`@modelcontextprotocol/server-filesystem` only accesses the local filesystem of the process that starts the MCP server. For example, when the configured argument is `/home/tester`, it accesses `/home/tester` on the machine running aiopsterm.
 
 It does not use aiopsterm SSH/SFTP asset connections and does not bind to the active terminal's remote shell. After a manual `relay ssh -> ssh target` hop, filesystem MCP still cannot see files on the final target. Use shell commands in that terminal, or a purpose-built aiopsterm MCP server that explicitly bridges to an asset SFTP channel or terminal session.
 

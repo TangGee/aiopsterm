@@ -2,7 +2,7 @@
 
 ## Evidence
 
-- Source visual truth: `/home/tlinux/Pictures/Screenshots/Screenshot from 2026-07-12 20-31-30.png`
+- Source visual truth: `/home/tester/Pictures/Screenshots/Screenshot from 2026-07-12 20-31-30.png`
 - Implementation screenshot: `test-results/design-qa/agents-layout-implemented-1330x760.png`
 - Full-view comparison: `test-results/design-qa/agents-layout-full-comparison.png`
 - Focused left-shell comparison: `test-results/design-qa/agents-layout-left-focus-comparison.png`
@@ -38,8 +38,8 @@ No P3 item is required for this handoff.
 
 ### Evidence
 
-- Source Command-card issue: `/home/tlinux/Pictures/Screenshots/Screenshot from 2026-07-12 21-56-39.png`
-- Source context-popup issue: `/home/tlinux/Pictures/Screenshots/Screenshot from 2026-07-12 21-58-25.png`
+- Source Command-card issue: `/home/tester/Pictures/Screenshots/Screenshot from 2026-07-12 21-56-39.png`
+- Source context-popup issue: `/home/tester/Pictures/Screenshots/Screenshot from 2026-07-12 21-58-25.png`
 - Fixed Command card: `test-results/design-qa/ai-panel-command-action-fixed.png`
 - Fixed context popup: `test-results/design-qa/ai-panel-context-popup-fixed.png`
 - Viewport: `1344 x 756`
@@ -68,7 +68,7 @@ final result: passed
 
 ### Evidence
 
-- Source issue: `/home/tlinux/Pictures/Screenshots/Screenshot from 2026-07-14 14-23-45.png`
+- Source issue: `/home/tester/Pictures/Screenshots/Screenshot from 2026-07-14 14-23-45.png`
 - Fixed production Electron state: `test-results/design-qa/codex-bind-responsive-fixed.png`
 - Viewport: `2016 x 1134`
 - State: a local terminal is bound to Codex after the target picker closes; the right pane reports `Codex CLI 已连接` and renders the threaded terminal.
@@ -88,7 +88,7 @@ final result: passed
 
 ### Evidence
 
-- Source issue: `/home/tlinux/Pictures/Screenshots/Screenshot from 2026-07-12 23-22-09.png`
+- Source issue: `/home/tester/Pictures/Screenshots/Screenshot from 2026-07-12 23-22-09.png`
 - Fixed production Electron state: `test-results/design-qa/ai-panel-context-selected-row-fixed.png`
 - State: the main context menu is open after selecting `115.191.41.79`, with the selected context chip visible below the popup.
 

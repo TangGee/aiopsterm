@@ -71,7 +71,7 @@ describe('platform runtime helpers', () => {
       '/tmp/aiopsterm/control/aiopsterm-control-42.sock'
     )
     expect(platformSocketPath(
-      '/Users/tangyumin/Library/Application Support/aiopsterm/profiles/primary-profile-with-long-name',
+      '/Users/tester/Library/Application Support/aiopsterm/profiles/primary-profile-with-long-name',
       'aiopsterm-agent-sessions',
       { platform: 'darwin', pid: 80015, uid: 501, directory: 'agent-sessions' }
     )).toBe('/tmp/aiopsterm-501/aiopsterm-agent-sessions-80015.sock')
@@ -81,7 +81,7 @@ describe('platform runtime helpers', () => {
       { platform: 'linux', pid: 80016, uid: 1000, directory: 'agent-sessions' }
     )).toBe('/tmp/aiopsterm-1000/aiopsterm-agent-sessions-80016.sock')
     expect(platformSocketPath(
-      '/Users/tangyumin/Library/Application Support/aiopsterm/profiles/primary-profile-with-long-name',
+      '/Users/tester/Library/Application Support/aiopsterm/profiles/primary-profile-with-long-name',
       'aiopsterm-external-codex',
       { platform: 'darwin', uid: 501, directory: 'external-codex-mcp', stable: true }
     )).toMatch(/^\/tmp\/aiopsterm-501\/aiopsterm-external-codex-[a-f0-9]{12}\.sock$/)

@@ -5,6 +5,7 @@ release/
 test-results/
 playwright-report/
 *.tsbuildinfo
+electron.vite.config.*.mjs
 .DS_Store
 npm-debug.log*
 aiopsterm-state.db

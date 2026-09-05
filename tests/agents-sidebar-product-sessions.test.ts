@@ -125,8 +125,8 @@ describe('AgentsSidebar product sessions', () => {
             surface: 'codex',
             title: 'Local terminal',
             isOpen: false,
-            projectRoot: '/home/tlinux',
-            lastKnownCwd: '/home/tlinux',
+            projectRoot: '/home/tester',
+            lastKnownCwd: '/home/tester',
             target: { kind: 'local', label: 'Local terminal' },
             createdAt: 100,
             updatedAt: 200
@@ -149,7 +149,7 @@ describe('AgentsSidebar product sessions', () => {
     const codex = wrapper.find('[data-session-id="codex-local"]')
     expect(codex.find('.conversation-title').text()).toBe('Codex CLI')
     expect(codex.find('.product-session-binding').text()).toBe('Local terminal')
-    expect(codex.find('.product-session-scope').text()).toBe('/home/tlinux')
+    expect(codex.find('.product-session-scope').text()).toBe('/home/tester')
 
     const database = wrapper.find('[data-session-id="database-main"]')
     expect(database.find('.conversation-title').text()).toBe('main')

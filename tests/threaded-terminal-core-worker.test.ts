@@ -223,7 +223,7 @@ describe('threadedTerminalCoreWorker', () => {
     expect(title).toEqual({ type: 'title', terminalId: createOptions().terminalId, title: 'Build active' })
 
     const titleCount = messages.filter((message) => message.type === 'title').length
-    send({ type: 'data', terminalId: createOptions().terminalId, data: '\x1b]2;root@tlinux:~\x07' })
+    send({ type: 'data', terminalId: createOptions().terminalId, data: '\x1b]2;root@dev-host:~\x07' })
     await new Promise((resolve) => setTimeout(resolve, 30))
     expect(messages.filter((message) => message.type === 'title')).toHaveLength(titleCount)
 

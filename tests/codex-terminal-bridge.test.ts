@@ -633,14 +633,14 @@ describe('Codex terminal bridge runtime', () => {
         id: 'terminal-echo',
         kind: 'local',
         host: '127.0.0.1',
-        cwd: '/home/tlinux',
+        cwd: '/home/tester',
         window: {} as never,
         target: {
           kind: 'local',
           sessionId: 'terminal-echo',
           label: '127.0.0.1',
           host: '127.0.0.1',
-          cwd: '/home/tlinux'
+          cwd: '/home/tester'
         },
         write: (data: string | Buffer) => writes.push(String(data))
       })
@@ -651,7 +651,7 @@ describe('Codex terminal bridge runtime', () => {
         id: 'request-echo',
         method: 'run_command',
         params: {
-          command: 'echo "created:"; cat /home/tlinux/loop1111.sh',
+          command: 'echo "created:"; cat /home/tester/run-loop.sh',
           commandId: 'cmd-echo',
           timeoutMs: 5000
         }
@@ -661,16 +661,16 @@ describe('Codex terminal bridge runtime', () => {
       expect(
         bridge.filterCodexTerminalBridgeDisplayData(
           'terminal-echo',
-          'tlinux@tlinux:~$ if "${SHELL:-sh}" -c \'echo "created:"; cat /home/tlinux/loop1111.sh\'; then __aiopsterm_status=0; else __aiopsterm_status=$?; fi; echo \'__AIOPSTERM_CODEX_END_cmd-echo__\':$__aiopsterm_status\r\n'
+          'tester@dev-host:~$ if "${SHELL:-sh}" -c \'echo "created:"; cat /home/tester/run-loop.sh\'; then __aiopsterm_status=0; else __aiopsterm_status=$?; fi; echo \'__AIOPSTERM_CODEX_END_cmd-echo__\':$__aiopsterm_status\r\n'
         )
-      ).toBe('tlinux@tlinux:~$ echo "created:"; cat /home/tlinux/loop1111.sh\r\n')
+      ).toBe('tester@dev-host:~$ echo "created:"; cat /home/tester/run-loop.sh\r\n')
       expect(bridge.filterCodexTerminalBridgeDisplayData('terminal-echo', 'created:\r\n#!/bin/bash\r\n')).toBe('created:\r\n#!/bin/bash\r\n')
       expect(
         bridge.filterCodexTerminalBridgeDisplayData(
           'terminal-echo',
-          "__AIOPSTERM_CODEX_END_cmd-echo__:0\r\ntlinux@tlinux:~$ "
+          "__AIOPSTERM_CODEX_END_cmd-echo__:0\r\ntester@dev-host:~$ "
         )
-      ).toBe('tlinux@tlinux:~$ ')
+      ).toBe('tester@dev-host:~$ ')
 
       bridge.appendCodexTerminalBridgeData(
         'terminal-echo',
@@ -770,14 +770,14 @@ describe('Codex terminal bridge runtime', () => {
         id: 'terminal-immediate',
         kind: 'local',
         host: '127.0.0.1',
-        cwd: '/home/tlinux',
+        cwd: '/home/tester',
         window: {} as never,
         target: {
           kind: 'local',
           sessionId: 'terminal-immediate',
           label: '127.0.0.1',
           host: '127.0.0.1',
-          cwd: '/home/tlinux'
+          cwd: '/home/tester'
         },
         write: (data: string | Buffer) => writes.push(String(data))
       })
@@ -788,14 +788,14 @@ describe('Codex terminal bridge runtime', () => {
         id: 'request-immediate',
         method: 'run_command',
         params: {
-          command: '/home/tlinux/loop1111.sh',
+          command: '/home/tester/run-loop.sh',
           commandId: 'cmd-immediate',
           mode: 'return_immediately',
           timeoutMs: 5000
         }
       })
 
-      expect(writes).toEqual(['/home/tlinux/loop1111.sh\n'])
+      expect(writes).toEqual(['/home/tester/run-loop.sh\n'])
       expect(writes[0]).not.toContain('__AIOPSTERM_CODEX_START')
       expect(writes[0]).not.toContain('__aiopsterm_status')
       expect(response).toEqual(
@@ -807,7 +807,7 @@ describe('Codex terminal bridge runtime', () => {
           }),
           data: expect.objectContaining({
             commandId: 'cmd-immediate',
-            command: '/home/tlinux/loop1111.sh',
+            command: '/home/tester/run-loop.sh',
             mode: 'return_immediately',
             output: '',
             exitCode: null,
@@ -831,13 +831,13 @@ describe('Codex terminal bridge runtime', () => {
         id: 'terminal-background',
         kind: 'local',
         host: '127.0.0.1',
-        cwd: '/home/tlinux/project',
+        cwd: '/home/tester/project',
         window: {} as never,
         target: {
           kind: 'local',
           sessionId: 'terminal-background',
           label: 'Local terminal',
-          cwd: '/home/tlinux/project'
+          cwd: '/home/tester/project'
         },
         write: (data: string | Buffer) => writes.push(String(data)),
         runBackgroundCommand: async (options: Record<string, unknown>) => {
@@ -868,7 +868,7 @@ describe('Codex terminal bridge runtime', () => {
       expect(backgroundCalls).toEqual([
         expect.objectContaining({
           command: 'pwd',
-          cwd: '/home/tlinux/project',
+          cwd: '/home/tester/project',
           timeoutMs: 5000
         })
       ])
@@ -901,13 +901,13 @@ describe('Codex terminal bridge runtime', () => {
       bridge.registerCodexTerminalBridgeSession({
         id: 'terminal-background-invalid',
         kind: 'local',
-        cwd: '/home/tlinux',
+        cwd: '/home/tester',
         window: {} as never,
         target: {
           kind: 'local',
           sessionId: 'terminal-background-invalid',
           label: 'Local terminal',
-          cwd: '/home/tlinux'
+          cwd: '/home/tester'
         },
         write: (data: string | Buffer) => writes.push(String(data)),
         runBackgroundCommand: async () => {

@@ -6527,7 +6527,7 @@ describe('AppShell', () => {
       {
         id: 'rendered-command-output',
         role: 'assistant',
-        text: '```text\nroot@tlinux:~# ps -eo pid,pcpu,comm\n53263 1.9 systemd\n```',
+        text: '```text\nroot@dev-host:~# ps -eo pid,pcpu,comm\n53263 1.9 systemd\n```',
         say: 'command_output',
         state: 'done'
       }
@@ -6547,14 +6547,14 @@ describe('AppShell', () => {
     expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('PID: 53263\n用户: root\n进程: systemd')
     expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('代码已复制')
 
-    const commandOutputMessage = wrapper.findAll('.message.assistant').find((message) => message.text().includes('root@tlinux:~# ps -eo pid,pcpu,comm'))!
+    const commandOutputMessage = wrapper.findAll('.message.assistant').find((message) => message.text().includes('root@dev-host:~# ps -eo pid,pcpu,comm'))!
     expect(commandOutputMessage.find('[data-testid="ai-command-output-renderer"]').exists()).toBe(true)
     expect(commandOutputMessage.find('[data-testid="ai-command-output-text"]').text()).toContain('53263 1.9 systemd')
     expect(commandOutputMessage.text()).toContain('OUTPUT')
     expect(commandOutputMessage.text()).not.toContain('```text')
     await commandOutputMessage.find('[data-testid="ai-command-output-copy"]').trigger('click')
     await flushPromises()
-    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('root@tlinux:~# ps -eo pid,pcpu,comm\n53263 1.9 systemd')
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('root@dev-host:~# ps -eo pid,pcpu,comm\n53263 1.9 systemd')
     expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('输出已复制')
 
     await assistantMessage!.find('[data-testid="ai-message-to-knowledge"]').trigger('click')
@@ -11438,11 +11438,11 @@ describe('AppShell', () => {
 
     vi.mocked(window.aiops.writeTerminal).mockClear()
     vi.mocked(window.aiops.writeRuntimeLog!).mockClear()
-    store.appendTerminalOutput('test-session-local', 'Welcome to Ubuntu 24.04 LTS\r\nroot@tlinux:~# ')
-    terminalAfterReconnect.write('Welcome to Ubuntu 24.04 LTS\r\nroot@tlinux:~# ')
+    store.appendTerminalOutput('test-session-local', 'Welcome to Ubuntu 24.04 LTS\r\nroot@dev-host:~# ')
+    terminalAfterReconnect.write('Welcome to Ubuntu 24.04 LTS\r\nroot@dev-host:~# ')
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
-    expect(terminalAfterReconnect.write).toHaveBeenCalledWith('Welcome to Ubuntu 24.04 LTS\r\nroot@tlinux:~# ')
+    expect(terminalAfterReconnect.write).toHaveBeenCalledWith('Welcome to Ubuntu 24.04 LTS\r\nroot@dev-host:~# ')
     const clearCallsBeforeInput = terminalAfterReconnect.clear.mock.calls.length
     store.startMacroRecording(store.activePanelId)
     terminalAfterReconnect.emitData('pwd\n')
@@ -11450,7 +11450,7 @@ describe('AppShell', () => {
     expect(window.aiops.writeTerminal).toHaveBeenCalledWith('test-session-local', 'pwd\n')
     expect(store.recordedCommands).toEqual(['pwd'])
     expect(terminalAfterReconnect.clear.mock.calls).toHaveLength(clearCallsBeforeInput)
-    expect(terminalAfterReconnect.write).not.toHaveBeenCalledWith(expect.stringContaining('root@tlinux:~# pWelcome'))
+    expect(terminalAfterReconnect.write).not.toHaveBeenCalledWith(expect.stringContaining('root@dev-host:~# pWelcome'))
     expect(terminalAfterReconnect.scrollToBottom).toHaveBeenCalled()
     expect(vi.mocked(window.aiops.writeRuntimeLog!).mock.calls.some(([level, event]) =>
       level === 'debug' && ['renderer.terminal-input.write-request', 'renderer.terminal-input.write-accepted'].includes(String(event))

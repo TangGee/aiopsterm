@@ -476,7 +476,7 @@ describe('terminalWorkspaceViewRuntime', () => {
     expect(panel.title).toBe('ignored control Claude Code')
     expect(panel.titleSource).toBe('auto')
 
-    terminal.titleHandler?.('root@tlinux:~')
+    terminal.titleHandler?.('root@dev-host:~')
     expect(panel.title).toBe('ignored control Claude Code')
 
     panel.title = 'Pinned name'

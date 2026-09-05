@@ -35,7 +35,7 @@
 
 ## 文件系统范围
 
-`@modelcontextprotocol/server-filesystem` 只访问启动 MCP server 的本机文件系统，例如配置参数是 `/home/tlinux` 时，它访问的是 aiopsterm 所在机器的 `/home/tlinux`。
+`@modelcontextprotocol/server-filesystem` 只访问启动 MCP server 的本机文件系统，例如配置参数是 `/home/tester` 时，它访问的是 aiopsterm 所在机器的 `/home/tester`。
 
 它不会走 aiopsterm 的 SSH/SFTP 资产连接，也不会自动绑定当前终端里的远端 shell；手工 `relay ssh -> 再 ssh` 到目标机后，filesystem MCP 仍然看不到目标机文件。此类场景应使用当前终端里的 `cat`、`sed`、`ls` 等 shell 命令，或后续专门实现能桥接资产 SFTP/终端会话的 aiopsterm MCP server。
 

@@ -152,10 +152,10 @@ testing the real asset refresh integration. The VM disk and JumpServer data are
 stored on the internal Samsung SSD at:
 
 ```text
-/media/tlinux/0e309940-ef14-4090-84c0-346ff5b89a2d/jumpserver-lab
+/media/tester/0e309940-ef14-4090-84c0-346ff5b89a2d/jumpserver-lab
 ```
 
-Do not move this lab to `/media/tlinux/sdd`; that mount is a slower removable
+Do not move this lab to `/media/tester/sdd`; that mount is a slower removable
 disk. The lab runs in a 4 vCPU, 8 GiB QEMU/KVM virtual machine so it does not
 consume the host Docker data directory. Its host ports are bound to loopback
 only:
@@ -167,9 +167,9 @@ only:
 Use the lab controller to manage and inspect it:
 
 ```bash
-/media/tlinux/0e309940-ef14-4090-84c0-346ff5b89a2d/jumpserver-lab/labctl.sh start
-/media/tlinux/0e309940-ef14-4090-84c0-346ff5b89a2d/jumpserver-lab/labctl.sh status
-/media/tlinux/0e309940-ef14-4090-84c0-346ff5b89a2d/jumpserver-lab/labctl.sh stop
+/media/tester/0e309940-ef14-4090-84c0-346ff5b89a2d/jumpserver-lab/labctl.sh start
+/media/tester/0e309940-ef14-4090-84c0-346ff5b89a2d/jumpserver-lab/labctl.sh status
+/media/tester/0e309940-ef14-4090-84c0-346ff5b89a2d/jumpserver-lab/labctl.sh stop
 ```
 
 The controller status check expects HTTP 200 from the Web entry point and HTTP
