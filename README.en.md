@@ -15,7 +15,7 @@ The complete documentation is included with desktop packages and can also be rea
 - [Host Agent](docs/usage/best-practices/en-US/03-host-agent.md)
 - [AI session management](docs/usage/best-practices/en-US/05-ai-sessions.md)
 - [Quick Commands and macros](docs/usage/best-practices/en-US/06-quick-commands.md)
-- [Complete keyboard shortcut reference](docs/usage/best-practices/en-US/07-shortcuts.md)
+- [Keyboard shortcuts and built-in commands](docs/usage/best-practices/en-US/07-shortcuts.md)
 - [Troubleshooting](docs/usage/best-practices/en-US/17-troubleshooting.md)
 
 ## Install And Develop

@@ -8,6 +8,21 @@ Click the **Settings gear** at the lower-left corner, then select **Shortcuts** 
 
 ![Shortcut settings](../images/en-US/settings-shortcuts.png)
 
+## Most-used Shortcuts
+
+| Shortcut | Action | Notes |
+| --- | --- | --- |
+| `Ctrl+Shift+T` | New local terminal | Configurable; inherits the current cwd when opened from a local terminal |
+| `Ctrl+Shift+Y` | Fork the current SSH channel | Available only when the current terminal is a forkable SSH channel |
+| `Ctrl+Shift+W` | Close the current panel | Configurable |
+| `Ctrl+Tab` | Open Recent Panels | Searches terminals, knowledge documents, AI sessions, and project files |
+| `Ctrl+Shift+A` | Show or hide the AI sidebar | Configurable |
+| `Ctrl+Shift+P` | Open Quick Commands | Opens user-configured commands and macros |
+| `Ctrl+Shift+K` | Open inline AI Command | Generates a command for the current terminal |
+| `Ctrl+Shift+M` | Open file management | Opens the file workspace for the current SSH host |
+
+`Ctrl+T` by itself is not aiopsterm's New Terminal shortcut. Plain `Ctrl+letter` combinations go to the shell while a terminal has focus; the default for New Terminal is `Ctrl+Shift+T`. If an app action is remapped to `Ctrl+T`, it works outside terminal areas, while terminal panes still send it to the shell first.
+
 ## Why Terminal Shortcuts Use Modifiers
 
 While a terminal is focused, `Ctrl+A/C/D/E/K/L` must reach readline, vim, tmux, and remote TUIs. aiopsterm therefore places copy, paste, new-terminal, and similar app actions under `Ctrl+Shift` or `Ctrl+Alt`. macOS labels follow the configured binding; operating-system key-repeat behavior is separate from application shortcuts.
@@ -31,27 +46,27 @@ The actions below can be remapped under **Settings -> Shortcuts**. The Settings 
 
 ## Terminal Shortcuts
 
-The bindings below apply to terminal surfaces and currently cannot be remapped on the Shortcuts page. `Primary` means `Ctrl` on Windows and Linux, and `Cmd` on macOS. `Alt` is also labeled `Option` on macOS keyboards.
+The bindings below apply to terminal surfaces and currently cannot be remapped on the Shortcuts page. `Option` is the macOS label for `Alt`; fixed terminal shortcuts on macOS also accept their corresponding `Ctrl` combinations.
 
-| Action | Default shortcut |
-| --- | --- |
-| Copy / paste | `Ctrl+Shift+C` / `Ctrl+Shift+V`; macOS also supports `Cmd+C` / `Cmd+V` |
-| Open search | `Primary+Alt+F` |
-| Next / previous search result | `Primary+Alt+G` / `Primary+Alt+H` |
-| Clear search highlights | `Primary+Alt+J` |
-| New / close window | `Primary+Shift+N` / `Primary+Shift+Q` |
-| Fork the current SSH channel | `Primary+Shift+Y` |
-| Open inline AI Command | `Primary+Shift+K` |
-| Clear the terminal | `Primary+Shift+L` |
-| Open file management for the current host | `Primary+Shift+M` |
-| Increase / decrease / reset font size | `Primary+=` / `Primary+-` / `Primary+0` |
-| Switch to the previous / next terminal tab | `Primary+PageUp` / `Primary+PageDown` |
-| Move the current tab left / right | `Primary+Shift+PageUp` / `Primary+Shift+PageDown` |
-| Scroll up / down one line | `Primary+Shift+Up` / `Primary+Shift+Down` |
-| Scroll up / down one page | `Shift+PageUp` / `Shift+PageDown` |
-| Scroll to the top / bottom | `Shift+Home` / `Shift+End` |
-| Toggle full screen | `F11` |
-| Reconnect a closed or failed terminal | `Enter` |
+| Action | Windows / Linux | macOS |
+| --- | --- | --- |
+| Copy / paste | `Ctrl+Shift+C` / `Ctrl+Shift+V` | `Cmd+C` / `Cmd+V` |
+| Open search | `Ctrl+Alt+F` | `Cmd+Option+F` |
+| Next / previous search result | `Ctrl+Alt+G` / `Ctrl+Alt+H` | `Cmd+Option+G` / `Cmd+Option+H` |
+| Clear search highlights | `Ctrl+Alt+J` | `Cmd+Option+J` |
+| New / close window | `Ctrl+Shift+N` / `Ctrl+Shift+Q` | `Cmd+Shift+N` / `Cmd+Shift+Q` |
+| Fork the current SSH channel | `Ctrl+Shift+Y` | `Cmd+Shift+Y` |
+| Open inline AI Command | `Ctrl+Shift+K` | `Cmd+Shift+K` |
+| Clear the terminal | `Ctrl+Shift+L` | `Cmd+Shift+L` |
+| Open file management for the current host | `Ctrl+Shift+M` | `Cmd+Shift+M` |
+| Increase / decrease / reset font size | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | `Cmd+=` / `Cmd+-` / `Cmd+0` |
+| Switch to the previous / next terminal tab | `Ctrl+PageUp` / `Ctrl+PageDown` | `Cmd+PageUp` / `Cmd+PageDown` |
+| Move the current tab left / right | `Ctrl+Shift+PageUp` / `Ctrl+Shift+PageDown` | `Cmd+Shift+PageUp` / `Cmd+Shift+PageDown` |
+| Scroll up / down one line | `Ctrl+Shift+Up` / `Ctrl+Shift+Down` | `Cmd+Shift+Up` / `Cmd+Shift+Down` |
+| Scroll up / down one page | `Shift+PageUp` / `Shift+PageDown` | `Shift+PageUp` / `Shift+PageDown` |
+| Scroll to the top / bottom | `Shift+Home` / `Shift+End` | `Shift+Home` / `Shift+End` |
+| Toggle full screen | `F11` | `F11` |
+| Reconnect a closed or failed terminal | `Enter` | `Enter` |
 
 `Ctrl+Shift+T` and `Ctrl+Shift+W` also follow the configurable shortcut settings. Once either action is remapped, its old default no longer triggers it.
 
@@ -59,9 +74,54 @@ The bindings below apply to terminal surfaces and currently cannot be remapped o
 
 | Surface | Action | Windows / Linux | macOS |
 | --- | --- | --- | --- |
-| Files, Knowledge, and JSON editors | Save | `Ctrl+S` | `Cmd+S` |
+| Files, Knowledge, session-content, and JSON editors | Save | `Ctrl+S` | `Cmd+S` |
+| Text editors | Undo / redo | `Ctrl+Z` / `Ctrl+Y` | `Cmd+Z` / `Cmd+Shift+Z` |
+| Text editors | Cut / copy / paste | `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | `Cmd+X` / `Cmd+C` / `Cmd+V` |
+| Text editors | Select all | `Ctrl+A` | `Cmd+A` |
+| Text editors | Find / replace | `Ctrl+F` / `Ctrl+H` | `Cmd+F` / `Option+Cmd+F` |
 | SQL editor | Run statement | `Ctrl+Enter` | `Cmd+Enter` |
-| SQL editor | Find / replace | `Ctrl+F` / `Ctrl+H` | `Cmd+F` / `Cmd+H` |
+| SQL editor | Save | `Ctrl+S` | `Cmd+S` |
+
+## AI Input And Search
+
+| Surface | Key | Action |
+| --- | --- | --- |
+| Classic AI or DB AI composer | `Enter` | Send the message |
+| Classic AI or DB AI composer | `Shift+Enter` | Insert a new line |
+| Classic AI composer | `Ctrl+Enter` / `Cmd+Enter` | Send the message |
+| Classic AI composer | `@` | Open the context picker |
+| Classic AI composer | `/` | Open the command picker |
+| Classic AI conversation | `Ctrl+F` / `Cmd+F` | Search the current conversation |
+| Conversation search field | `Enter` / `Shift+Enter` | Next / previous match |
+| Popup, menu, or edit state | `Escape` | Close, go back, or cancel the current operation |
+
+## Built-in Terminal Helper Commands
+
+Local terminals created by aiopsterm automatically add the following commands to `PATH`. These are command-line shortcuts, not keyboard combinations. They are not installed in remote SSH shells.
+
+| Command | Purpose | Example |
+| --- | --- | --- |
+| `aio` | Preferred workspace control command | `aio terminal list` |
+| `aictl` | Compatibility alias for `aio` | `aictl context` |
+| `aiopsterm-control` | Full-name compatibility entry for `aio` | `aiopsterm-control help` |
+| `aiopen` | Open one or more local text files in the main workspace | `aiopen README.md src/main.ts` |
+| `aiossh` | Connect to or locate a managed host | `aiossh prod-api` |
+| `aiswitch` | Switch to a managed host, equivalent to `aio host switch` | `aiswitch prod-api` |
+| `aioic` | Close panels confirmed idle under the configured timeout | `aioic` |
+| `aiobc` | Immediately close background panels and keep the current panel | `aiobc` |
+
+The correct command names are `aiopen` and `aiossh`; there is no `aioopen` or `aiopssh` command. Run `aio help` for the complete command tree and `aio recipes` for copyable examples. The detailed [Control CLI Tutorial](../../control-cli-tutorial.md) covers parameters and workflows.
+
+Common examples:
+
+```bash
+aiopen ./README.md
+aiossh prod-api
+aio terminal read-screen --lines 80
+aio settings open --target shortcuts
+aioic
+aiobc
+```
 
 Treat the current Settings page and the current version's interface hints as authoritative. Configurable bindings may have been changed, and the operating system or desktop environment may reserve some combinations.
 

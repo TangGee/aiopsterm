@@ -12,7 +12,7 @@ This task-oriented guide starts with a product tour and then follows real workfl
 | 04 | [Agents 产品会话](zh-CN/04-agents-product-sessions.md) | [Agents Product Sessions](en-US/04-agents-product-sessions.md) |
 | 05 | [AI 会话管理](zh-CN/05-ai-sessions.md) | [AI Session Management](en-US/05-ai-sessions.md) |
 | 06 | [快捷命令与宏](zh-CN/06-quick-commands.md) | [Quick Commands And Macros](en-US/06-quick-commands.md) |
-| 07 | [快捷键](zh-CN/07-shortcuts.md) | [Keyboard Shortcuts](en-US/07-shortcuts.md) |
+| 07 | [快捷键与内置命令](zh-CN/07-shortcuts.md) | [Keyboard Shortcuts And Built-in Commands](en-US/07-shortcuts.md) |
 | 08 | [导出 MCP](zh-CN/08-export-mcp.md) | [Export MCP](en-US/08-export-mcp.md) |
 | 09 | [第三方 MCP Server](zh-CN/09-third-party-mcp.md) | [Third-party MCP Servers](en-US/09-third-party-mcp.md) |
 | 10 | [文件管理](zh-CN/10-files.md) | [File Management](en-US/10-files.md) |

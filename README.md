@@ -15,7 +15,7 @@ aiopsterm 是面向 AI 运维的桌面终端，将终端、SSH/跳板机、主�
 - [主机 Agent](docs/usage/best-practices/zh-CN/03-host-agent.md)
 - [AI 会话管理](docs/usage/best-practices/zh-CN/05-ai-sessions.md)
 - [快捷命令与宏](docs/usage/best-practices/zh-CN/06-quick-commands.md)
-- [完整快捷键参考](docs/usage/best-practices/zh-CN/07-shortcuts.md)
+- [快捷键与内置命令参考](docs/usage/best-practices/zh-CN/07-shortcuts.md)
 - [故障排查](docs/usage/best-practices/zh-CN/17-troubleshooting.md)
 
 ## 安装与开发
