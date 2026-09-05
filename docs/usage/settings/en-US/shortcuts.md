@@ -21,3 +21,5 @@ Shortcut changes affect global operations across windows, terminals, and AI pane
 - `Ctrl+Shift+T` and New Terminal in the terminal context menu open a new local shell. When invoked from a connected local terminal, the new shell inherits the current working directory. When invoked from an SSH terminal, it does not implicitly clone the remote connection; use the explicit Clone or Fork SSH action instead.
 - `Ctrl+Shift+Y` runs Fork SSH when the current terminal is a forkable SSH channel. The terminal context menu also shows `Fork SSH`. SSH sessions established through a jump host or relay shell preserve their jump-host metadata when forked.
 - If an application action is reassigned to an ordinary combination such as `Ctrl+K`, it still works outside terminal areas. Inside a terminal pane, aiopsterm gives the combination to the shell first.
+
+See the [complete keyboard shortcut reference](../../best-practices/en-US/07-shortcuts.md) for every default binding, fixed terminal binding, and common editor shortcut.

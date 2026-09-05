@@ -39,6 +39,7 @@ const requiredContent = {
   '03-host-agent.md': [/OpenAI Compatible/i, /Responses/i, /Check/, /Save/],
   '04-agents-product-sessions.md': [/(Codex|内嵌)/i, /Classic/i, /DB AI/i, /(恢复|restore)/i],
   '05-ai-sessions.md': [/(Hook|插件)/i, /(信任|trust)/i, /(完整对话|complete (?:session|transcript|conversation))/i, /(修改|edit|revise)/i],
+  '07-shortcuts.md': [/Ctrl\+Shift\+T/, /Ctrl\+Tab/, /Primary\+Alt\+F/, /(SQL 编辑器|SQL editor)/i],
   '09-third-party-mcp.md': [/Add Server/i, /mcpServers/, /streamableHttp/],
   '14-kubernetes.md': [/(发送输出到 AI|Send Output to AI)/i, /kubectl/i, /(不会自行调用大模型|does not invoke an LLM)/i],
   '15-database.md': [/DB AI/i, /(Explain|解释)/i, /(Optimize|优化)/i, /(Convert|转换)/i, /(Diagnose|诊断)/i]

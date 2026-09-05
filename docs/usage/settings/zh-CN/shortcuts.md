@@ -21,3 +21,5 @@
 - `Ctrl+Shift+T` 和终端右键菜单里的新建终端会打开新的本地 shell；如果来源是已连接的本地终端，会继承当前 cwd；如果来源是 SSH 终端，不会隐式克隆远端连接，SSH 克隆仍通过显式克隆/Fork SSH 动作完成。
 - `Ctrl+Shift+Y` 会在当前终端是可 fork 的 SSH 通道时执行 Fork SSH；终端内容右键菜单也会显示 `Fork SSH`。通过跳板/relay shell 建立的 SSH 会话会携带 jump host 元数据继续 fork。
 - 如果把某个应用动作改成 `Ctrl+K` 这类普通 `Ctrl+字母`，它仍会在非终端区域生效；在终端窗格内，aiopsterm 会优先把该组合键交给 shell。
+
+所有默认按键、终端固定按键和编辑器常用按键见[完整快捷键参考](../../best-practices/zh-CN/07-shortcuts.md)。

@@ -12,18 +12,58 @@
 
 终端聚焦时，`Ctrl+A/C/D/E/K/L` 等组合必须交给 readline、vim、tmux 和远程 TUI。aiopsterm 因此把复制、粘贴、新建终端等应用操作放在 `Ctrl+Shift` 或 `Ctrl+Alt` 组合中。macOS 的界面提示会根据实际快捷键显示；不要把系统级的按住按键重复输入与应用快捷键混为一谈。
 
-## 推荐记住的操作
+## 可自定义的工作区快捷键
 
-| 类别 | 默认操作 |
+下表中的动作可以在 **设置 -> 快捷键** 中重映射。设置页显示的是当前生效值；下表列出新安装时的默认值。
+
+| 动作 | Windows / Linux | macOS |
+| --- | --- | --- |
+| 新建本地终端 | `Ctrl+Shift+T` | `Ctrl+Shift+T` |
+| 显示或隐藏 AI 侧边栏 | `Ctrl+Shift+A` | `Ctrl+Shift+A` |
+| 切换到第 1 至 9 个标签 | `Alt+1..9` | `Alt+1..9` |
+| 打开快捷命令 | `Ctrl+Shift+P` | `Ctrl+Shift+P` |
+| 关闭当前面板 | `Ctrl+Shift+W` | `Ctrl+Shift+W` |
+| 打开最近面板 | `Ctrl+Tab` | `Ctrl+Tab` |
+| 按访问历史后退 | `Ctrl+Left` | `Cmd+[` |
+| 按访问历史前进 | `Ctrl+Right` | `Cmd+]` |
+| 按标签栏顺序切换到左侧面板 | `Ctrl+Shift+Left` | `Ctrl+Shift+Left` |
+| 按标签栏顺序切换到右侧面板 | `Ctrl+Shift+Right` | `Ctrl+Shift+Right` |
+
+## 终端快捷键
+
+下列按键只在终端相关界面生效，目前不在快捷键设置页中重映射。表中的 `Primary` 在 Windows 和 Linux 上表示 `Ctrl`，在 macOS 上表示 `Cmd`；`Alt` 在 macOS 键盘上也标为 `Option`。
+
+| 动作 | 默认快捷键 |
 | --- | --- |
-| 会话 | 新建本地终端、关闭当前面板、最近面板、前后标签 |
-| 终端 | 复制、粘贴、清屏、Fork SSH、字体缩放 |
-| 搜索 | 打开搜索、上一项、下一项、清除高亮 |
-| AI | 内联 AI 命令、打开或关闭 AI 面板 |
-| 文件 | 打开当前 SSH 主机的文件管理 |
-| 应用 | 设置、资产列表、全屏和布局切换 |
+| 复制 / 粘贴 | `Ctrl+Shift+C` / `Ctrl+Shift+V`；macOS 也支持 `Cmd+C` / `Cmd+V` |
+| 打开搜索 | `Primary+Alt+F` |
+| 下一个 / 上一个搜索结果 | `Primary+Alt+G` / `Primary+Alt+H` |
+| 清除搜索高亮 | `Primary+Alt+J` |
+| 新建 / 关闭窗口 | `Primary+Shift+N` / `Primary+Shift+Q` |
+| 为当前 SSH 通道创建 Fork | `Primary+Shift+Y` |
+| 打开内联 AI 命令 | `Primary+Shift+K` |
+| 清屏 | `Primary+Shift+L` |
+| 打开当前主机文件管理 | `Primary+Shift+M` |
+| 字体放大 / 缩小 / 复位 | `Primary+=` / `Primary+-` / `Primary+0` |
+| 切换到上一个 / 下一个终端标签 | `Primary+PageUp` / `Primary+PageDown` |
+| 当前标签向左 / 向右移动 | `Primary+Shift+PageUp` / `Primary+Shift+PageDown` |
+| 向上 / 向下滚动一行 | `Primary+Shift+Up` / `Primary+Shift+Down` |
+| 向上 / 向下滚动一页 | `Shift+PageUp` / `Shift+PageDown` |
+| 滚动到顶部 / 底部 | `Shift+Home` / `Shift+End` |
+| 切换全屏 | `F11` |
+| 重新连接已关闭或出错的终端 | `Enter` |
 
-完整按键以设置页当前值为准，因为用户可以重映射，Windows、Linux 与 macOS 的系统保留组合也不同。
+`Ctrl+Shift+T` 和 `Ctrl+Shift+W` 同时受快捷键设置控制；重映射后，旧的默认组合不再触发对应动作。
+
+## 编辑器常用快捷键
+
+| 使用位置 | 动作 | Windows / Linux | macOS |
+| --- | --- | --- | --- |
+| 文件、知识库和 JSON 编辑器 | 保存 | `Ctrl+S` | `Cmd+S` |
+| SQL 编辑器 | 执行语句 | `Ctrl+Enter` | `Cmd+Enter` |
+| SQL 编辑器 | 查找 / 替换 | `Ctrl+F` / `Ctrl+H` | `Cmd+F` / `Cmd+H` |
+
+完整按键以设置页当前值和当前版本界面提示为准，因为可配置快捷键可能已被用户修改，系统或桌面环境也可能占用某些组合。
 
 ## 自定义步骤
 

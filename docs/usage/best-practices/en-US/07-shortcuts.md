@@ -12,18 +12,58 @@ Click the **Settings gear** at the lower-left corner, then select **Shortcuts** 
 
 While a terminal is focused, `Ctrl+A/C/D/E/K/L` must reach readline, vim, tmux, and remote TUIs. aiopsterm therefore places copy, paste, new-terminal, and similar app actions under `Ctrl+Shift` or `Ctrl+Alt`. macOS labels follow the configured binding; operating-system key-repeat behavior is separate from application shortcuts.
 
-## Recommended Categories
+## Configurable Workspace Shortcuts
 
-| Category | Typical actions |
+The actions below can be remapped under **Settings -> Shortcuts**. The Settings page shows the active value; this table lists defaults for a new installation.
+
+| Action | Windows / Linux | macOS |
+| --- | --- | --- |
+| New local terminal | `Ctrl+Shift+T` | `Ctrl+Shift+T` |
+| Show or hide the AI sidebar | `Ctrl+Shift+A` | `Ctrl+Shift+A` |
+| Switch to tab 1 through 9 | `Alt+1..9` | `Alt+1..9` |
+| Open Quick Commands | `Ctrl+Shift+P` | `Ctrl+Shift+P` |
+| Close the current panel | `Ctrl+Shift+W` | `Ctrl+Shift+W` |
+| Open Recent Panels | `Ctrl+Tab` | `Ctrl+Tab` |
+| Go back through activation history | `Ctrl+Left` | `Cmd+[` |
+| Go forward through activation history | `Ctrl+Right` | `Cmd+]` |
+| Switch to the panel on the left by tab order | `Ctrl+Shift+Left` | `Ctrl+Shift+Left` |
+| Switch to the panel on the right by tab order | `Ctrl+Shift+Right` | `Ctrl+Shift+Right` |
+
+## Terminal Shortcuts
+
+The bindings below apply to terminal surfaces and currently cannot be remapped on the Shortcuts page. `Primary` means `Ctrl` on Windows and Linux, and `Cmd` on macOS. `Alt` is also labeled `Option` on macOS keyboards.
+
+| Action | Default shortcut |
 | --- | --- |
-| Sessions | New local terminal, close panel, recent panels, previous/next tab |
-| Terminal | Copy, paste, clear, fork SSH, font zoom |
-| Search | Open, previous, next, clear highlights |
-| AI | Inline AI command, show or hide AI panel |
-| Files | Open file management for the selected SSH host |
-| App | Settings, Assets, full screen, layout switch |
+| Copy / paste | `Ctrl+Shift+C` / `Ctrl+Shift+V`; macOS also supports `Cmd+C` / `Cmd+V` |
+| Open search | `Primary+Alt+F` |
+| Next / previous search result | `Primary+Alt+G` / `Primary+Alt+H` |
+| Clear search highlights | `Primary+Alt+J` |
+| New / close window | `Primary+Shift+N` / `Primary+Shift+Q` |
+| Fork the current SSH channel | `Primary+Shift+Y` |
+| Open inline AI Command | `Primary+Shift+K` |
+| Clear the terminal | `Primary+Shift+L` |
+| Open file management for the current host | `Primary+Shift+M` |
+| Increase / decrease / reset font size | `Primary+=` / `Primary+-` / `Primary+0` |
+| Switch to the previous / next terminal tab | `Primary+PageUp` / `Primary+PageDown` |
+| Move the current tab left / right | `Primary+Shift+PageUp` / `Primary+Shift+PageDown` |
+| Scroll up / down one line | `Primary+Shift+Up` / `Primary+Shift+Down` |
+| Scroll up / down one page | `Shift+PageUp` / `Shift+PageDown` |
+| Scroll to the top / bottom | `Shift+Home` / `Shift+End` |
+| Toggle full screen | `F11` |
+| Reconnect a closed or failed terminal | `Enter` |
 
-Treat the current Settings page as authoritative because bindings are editable and OS-reserved combinations differ between Windows, Linux, and macOS.
+`Ctrl+Shift+T` and `Ctrl+Shift+W` also follow the configurable shortcut settings. Once either action is remapped, its old default no longer triggers it.
+
+## Common Editor Shortcuts
+
+| Surface | Action | Windows / Linux | macOS |
+| --- | --- | --- | --- |
+| Files, Knowledge, and JSON editors | Save | `Ctrl+S` | `Cmd+S` |
+| SQL editor | Run statement | `Ctrl+Enter` | `Cmd+Enter` |
+| SQL editor | Find / replace | `Ctrl+F` / `Ctrl+H` | `Cmd+F` / `Cmd+H` |
+
+Treat the current Settings page and the current version's interface hints as authoritative. Configurable bindings may have been changed, and the operating system or desktop environment may reserve some combinations.
 
 ## Customization Steps
 
