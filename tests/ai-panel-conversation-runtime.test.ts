@@ -22,6 +22,10 @@ import {
   type AiPanelConversationLike
 } from '@/services/ai/aiPanelConversationRuntime'
 
+// Fixtures use explicit +08:00 timestamps and expect Asia/Shanghai rendering;
+// pin TZ so the assertions hold in UTC CI runners as well.
+process.env.TZ = 'Asia/Shanghai'
+
 const conversations: AiPanelConversationLike[] = [
   { id: 'conv-1', title: '生产巡检', summary: 'CPU and disk', ts: 3000, favorite: true },
   { id: 'conv-2', title: '发布回滚会话', summary: 'nginx rollback', ts: 2000 },
