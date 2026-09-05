@@ -10,6 +10,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/TangGee/aiopsterm/actions/workflows/ci.yml/badge.svg)](https://github.com/TangGee/aiopsterm/actions/workflows/ci.yml)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://aiopsterm.com/zh-cn/download/)
+[![Discord](https://img.shields.io/badge/Discord-加入社区-5865F2?logo=discord&logoColor=white)](https://discord.gg/jbWEjKCm8w)
 
 ![aiopsterm 主界面：Agents 会话列表、分屏终端与 AI 面板](docs/usage/best-practices/images/zh-CN/agents-mode.png)
 

@@ -10,6 +10,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/TangGee/aiopsterm/actions/workflows/ci.yml/badge.svg)](https://github.com/TangGee/aiopsterm/actions/workflows/ci.yml)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://aiopsterm.com/download)
+[![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/jbWEjKCm8w)
 
 ![aiopsterm main window: Agents session list, split terminals, and the AI panel](docs/usage/best-practices/images/en-US/agents-mode.png)
 
