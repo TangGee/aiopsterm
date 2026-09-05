@@ -312,7 +312,8 @@ describe('workspaceConfigRuntime', () => {
   it('normalizes privacy, AI preferences, and runtime snapshot guards', () => {
     expect(normalizePrivacyConfig({ telemetry: 'off' as any, secretRedaction: 'enabled', dataSync: 'enabled' }).normalized).toEqual({
       telemetry: defaultPrivacySettings.telemetry,
-      telemetryConsentVersion: 0,
+      // Anonymous telemetry is enabled by default: normalization upgrades consent to v1 (see 75aecd27).
+      telemetryConsentVersion: 1,
       secretRedaction: 'enabled',
       dataSync: 'enabled'
     })

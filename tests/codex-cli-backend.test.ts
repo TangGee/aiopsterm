@@ -183,11 +183,15 @@ describe('Codex CLI backend runtime', () => {
   })
 
   afterEach(async () => {
+    vi.unstubAllEnvs()
     await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
   })
 
   it('starts Codex in a PTY with aiopsterm-owned CODEX_HOME', async () => {
     const backend = await loadBackend()
+    // The PTY env inherits host TERM/COLORTERM; pin them so the assertion is environment-independent.
+    vi.stubEnv('TERM', 'xterm-256color')
+    vi.stubEnv('COLORTERM', 'truecolor')
     const events = createRecorder()
     const pty = new MockPtyProcess()
     const spawnCalls: Array<Record<string, unknown>> = []
@@ -1039,7 +1043,7 @@ describe('Codex CLI backend runtime', () => {
         '[mcp_servers.aiopsterm_remote]',
         'enabled_tools = ["list_terminals", "run_command"]',
         '',
-        '[projects."/home/tlinux/.config/aiopsterm/codex-agent"]',
+        '[projects."/home/tester/.config/aiopsterm/codex-agent"]',
         'trust_level = "trusted"',
         '',
         '[tui.model_availability_nux]',
@@ -1059,7 +1063,7 @@ describe('Codex CLI backend runtime', () => {
 
     expect(merged).toContain('user_root_setting = "keep-root"')
     expect(merged).toContain('user_feature = true')
-    expect(merged).toContain('[projects."/home/tlinux/.config/aiopsterm/codex-agent"]')
+    expect(merged).toContain('[projects."/home/tester/.config/aiopsterm/codex-agent"]')
     expect(merged).toContain('trust_level = "trusted"')
     expect(merged).toContain('[tui.model_availability_nux]')
     expect(merged).toContain('"gpt-5.5" = 1')
@@ -1107,7 +1111,7 @@ describe('Codex CLI backend runtime', () => {
         kind: 'local',
         sessionId: 'terminal-refresh',
         label: 'Local terminal',
-        cwd: '/home/tlinux'
+        cwd: '/home/tester'
       }
     })
 
