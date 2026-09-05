@@ -1,0 +1,45 @@
+aiopsterm
+Copyright 2026 TangGee (https://aiopsterm.com)
+
+aiopsterm's own code is licensed under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations under
+the License.
+
+===============================================================================
+
+Third-Party Component Attributions
+
+aiopsterm bundles or vendors the following third-party components. License
+texts are included under resources/licenses/ or alongside the component
+sources, and the full dependency inventory is published in
+THIRD-PARTY-NOTICES.txt.
+
+- Cline SDK (@cline/sdk 0.0.59) - https://github.com/cline/cline -
+  Apache License 2.0. Copyright Cline Bot Inc. Cline is a trademark of
+  Cline Bot Inc.; no Cline trademark or product branding is used to identify
+  aiopsterm. See resources/licenses/cline/.
+- opencode SDK (@opencode-ai/sdk 1.17.18) - https://github.com/sst/opencode -
+  MIT License. See resources/licenses/cline-sidecar/opencode-LICENSE.
+- simple-git (simple-git 3.36.0, @simple-git/args-pathspec 1.0.3,
+  @simple-git/argv-parser 1.1.1) - https://github.com/steveukx/git-js -
+  MIT License. Copyright Steve King. See
+  resources/licenses/cline-sidecar/simple-git-LICENSE.
+- Node.js runtime (exact-pinned 22.20.0, used by the agent sidecar) -
+  https://github.com/nodejs/node - Node.js license (MIT). Copyright Node.js
+  contributors. See resources/licenses/cline-sidecar/node-22.20.0-LICENSE.
+- xterm.js (@xterm/xterm and @xterm/headless, local fork based on 5.5.0,
+  vendored under vendor/xterm/) - https://github.com/xtermjs/xterm.js -
+  MIT License. Copyright the xterm.js authors. See
+  vendor/xterm/xterm/LICENSE and docs/technical/xterm-fork.md.
+- Codex CLI (embedded runtime, built from
+  https://github.com/TangGee/aiopsterm-codex, a fork of
+  https://github.com/openai/codex) - Apache License 2.0. The exact commit is
+  recorded in codex-source.json.
