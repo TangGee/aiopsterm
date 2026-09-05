@@ -61,7 +61,7 @@ const officialExternalLinks: Record<OfficialExternalLink, string> = {
   issues: 'https://github.com/tanggee/aiopsterm/issues/new/choose',
   discussions: 'https://github.com/tanggee/aiopsterm/discussions',
   discord: 'https://aiopsterm.com/community#discord',
-  wechat: 'https://aiopsterm.com/zh-cn/community#wechat',
+  feishu: 'https://aiopsterm.com/zh-cn/community#feishu',
   supportEmail: 'mailto:support@aiopsterm.com',
   securityEmail: 'mailto:security@aiopsterm.com',
   privacyPolicy: 'https://aiopsterm.com/privacy'

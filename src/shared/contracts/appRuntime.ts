@@ -127,7 +127,7 @@ export type OfficialExternalLink =
   | 'issues'
   | 'discussions'
   | 'discord'
-  | 'wechat'
+  | 'feishu'
   | 'supportEmail'
   | 'securityEmail'
   | 'privacyPolicy'
