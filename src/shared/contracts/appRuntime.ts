@@ -318,6 +318,28 @@ export type AppUpdateCheckResult = {
 
 export type AppUpdateSignatureInfo = NonNullable<NonNullable<AppUpdateCheckResult['updateInfo']>['signature']>
 
+export type AppUpdateReleaseArtifact = {
+  platform: 'macos' | 'windows' | 'linux'
+  arch: string
+  kind: string
+  sha256: string
+  urlGlobal: string
+  urlChina: string
+}
+
+export type AppUpdateOnlineCheckData = {
+  available: boolean
+  currentVersion: string
+  version: string
+  channel: string
+  releasedAt: string
+  downloadUrl: string
+  downloadPageUrl: string
+  artifact: AppUpdateReleaseArtifact | null
+}
+
+export type AppUpdateOnlineCheckResult = AiopsMutationResult<AppUpdateOnlineCheckData>
+
 export type AppUpdateProgressEvent = {
   status: 'downloading' | 'downloaded' | 'error'
   version: string

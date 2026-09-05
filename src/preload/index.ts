@@ -36,6 +36,7 @@ const api: AiopsPreloadApi = {
   shell: () => ipcRenderer.invoke('app:shell'),
   getGpuFeatureStatus: () => ipcRenderer.invoke('app:gpu-feature-status'),
   checkUpdate: () => ipcRenderer.invoke('app:check-update'),
+  checkForUpdates: () => ipcRenderer.invoke('app:check-for-updates'),
   downloadAppUpdate: (version: string) => ipcRenderer.invoke('app:download-update', version),
   installAppUpdate: (version?: string) => ipcRenderer.invoke('app:install-update', version),
   onAppUpdateProgress: (listener) => {

@@ -1,7 +1,8 @@
-import { computed, defineComponent, h } from 'vue'
-import { BookOpen, Copy, ExternalLink, FolderOpen, MessageSquare, Play } from 'lucide-vue-next'
+import { computed, defineComponent, h, ref } from 'vue'
+import { BookOpen, Copy, ExternalLink, FolderOpen, MessageSquare, Play, RefreshCw } from 'lucide-vue-next'
 import { settingsSecretPatterns } from '@/config/settings'
 import SettingsJsonEditor from '@/components/settings/SettingsJsonEditor.vue'
+import { appRuntimeClient, isAppUpdateOnlineCheckData } from '@/services/app/appRuntimeClient'
 import type { SettingsWorkspacePageContext, SettingsWorkspaceStore, SettingsWorkspaceTranslate } from '@/services/settings/settingsWorkspacePageContext'
 import type { ExportMcpClientStatus, ExportMcpServerId } from '@shared/contracts/exportMcp'
 
@@ -931,6 +932,57 @@ export const createSettingsWorkspaceAdvancedPages = (
   const AboutSettingsPage = defineComponent({
     name: 'AboutSettingsPage',
     setup() {
+      const onlineUpdate = ref<{
+        status: 'idle' | 'checking' | 'latest' | 'available' | 'error'
+        currentVersion: string
+        version: string
+        downloadUrl: string
+      }>({ status: 'idle', currentVersion: '', version: '', downloadUrl: '' })
+
+      const onlineUpdateMessage = computed(() => {
+        switch (onlineUpdate.value.status) {
+          case 'checking':
+            return t('settings.about.update.checking')
+          case 'latest':
+            return t('settings.about.update.latest')
+          case 'available':
+            return t('settings.about.update.available', { version: onlineUpdate.value.version })
+          case 'error':
+            return t('settings.about.update.failed')
+          default:
+            return ''
+        }
+      })
+
+      const runOnlineUpdateCheck = async () => {
+        const checkForUpdatesBridge = appRuntimeClient.checkForUpdates()
+        if (typeof checkForUpdatesBridge !== 'function') {
+          onlineUpdate.value = { ...onlineUpdate.value, status: 'error' }
+          return
+        }
+        onlineUpdate.value = { ...onlineUpdate.value, status: 'checking' }
+        try {
+          const result = await checkForUpdatesBridge()
+          if (!result?.ok || !isAppUpdateOnlineCheckData(result.data)) {
+            onlineUpdate.value = { ...onlineUpdate.value, status: 'error' }
+            return
+          }
+          onlineUpdate.value = {
+            status: result.data.available ? 'available' : 'latest',
+            currentVersion: result.data.currentVersion,
+            version: result.data.version,
+            downloadUrl: result.data.downloadUrl || result.data.downloadPageUrl
+          }
+        } catch {
+          onlineUpdate.value = { ...onlineUpdate.value, status: 'error' }
+        }
+      }
+
+      const openOnlineUpdateDownload = () => {
+        const url = onlineUpdate.value.downloadUrl
+        if (url) void window.aiops.openExternalUrl(url)
+      }
+
       const updateButtonText = computed(() => {
         switch (workspace.aboutSettings.updateStatus) {
           case 'checking':
@@ -988,6 +1040,26 @@ export const createSettingsWorkspaceAdvancedPages = (
               updateButtonText.value
             ),
             h('small', { class: 'about-copyright' }, `Copyright © ${new Date().getFullYear()} aiopsterm All rights reserved.`)
+          ]),
+          h('div', { class: 'settings-section-card diagnostics-card' }, [
+            h('div', { class: 'diagnostics-card-header' }, [h(RefreshCw, { class: 'diagnostics-icon' }), h('strong', t('settings.about.update.title'))]),
+            h('small', t('settings.about.update.description')),
+            h('small', t('settings.about.update.currentVersion', { version: onlineUpdate.value.currentVersion || workspace.aboutSettings.version })),
+            onlineUpdateMessage.value ? h('small', onlineUpdateMessage.value) : null,
+            h('div', { class: 'settings-action-row' }, [
+              h(
+                'button',
+                {
+                  class: 'settings-button',
+                  disabled: onlineUpdate.value.status === 'checking',
+                  onClick: () => void runOnlineUpdateCheck()
+                },
+                [h(RefreshCw), onlineUpdate.value.status === 'checking' ? t('settings.about.update.checking') : t('settings.about.update.check')]
+              ),
+              onlineUpdate.value.status === 'available'
+                ? h('button', { class: 'settings-button', onClick: openOnlineUpdateDownload }, [h(ExternalLink), t('settings.about.update.download')])
+                : null
+            ])
           ]),
           h('div', { class: 'settings-section-card diagnostics-card' }, [
             h('div', { class: 'diagnostics-card-header' }, [h(FolderOpen, { class: 'diagnostics-icon' }), h('strong', 'Log Diagnostics')]),

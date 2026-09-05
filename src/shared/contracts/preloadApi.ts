@@ -285,6 +285,7 @@ import type {
   AppUpdateCheckResult,
   AppUpdateDownloadResult,
   AppUpdateInstallResult,
+  AppUpdateOnlineCheckResult,
   AppUpdateProgressEvent,
   CustomBackgroundSaveResult,
   CustomNotificationSoundSaveResult,
@@ -468,6 +469,7 @@ export type AiopsPreloadApi = {
   shell: () => Promise<string>
   getGpuFeatureStatus?: () => Promise<Record<string, unknown>>
   checkUpdate: () => Promise<AppUpdateCheckResult>
+  checkForUpdates: () => Promise<AppUpdateOnlineCheckResult>
   downloadAppUpdate: (version: string) => Promise<AppUpdateDownloadResult>
   installAppUpdate: (version?: string) => Promise<AppUpdateInstallResult>
   onAppUpdateProgress: (listener: (event: AppUpdateProgressEvent) => void) => () => void

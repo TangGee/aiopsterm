@@ -4,6 +4,7 @@ import type {
   AppUpdateCheckResult,
   AppUpdateDownloadResult,
   AppUpdateInstallResult,
+  AppUpdateOnlineCheckData,
   AppUpdateProgressEvent,
   SettingsDocumentationResult
 } from '@shared/contracts/appRuntime'
@@ -16,6 +17,7 @@ type AppRuntimeBridge = Pick<
   | 'applyPrivacyRuntimeSettings'
   | 'applyKnowledgeSearchRuntimeSetting'
   | 'checkUpdate'
+  | 'checkForUpdates'
   | 'downloadAppUpdate'
   | 'installAppUpdate'
   | 'onAppUpdateProgress'
@@ -46,6 +48,7 @@ export const appRuntimeClient = {
   applyPrivacyRuntimeSettings: () => bridgeMethod('applyPrivacyRuntimeSettings'),
   applyKnowledgeSearchRuntimeSetting: () => bridgeMethod('applyKnowledgeSearchRuntimeSetting'),
   checkUpdate: () => bridgeMethod('checkUpdate'),
+  checkForUpdates: () => bridgeMethod('checkForUpdates'),
   downloadAppUpdate: () => bridgeMethod('downloadAppUpdate'),
   installAppUpdate: () => bridgeMethod('installAppUpdate'),
   onAppUpdateProgress: () => bridgeMethod('onAppUpdateProgress'),
@@ -99,6 +102,17 @@ export const isAppUpdateCheckResult = (source: unknown): source is AppUpdateChec
 export const resolveUpdateVersion = (result?: AppUpdateCheckResult | null) => result?.updateInfo?.version || result?.versionInfo?.version || ''
 
 export const hasAvailableAppUpdate = (result: AppUpdateCheckResult) => Boolean(result.available || result.isUpdateAvailable || result.updateInfo)
+
+export const isAppUpdateOnlineCheckData = (source: unknown): source is AppUpdateOnlineCheckData =>
+  isRecord(source) &&
+  typeof source.available === 'boolean' &&
+  isNonEmptyString(source.currentVersion) &&
+  isNonEmptyString(source.version) &&
+  typeof source.channel === 'string' &&
+  typeof source.releasedAt === 'string' &&
+  typeof source.downloadUrl === 'string' &&
+  isNonEmptyString(source.downloadPageUrl) &&
+  (source.artifact === null || (isRecord(source.artifact) && isNonEmptyString(source.artifact.urlGlobal)))
 
 export const isAppUpdateDownloadData = (source: unknown, version: string): source is AppUpdateDownloadData =>
   isRecord(source) &&
