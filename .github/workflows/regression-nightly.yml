@@ -41,7 +41,11 @@ jobs:
           retention-days: 21
 
   stress:
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -50,14 +54,15 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0 libnss3 libasound2 libgbm1
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0 libnss3 libasound2 libgbm1
       - run: npm run test:regression -- stress
       - name: Upload performance samples and traces
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: stress-linux
+          name: stress-${{ matrix.os }}
           path: |
             test-results/
             playwright-report/
-          retention-days: 30
+          retention-days: 7
