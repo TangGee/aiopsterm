@@ -191,6 +191,18 @@ const createRuntime = (options: {
 }
 
 describe('terminalWorkspaceShellRuntime', () => {
+  it('consumes Escape for a menu but preserves Escape for terminal applications', async () => {
+    const { runtime } = createRuntime()
+    const passthrough = createKeyboardEvent({ key: 'Escape' })
+    await runtime.handleShortcut(passthrough)
+    expect(passthrough.preventDefault).not.toHaveBeenCalled()
+    expect(passthrough.stopPropagation).not.toHaveBeenCalled()
+    runtime.openTerminalMenu(createMouseEvent(), 'panel-1')
+    const dismissed = createKeyboardEvent({ key: 'Escape' })
+    await runtime.handleShortcut(dismissed)
+    expect(dismissed.preventDefault).toHaveBeenCalledOnce()
+    expect(dismissed.stopPropagation).toHaveBeenCalledOnce()
+  })
   it.each(['clear', 'copy', 'copy-empty', 'font-increase', 'font-decrease', 'connection', 'unsplit', 'escape'])('restores terminal keyboard focus after the %s menu action', async (action) => {
     const button = document.createElement('button')
     const input = document.createElement('textarea')

@@ -841,6 +841,11 @@ export const createTerminalWorkspaceShellRuntime = (
       return
     }
     if (event.key === 'Escape') {
+      if (menu.visible || termMenu.visible || commandDialog.visible || searchOverlayPanelId.value) {
+        // Consume overlay dismissal before the same key reaches the terminal PTY.
+        event.preventDefault()
+        event.stopPropagation()
+      }
       const restoreFocus = (menu.visible || termMenu.visible)
         ? closeMenusForTerminalAction(workspace.activePanelId)
         : null

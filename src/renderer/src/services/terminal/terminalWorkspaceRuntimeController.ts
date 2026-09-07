@@ -926,7 +926,10 @@ export const useTerminalWorkspaceContainerRuntime = () => {
       const panel = workspace.applyTerminalLifecycle(event)
       if (panel && event.stage === 'error') writeTerminalNotice(panel.id, terminalLifecycleErrorNotice(event))
     }) || null
-    offExit = terminalClient.onTerminalExit()?.((event) => workspace.applyTerminalExit(event)) || null
+    offExit = terminalClient.onTerminalExit()?.((event) => {
+      // Event callbacks cross contextBridge; never return a reactive panel proxy.
+      workspace.applyTerminalExit(event)
+    }) || null
     offControlRequest = controlClient.onControlRequest()?.(handleControlRequest) || null
     document.addEventListener('click', closeTerminalMenusFromDocument)
     window.addEventListener('keydown', handleActiveShortcut, true)
