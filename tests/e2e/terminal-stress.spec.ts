@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from 'fs/promises'
 import os from 'os'
 import path from 'path'
 import { isolatedEnvironment } from '../regression/support/environment'
+import { readFlowLogs } from '../regression/support/flow-log'
 
 const stressEnabled = process.env.AIOPSTERM_TERMINAL_STRESS === '1'
 const stressDurationMs = Number(process.env.AIOPSTERM_TERMINAL_STRESS_DURATION_MS || 20 * 60 * 1000)
@@ -122,6 +123,7 @@ type StressResult = {
     errors: string[]
   }
   flow: {
+    complete: boolean
     paused: number
     resumed: number
     safetyResumed: number
@@ -361,31 +363,7 @@ const injectStressHarness = async (
 
 const readTerminalFlowSummary = async (userDataDir: string, sessionIds: string[]) => {
   await new Promise((resolve) => setTimeout(resolve, 500))
-  const logText = await readFile(path.join(userDataDir, 'logs', 'aiopsterm-runtime.log'), 'utf8').catch(() => '')
-  const tracked = new Set(sessionIds)
-  const bySession: Record<string, { paused: number; resumed: number; safetyResumed: number }> = {}
-  tracked.forEach((sessionId) => {
-    bySession[sessionId] = { paused: 0, resumed: 0, safetyResumed: 0 }
-  })
-  for (const line of logText.split('\n')) {
-    if (!line.trim()) continue
-    let entry: { event?: string; id?: string }
-    try {
-      entry = JSON.parse(line) as { event?: string; id?: string }
-    } catch {
-      continue
-    }
-    if (!entry.id || !tracked.has(entry.id)) continue
-    if (entry.event === 'terminal.flow.paused') bySession[entry.id].paused += 1
-    if (entry.event === 'terminal.flow.resumed') bySession[entry.id].resumed += 1
-    if (entry.event === 'terminal.flow.safety-resume') bySession[entry.id].safetyResumed += 1
-  }
-  return {
-    paused: Object.values(bySession).reduce((total, item) => total + item.paused, 0),
-    resumed: Object.values(bySession).reduce((total, item) => total + item.resumed, 0),
-    safetyResumed: Object.values(bySession).reduce((total, item) => total + item.safetyResumed, 0),
-    bySession
-  }
+  return readFlowLogs(path.join(userDataDir, 'logs'), sessionIds)
 }
 
 const mb = (bytes?: number) => (typeof bytes === 'number' ? Math.round((bytes / 1024 / 1024) * 10) / 10 : undefined)
@@ -709,6 +687,7 @@ test('threaded terminal renderer keeps foreground frames healthy under 10 foregr
     })
     expect(result.realCat.errors).toEqual([])
     expect(result.flow.safetyResumed).toBe(0)
+    expect(result.flow.complete, 'Flow logs must include the complete test session, including rotations').toBe(true)
     expect(result.flow.paused).toBe(result.flow.resumed)
     Object.values(result.flow.bySession).forEach((flow) => {
       expect(flow.safetyResumed).toBe(0)
