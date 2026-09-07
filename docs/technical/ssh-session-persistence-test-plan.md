@@ -1,4 +1,4 @@
-# SSH 会话保持功能与性能测试计划
+# 本地与 SSH 会话保持功能及性能测试计划
 
 状态：待执行。本文定义测试要求，没有任何一行代表测试已经通过。
 
@@ -14,11 +14,13 @@
 | Live | ali 的专属测试目录和 tmux server，加本地故障代理 | 在真实主机上保持原进程与完整恢复路径 |
 | Perf | 固定本地环境加 ali，使用同一合成负载 | 时延、吞吐、内存、事件循环、公平性、长稳 |
 
-E01-E06、F01-F60、U01-U10、A01-A08、PF01-PF10 共 94 个验收条目，全部属于本轮必选。一个条目可展开为多个自动化测试；参数化组合需逐项记录，不能因为主条目有一个样本通过就认为所有组合通过。
+E01-E06、F01-F60、U01-U10、A01-A08、PF01-PF10，以及本地 L01-L12、LP01-LP03，共 109 个验收条目，全部属于本轮必选。一个条目可展开为多个自动化测试；参数化组合需逐项记录，不能因为主条目有一个样本通过就认为所有组合通过。
 
 P0 建立机器可读的 case manifest，包含 ID、阶段、实现文件、参数化变体、结果、命令、Git 提交、runId、artifact 路径。先验证 manifest 中用例 ID 唯一且数量完整；最终 gate 拒绝缺失、未运行、timeout 和 skip 的必选项。阶段执行只校验该阶段范围，最终执行校验全部条目。
 
 平台范围：本轮强制 Linux 开发环境和 Linux 发布包验证；macOS/Windows 需保证类型、平台分支及现有跨平台构建规则不退化，原生平台实测作为单独发布证据，不能用 Linux 测试声称已经通过。Relay-shell 的“不支持保持”分支是必选用例，不把未支持能力伪装成绿色成功。
+
+本地 L/LP 使用 Linux 实际 tmux 和实际 node-pty/Electron，不通过 SSH 绕回 localhost 代替。U05-U08、U10 的通用会话操作在 local/SSH 两种 targetKind 各运行一次；认证和断网 UI 用例仍只针对 SSH。Windows 原生与 WSL 本地保持属于范围外，但不支持提示和既有普通终端回归必须验证。
 
 所有预期功能结果默认期限为本地夹具 10 秒、ali 30 秒；重试期限、连接超时和性能用例另有明确要求时使用其专属期限。依靠事件或条件等待，不用固定 sleep 掩盖竞态。Unit 中用虚拟时间覆盖长退避；长稳测试必须实际运行规定时长。
 
@@ -161,6 +163,25 @@ tmux 模式输出经过终端重绘，并不等于 shell 原始字节流。连�
 | F59 | 控制 view 崩溃，旁观 view 尝试接管；旧 view 迟到恢复写入 | 租约准确回收；新控制者可操作；旧租约不复活；尺寸不抖动 |
 | F60 | 运行中、detached、missing、terminated 的记录分别 forget，重启应用 | 只删除本地记录；运行中明确保留远端；不会重建被忘记的记录或删除其他数据 |
 
+### 4.6 本地会话保持
+
+本地使用专属 runId、临时目录和 tmux server label；任务联合身份、计数期限、输出上限与清理方式沿用第 2.1 节。独立观察进程不能作为应用的子进程随退出一起终止。以下用例在 P3L 实现 backend 断言，P4 补足实际 UI，P6 全部验收。
+
+| ID | 前置条件和操作 | 必须断言 |
+| --- | --- | --- |
+| L01 | 检测 Linux 本机 tmux；分别测试缺失、不可执行和不支持平台的能力结果 | 支持时使用本机 tmux；缺失不静默退化且不自动安装；普通本地 PTY 不受影响 |
+| L02 | 用不同 shell profile、cwd 和测试环境先后创建两个本地持久终端；第二次改变启动环境 | 两个独立任务；各自 profile/cwd/token 正确，不沿用早先 tmux server 的旧环境；秘密不出现在 argv 或日志 |
+| L03 | 本地任务持续计数，关闭标签并等 10 秒，从目录重新打开，循环 5 次 | shell 与任务联合身份不变，计数增长，目录和环境不变；关闭仅 detach |
+| L04 | 正常退出整个测试 Electron，确认 Main/renderer 都已退出，独立观察 10 秒再重启；3 轮 | 本地任务仍运行；恢复接回原进程；不能以托盘常驻、仅 reload 或重开 shell 代替 |
+| L05 | 对本轮 Main 强制退出，再启动独立 Electron 进程，循环 3 次 | 本地 tmux server 和任务未被进程树清理；目录可恢复；没有额外 shell/任务 |
+| L06 | 关闭本地 attach client 后自动恢复；对照用户 detach、任务正常 exit、明确 terminate | 非预期 client 丢失可以精确接回；三种主动/终态不复活；逻辑 ID 不变，generation 单调增加 |
+| L07 | 用两个窗口查看本地同会话并接管；对照新建、复制连接、分屏 | 复用入口共享同任务，新建默认独立；只读输入/resize 拒绝；关闭一个 view 不伤另一个 |
+| L08 | 只结束本轮本地 tmux server，再恢复保存记录；另用同名新 session 替代旧记录 | missing/身份不匹配，不偷偷重建；机器重启后的失效状态按相同规则处理，不声称可复活 |
+| L09 | 本地与 SSH 建立相同显示名称的任务，分别 terminate/forget；重复请求 | adapter 和 targetBinding 隔离，精确操作目标；forget 不杀任务，terminate 不跨本地/远端 |
+| L10 | 本地合成 TUI、中文宽字符、normal/alternate screen、历史查询、ACK 中断与多 view 快照 | 与共享屏幕/历史/背压契约一致；不因本地适配绕过 generation、租约和缓冲上限 |
+| L11 | 测试本地保持开关的默认、保存、重载、运行中切换；运行普通本地 shell 和 AI/终端工具 | 本地与 SSH 设置独立；已创建模式不变；普通 PTY/AI 写入语义不退化；平台能力准确显示 |
+| L12 | 本地 create 成功后丢响应、迟到 PTY callback、取消管理子进程、重复退出和清理 | 幂等恢复原任务；只有本轮 attach client 被取消，所有短命进程/timer 回收；默认用户 tmux server 不受影响 |
+
 ## 5. 用户界面验收
 
 | ID | 操作 | UI 与后端联合断言 |
@@ -222,6 +243,18 @@ PF04 有效处理率统一定义为合成任务产生的已知数据量除以“
 
 “恢复时间”的起点是故障夹具确认放行，终点是本次 attachVerified 且一个合成输入获得任务回应。连接已建立但 tmux 还没接回不算完成。认证需要人工交互的场景不计入免交互 p95，必须单列耗时和结果。
 
+### 7.1 本地性能门槛
+
+本地 baseline 为原本地 PTY，candidate 为本地 tmux 模式。记录 node-pty、tmux、shell、硬件、终端尺寸及输出集；不把 SSH RTT 计入本地门槛。采样和 artifact 规范沿用第 7 节。
+
+| ID | 场景与测量 | 验收门槛 |
+| --- | --- | --- |
+| LP01 | 30 次本地 create、detach/attach；100 次合成输入响应；单 session 1 MiB/s 输出 60 秒，5 轮 | attach 到可输入 p95 不超过 1 秒；首次创建相对普通 PTY 增量 p95 不超过 500 ms；正常交互端到端 p95 不超过 100 ms；有效处理率不少于普通 PTY 百分之八十 |
+| LP02 | 20 个本地空闲会话保持 5 分钟，100 轮 attach/detach/terminate 后冷却 60 秒 | Main/renderer/tmux 合计额外 RSS 不超过 128 MiB，平均额外 CPU 不超过一个核心的百分之三；结束测试任务后自有 timers/连接/短命子进程回到基线，FD 差不超过 5 且可归因；detach 仍存活的任务不是泄漏 |
+| LP03 | 10 个本地有期限计数任务运行 2 小时，每 5 分钟正常退出并重开测试应用，另执行 3 次 Main 强制退出 | 原任务联合身份全部保持，零重复命令；每次恢复可操作；预热后 RSS 趋势不超过 5 MiB/小时，结尾增量不超过 64 MiB；最终显式 terminate 后本轮任务全部清理 |
+
+本轮不强制让开发机器真的休眠或重启，以免中断其他工作。状态恢复通过独立应用重启和受控 tmux server 丢失验证；文档明确本地休眠时执行可能暂停，系统重启后原进程已经消失。
+
 ## 8. 实现文件与命令入口
 
 ### 8.1 复用现有测试
@@ -236,6 +269,8 @@ PF04 有效处理率统一定义为合成任务产生的已知数据量除以“
 - `tests/live-ssh-backend.test.ts` 的私密参数方式；该文件的现有普通 shell 用例不能替代新的持久会话 Live 用例。
 
 建议新增聚焦测试：`tests/ssh-session-supervisor.test.ts`、`tests/ssh-persistent-session.test.ts`、`tests/terminal-session-registry.test.ts`、`tests/live-ssh-session-persistence.test.ts`、一个真实 Electron 会话保持 spec，以及 `scripts/test-ssh-session-persistence.mjs` 测试入口。最终名称在 P0 case manifest 固定。
+
+本地增加 `tests/local-persistent-session.test.ts` 并扩展 `tests/local-terminal-backend.test.ts`；共享目录、UI 和租约用例按 targetKind 参数化，不复制整个 SSH runner。统一入口名称保持兼容，但新增 `--suite local` 和 `--suite local-performance`，P0 建立入口，P3L/P5 填充实现，P6 required-results 包括全部 L/LP。
 
 当前工作区另有尚未提交的 regression/CI 配置工作。实施开始先查看其最终落点并兼容，不能覆盖别人的 runner，也不能把它的测试变更顺带纳入本功能提交。
 
@@ -271,6 +306,8 @@ node scripts/test-ssh-session-persistence.mjs --suite ui
 node scripts/test-ssh-session-persistence.mjs --suite live --target ali
 node scripts/test-ssh-session-persistence.mjs --suite performance
 node scripts/test-ssh-session-persistence.mjs --suite soak
+node scripts/test-ssh-session-persistence.mjs --suite local
+node scripts/test-ssh-session-persistence.mjs --suite local-performance
 node scripts/test-ssh-session-persistence.mjs --verify-required-results
 ```
 
@@ -320,5 +357,7 @@ Unit/Integration 可在开发与 CI 自动运行；UI 放在有关变更及 P4/P
 | G08 输入可靠 | F18-F19、F35-F37、F41-F42、U04、U07 |
 | G09 性能有界 | F11-F13、F34、F39、F50、F53、F55-F56、PF01-PF10 |
 | G10 可交付 | E01-E06、F43-F46、全部 U/A、P6 文档及 Git 证据 |
+
+本地补充映射：G02/G05 对应 L02-L06、L08、LP03；G03/G04 对应 L03-L09、L12；G06 对应 L07、L10；G07 对应 L01、L06、L08、L11；G08 对应本地参数化的 F18/F35/F36 及 L07/L11；G09 对应 LP01-LP03；G10 包括全部 L/LP、本地使用文档和 P3L 提交。F18 的本地参数化使用 client 不可用状态，不伪造本地 SSH 网络故障。
 
 最终验收必须同时满足主计划的完成清单和本测试清单。只给出计划、只完成下载、只运行 unit、只通过连接演示，均不等于后续实施 Goal 已完成。

@@ -1,4 +1,4 @@
-# SSH 会话保持与复用实施计划
+# 本地与 SSH 会话保持及复用实施计划
 
 状态：待实施。本文是后续 Goal 模式的执行依据，不代表功能已经实现。
 
@@ -6,28 +6,34 @@
 
 配套文件：[功能与性能测试计划](ssh-session-persistence-test-plan.md)。两份文件共同定义验收范围。
 
+范围修订：同时覆盖本地 tmux 与远端 tmux。为保持已有链接有效，文档路径继续沿用 ssh-session-persistence 命名；不能据此把本地部分当成可选增强。
+
 ## 1. 设计目标与交付边界
 
-用户场景：在 aiopsterm 中通过 SSH 操作服务器，短时断网、休眠、关闭标签或退出应用后，远端任务仍继续；重新连接时接回原来的 shell 和任务。用户无需重新切目录、设置环境或重跑命令。
+用户场景：在 aiopsterm 中运行本地终端或通过 SSH 操作服务器，关闭标签、退出应用后，任务仍存在；远端任务在 SSH 短时断网期间继续运行，重新连接时接回原来的 shell 和任务。用户无需重新切目录、设置环境或重跑命令。本地电脑休眠时本地进程通常暂停执行，唤醒后继续；不能把“进程仍存在”描述成休眠期间仍执行。
 
 “尽量无感”定义为保留标签、画面、焦点及会话身份，连接恢复后自动接回原会话。断网期间不能实时操作服务器；状态需要轻量可见，不能伪装仍可输入。
 
 | 目标 | 必须实现的结果 | 验收证据 |
 | --- | --- | --- |
 | G01 连接恢复 | 直连、代理、TCP 跳板 SSH 的暂时网络故障触发有界重试 | 故障注入后的生命周期和重试计数 |
-| G02 进程保持 | tmux 模式下断网前后的 shell、前台任务、目录及环境保持 | PID、进程启动时间、任务 nonce、cwd 和环境变量联合证明 |
+| G02 进程保持 | 本地 tmux 在应用关闭后保持进程；远端 tmux 在 SSH 断网和应用关闭后保持 shell、任务、目录及环境 | PID、进程启动时间、任务 nonce、cwd 和环境变量联合证明 |
 | G03 身份保持 | 逻辑终端会话 ID 不随 transport 重建改变 | 注册表记录、事件 generation、AI 绑定一致 |
-| G04 分离生命周期 | detach 保留远端任务，terminate 明确结束，forget 只移除本地记录 | 远端进程与本地目录的不同结果 |
-| G05 应用恢复 | 重启应用后能从目录重新打开仍存活的远端会话 | 独立应用进程重启测试，不以窗口 reload 代替 |
+| G04 分离生命周期 | detach 保留所在机器上的任务，terminate 明确结束，forget 只移除目录记录 | 本地/远端进程与目录的不同结果 |
+| G05 应用恢复 | 重启应用后能从目录重新打开仍存活的本地及远端会话 | 独立应用进程重启测试，不以窗口 reload 代替 |
 | G06 会话复用 | 同一应用的多个窗口可查看一个会话；输入与尺寸由一个控制者负责 | 主进程租约与多视图测试 |
 | G07 状态诚实 | 原会话丢失、缺少 tmux、认证取消等情况明确区分 | 失败不偷偷新建 shell，不显示虚假恢复成功 |
 | G08 输入可靠 | 未连接时拒绝输入；已经发送但结果未知的命令不自动重发 | 远端副作用计数不重复，IPC 返回拒绝原因 |
 | G09 性能有界 | 重试、输出缓冲、历史快照和并发握手均有上限 | 配套测试计划的数值门槛和原始测量结果 |
 | G10 可交付 | 功能测试、性能测试、ali 实机测试、文档和 Git 提交齐备 | P0 至 P6 的证据与完成清单 |
 
-本轮 Goal 的范围是 SSH 会话。普通 SSH 模式也需要自动重连，但重连后的 shell 是新进程，界面必须说明这一点。tmux 模式才提供原进程保持。
+本轮 Goal 同时包含本地会话保持和 SSH 会话保持。在本计划选定的实现中，普通本地 PTY/普通 SSH 重建会创建新 shell；本地 tmux/远端 tmux 接回一直存活的原进程。“tmux 模式提供原进程保持”不是说 tmux 只能用于远端，也不是说其他架构做不到；独立 PTY 服务也可实现，但本轮选择集成已有 tmux。
 
-以下属于本轮之外，不得作为本轮必须完成的隐藏任务：本地 PTY 独立守护进程、电脑重启后复活本地进程、服务器重启后复活远端进程、完整 tmux control-mode 镜像协议、跨账号协作、多台 aiopsterm 实例之间的分布式输入租约、SFTP/隧道的任务续传、Kubernetes exec 会话保持。
+tmux server 必须位于被保持进程所在的机器。本地 tmux 中运行普通 SSH 只能保持本地 SSH 客户端所在的会话；SSH transport 真正断开时，要保住远端 shell 仍需远端 tmux。恢复是 attach 到活进程，不是复活已经退出的进程。
+
+本地交付基线为 Linux 上已安装 tmux 的 POSIX shell；macOS 复用该适配设计，但未经原生环境验证不宣称通过。Windows 原生 PowerShell/cmd 不由 tmux 直接保持，继续普通终端行为并明确能力不可用；WSL 接入及 Windows 原生 PTY 守护服务不在本轮范围。
+
+以下属于本轮之外，不得作为本轮必须完成的隐藏任务：自研本地 PTY 独立守护进程、电脑重启后复活本地进程、服务器重启后复活远端进程、完整 tmux control-mode 镜像协议、跨账号协作、多台 aiopsterm 实例之间的分布式输入租约、SFTP/隧道的任务续传、Kubernetes exec 会话保持。
 
 Relay-shell 跳板必须保留原有连接能力；本轮将它明确标为“自动保持不支持”，不依赖提示符猜测注入 tmux，也不在该路径自动重跑登录脚本。若未来增加可靠的远端命令通道和目标身份确认，再另立迭代。
 
@@ -64,7 +70,7 @@ Relay-shell 跳板必须保留原有连接能力；本轮将它明确标为“�
 | [server-client.c](https://github.com/tmux/tmux/blob/73db0a54e5ae5abf80bb790829222c9760f60b1d/server-client.c) 与 [session.c](https://github.com/tmux/tmux/blob/73db0a54e5ae5abf80bb790829222c9760f60b1d/session.c) | server 管理 client 与 session | 会话所有权独立于 BrowserWindow |
 | [tmux.1](https://github.com/tmux/tmux/blob/73db0a54e5ae5abf80bb790829222c9760f60b1d/tmux.1) 与 [format.c](https://github.com/tmux/tmux/blob/73db0a54e5ae5abf80bb790829222c9760f60b1d/format.c) | 提供 session/client 查询及状态格式 | 用受控管理命令查询，不解析 shell 提示符 |
 
-落地方式为调用目标服务器已安装的 tmux。参考源码只用于理解语义；不从这些目录生产发布二进制，不把 tmux C 源码移植到 TypeScript，也不自动安装系统软件。
+落地方式为调用本地或目标服务器已安装的 tmux。参考源码只用于理解语义；不从这些目录生产发布二进制，不把 tmux C 源码移植到 TypeScript，也不自动安装系统软件。
 
 ## 3. aiopsterm 当前架构与缺口
 
@@ -92,12 +98,13 @@ Relay-shell 跳板必须保留原有连接能力；本轮将它明确标为“�
 Terminal views
   -> preload / terminalClient / IPC
   -> Main SessionRegistry + SessionSupervisor
+     -> local PTY -> local tmux client -> local tmux server
      -> SSH connection pool
         -> SSH shell channel                    (plain mode)
         -> SSH PTY exec channel -> remote tmux  (persistent mode)
 ```
 
-Main 保存逻辑身份、重试状态和视图授权。远端 tmux 保存 shell、子进程、终端状态与有界历史。Renderer 保存显示投影，不管理 SSH 连接、不计算自动重试、不根据屏幕文本认定恢复成功。
+Main 保存逻辑身份、重试状态和视图授权。本地或远端 tmux server 保存对应机器的 shell、子进程、终端状态与有界历史。Renderer 保存显示投影，不管理 SSH 连接、不计算自动重试、不根据屏幕文本认定恢复成功。
 
 优先在现有 SSH facade 之后增加一个 supervisor；现有 transport runtime 继续负责认证、代理、跳板和 channel。避免将计时器、注册表、tmux 协议和 UI 状态全部塞进现有长文件。
 
@@ -206,6 +213,22 @@ Main 保存逻辑身份、重试状态和视图授权。远端 tmux 保存 shell
 
 元数据采用 Main 所有、版本化 schema 和原子写入，新增/更新与去重集中在一个 registry。重启时一律核实远端状态，不以 persisted attached 直接显示 running；损坏记录隔离并可诊断，不损坏资产和 AI 会话库。
 
+### 4.8 本地 tmux 适配
+
+本地使用同一个 SessionRegistry、逻辑状态和 view 租约，增加 `targetKind=local` 及本地 tmux adapter，不经 SSH，也不实现第二套会话目录。前述第 4.3 至 4.7 节的 SSH 连接、认证和退避规则仅适用于 SSH；身份、精确恢复、关闭语义、历史和多视图规则由两个 adapter 共享。
+
+本地 targetBinding 包括安装实例、本机账户和 shell profile。`remoteServerLabel`、`remoteSessionName`、`remoteIdentity` 在最终公共 schema 中统一为 provider 状态，避免本地字段假冒远端字段；若保留 SSH 专用 DTO，local 必须使用明确的独立分支。
+
+本地实现入口为 `src/main/backend/terminal/localTerminal.ts`。普通本地模式继续 spawn shell；持久模式使用 node-pty 启动本机 tmux client，让独立 tmux server 拥有真正的 shell 和任务。管理命令用参数数组启动受控本机子进程，禁止通过拼接 shell 命令接受任意会话名。依赖探测、exec 超时、输出限制与取消均需覆盖。
+
+创建时正确应用 shell profile、cwd 和该次启动环境，不能意外继承早先启动的 tmux server 的过期环境。通过受控启动协议传递必要环境，不能把密码或完整环境写入命令行、目录记录和日志；不复用用户正在使用的默认 tmux server 配置。
+
+关闭持久标签、退出或崩溃清理时，只关闭本应用的 attach client；不得将 tmux server 或其 shell 子树纳入 killAllSessions 的递归终止。正常退出应用后用独立观察进程验证本地任务继续运行，不能只验证 Electron 留在托盘。应用重开后通过目录恢复原会话；tmux server/session 消失则 missing，不偷偷重建。
+
+本地 client 非预期退出可重建 client 并精确 attach；用户 detach、正常 exit 或明确终止不自动接回。不存在本地网络故障，因此不套用 SSH keepalive/MFA 状态。验证原会话存在后才允许重试，沿用有界次数、generation 和取消规则。
+
+配置增加 `terminal.localSessionPersistence`，默认关闭；与 SSH 保持开关独立，创建时固定模式。设置页和目录显示“本地”或目标服务器身份。缺少本机 tmux、tmux 不可执行或平台不支持时明确报能力不可用，不假称保持成功。代码集成后补充本地使用与架构文档，不能只写 SSH 说明。
+
 ## 5. 迭代方法与退出条件
 
 每阶段执行同一循环：确认当前代码和用例范围，先写可失败的行为测试，实现最小闭环，运行关联回归，保存证据，更新本阶段涉及的文档，审查 diff，提交本地 Git。没有新变化或失败证据时不重复全量运行。任何阶段发现合同冲突，应先更新本计划和测试用例，不能删除用例来获得通过。
@@ -216,11 +239,14 @@ Main 保存逻辑身份、重试状态和视图授权。远端 tmux 保存 shell
 | P1 身份与生命周期 | registry、contracts、view 绑定、generation、结构化错误；旧行为适配，暂不改变远端 shell | F01-F08、F33-F38、F43-F46 | create/attach/detach/terminate 定义可测试；类型检查和现有 IPC/AI 回归通过；提交会话边界 |
 | P2 自动重连 | supervisor、错误分类、退避、取消、并发握手合并、输入拒绝、状态投影 | F09-F20、F39-F42；PF02、PF06 | 普通 SSH 网络故障可恢复且明确是新 shell；手动关闭与认证取消不重连；提交重连闭环 |
 | P3 tmux 保持 | 能力探测、专属 namespace、幂等创建、精确恢复、attach 确认、远端终止 | F21-F32、F47-F50；A01、A02、A04 的 backend 验证 | ali 上同一进程通过断线测试；会话丢失不新建；提交远端保持 |
+| P3L 本地 tmux 保持 | local adapter、shell profile/环境、client/server 生命周期、应用退出与精确恢复 | L01-L12；LP01 基线 | Linux 实际本地 shell/任务在独立应用退出后存活；共享 registry；提交本地保持 |
 | P4 图形恢复与复用 | UI 目录、关闭语义、重启恢复、只读历史、租约、多视图快照和背压 | F33-F42、F51-F60；U01-U10；A03-A08；PF03-PF05 | 完整 UI 路径可用；真实 Electron 进程重启和 AI/文件回归通过；提交体验闭环 |
 | P5 性能与故障收敛 | 重试风暴、资源释放、吞吐、公平性、长稳；修复测量发现的问题 | 全部 PF、A、故障相关 F；重复失败场景 | 达到固定门槛；没有以跳过或放宽门槛掩盖失败；提交性能与稳定性修复 |
 | P6 发布验收与文档 | 全部必选用例、项目构建审计、打包边界、使用/运维/开发文档、最终报告 | 全部必选 E/F/U/A/PF；Linux 包验证与最终完成清单 | 每个目标有结果和证据；本地 Git 提交，无 push；标记本计划完成 |
 
-不得把 P1/P2 或单纯 tmux demo 作为整个 Goal 完成。P3 必须走 aiopsterm 的实际 backend，P4 必须走真实 Electron UI；只在命令行 `ssh ali tmux attach` 成功不够。
+执行顺序为 P0、P1、P2、P3、P3L、P4、P5、P6。P0 同时核实本机 tmux 与普通本地 PTY 基线；P4 的目录、关闭、重启和多视图用例在 local/SSH 两个 targetKind 参数化执行；P5 增加 LP01-LP03，P6 验收包括全部 L/LP。本地使用与架构文档在 P3L/P4 更新。
+
+不得把 P1/P2 或单纯 tmux demo 作为整个 Goal 完成。P3/P3L 必须走 aiopsterm 的实际 backend，P4 必须走真实 Electron UI；只在命令行执行 tmux attach 成功不够。
 
 分层用例在早期阶段先实现 Unit/Integration 断言，依赖 UI 或远端功能的变体在对应后续阶段补齐。manifest 分别记录每个变体状态；早期的部分通过不等于整个用例已经满足最终门槛。
 
@@ -249,6 +275,7 @@ P0 先从既有 aiopsterm 资产/连接入口定位名为 ali 的机器，读取
 | 文档 | 更新阶段 | 内容边界 |
 | --- | --- | --- |
 | `docs/usage/ssh-session-persistence.md`，实施时新增 | P3-P4，P6 完成 | 启用、依赖、普通重连与保持差别、查看/分离/结束/忘记、远端历史、重启恢复、故障说明 |
+| `docs/usage/local-session-persistence.md` 与 `docs/technical/local-terminal.md`，实施时新增 | P3L-P4，P6 完成 | 本地 tmux 依赖与平台边界、配置、client/server 所有权、profile/环境、关闭和恢复、进程退出边界 |
 | `docs/technical/ssh-terminal.md` | P1-P4 | registry/supervisor/transport 所有权、状态机、协议、错误分类、支持矩阵 |
 | `docs/technical/performance-resource-management.md` | P4-P5 | 实际背压算法、快照与历史上限、并发限制、资源生命周期 |
 | `docs/technical/development.md` 与 `docs/usage/development-commands.md` | P0-P6 | fixture、测试命令、ali 私密配置方式、证据生成、打包验证 |
@@ -260,8 +287,9 @@ AGENTS.md 保持指向 `docs/index.md`；根索引指向 usage/technical 分类�
 ## 9. 最终完成清单
 
 - [ ] G01-G10 都有实现和可复现证据。
-- [ ] P0-P6 都有阶段提交和明确结果。
-- [ ] 必选 E/F/U/A/PF 用例全部通过，必选项 skip 数为零；未运行必须标为未验证。
+- [ ] P0-P6 及 P3L 都有阶段提交和明确结果。
+- [ ] 必选 E/F/U/A/PF/L/LP 用例全部通过，必选项 skip 数为零；未运行必须标为未验证。
+- [ ] 本地 Linux tmux 在应用正常退出、Main 崩溃后保持任务，恢复与终止通过真实应用测试。
 - [ ] ali 的断线保持、应用重启恢复、任务身份和资源清理完成实机验证。
 - [ ] tmux 模式不在恢复失败后偷偷创建 shell，普通模式不宣称原进程保持。
 - [ ] UI、IPC、AI 写入、文件功能、认证、连接池和 renderer 相关回归通过。
@@ -274,4 +302,4 @@ AGENTS.md 保持指向 `docs/index.md`；根索引指向 usage/technical 分类�
 
 以下文本用于以后启动实施，本次整理计划不自动创建 Goal：
 
-> 按 docs/technical/ssh-session-persistence-plan.md 和配套 ssh-session-persistence-test-plan.md，实现 aiopsterm 的 SSH 自动重连、远端 tmux 会话保持、目录恢复和同应用多视图复用。按 P0 至 P6 逐阶段推进，每阶段完成行为测试、必要的性能测试、文档更新和本地 Git commit，不 push。ali 可以用于隔离的实机测试，先通过已有资产配置核实连接；参考源码仅供阅读。用计划中的 G01-G10 与最终完成清单验收，禁止把 demo、跳过实机测试或部分阶段通过当作 Goal 完成。本地 PTY 守护进程及服务器重启后的进程复活不在本 Goal 范围。遵守仓库 AGENTS.md，并保留其他任务的未提交改动。
+> 按 docs/technical/ssh-session-persistence-plan.md 和配套 ssh-session-persistence-test-plan.md，实现 aiopsterm 的本地 Linux tmux 会话保持、SSH 自动重连、远端 tmux 会话保持、目录恢复和同应用多视图复用。按 P0、P1、P2、P3、P3L、P4、P5、P6 逐阶段推进，每阶段完成行为测试、必要的性能测试、文档更新和本地 Git commit，不 push。ali 可以用于隔离的实机测试，先通过已有资产配置核实连接；参考源码仅供阅读。用计划中的 G01-G10 与最终完成清单验收，禁止把 demo、遗漏本地保持、跳过实机测试或部分阶段通过当作 Goal 完成。自研本地 PTY 守护服务、Windows 原生/WSL 保持和机器重启后的进程复活不在本 Goal 范围。遵守仓库 AGENTS.md，并保留其他任务的未提交改动。
