@@ -50,7 +50,12 @@ jobs:
         run: npx electron-builder --config electron-builder.yml --config.mac.notarize=false --publish never
       - name: Record artifact commit and hashes
         run: npm run test:release:gate -- dist
+      - run: npm run audit:package-config
       - run: npm run audit:packaged-app
+      - if: runner.os == 'Linux'
+        run: npm run audit:linux-appimage
+      - if: runner.os == 'Linux'
+        run: npm run audit:linux-deb
       - run: npm run test:regression -- packaged
       - name: Verify tested artifacts were not changed
         run: npm run test:release:gate -- dist --verify
