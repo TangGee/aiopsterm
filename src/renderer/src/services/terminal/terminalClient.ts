@@ -3,6 +3,8 @@ import { createBridgeMethod } from '@/services/common/preloadBridgeClient'
 
 type TerminalBridge = Pick<
   AiopsPreloadApi,
+  | 'loadTerminalRecovery'
+  | 'saveTerminalRecovery'
   | 'createTerminal'
   | 'writeTerminal'
   | 'ackTerminalData'
@@ -23,6 +25,8 @@ type TerminalBridge = Pick<
 const bridgeMethod = createBridgeMethod<TerminalBridge>()
 
 export const terminalClient = {
+  loadTerminalRecovery: () => bridgeMethod('loadTerminalRecovery'),
+  saveTerminalRecovery: () => bridgeMethod('saveTerminalRecovery'),
   createTerminal: () => bridgeMethod('createTerminal'),
   writeTerminal: () => bridgeMethod('writeTerminal'),
   ackTerminalData: () => bridgeMethod('ackTerminalData'),

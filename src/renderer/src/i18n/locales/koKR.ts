@@ -1,5 +1,8 @@
 import { completeLocaleMessages } from './complete'
 export const koKR = completeLocaleMessages({
+  'settings.terminal.sshAutoReconnect': 'SSH 연결 자동 복구',
+  'settings.terminal.sshShellIntegration': 'SSH Bash 작업 디렉터리 복원',
+  'settings.terminal.restoreTerminalTabs': '시작 시 터미널 탭 및 기록 복원',
   'common.ai': 'AI',
   'common.agents': 'Agents',
   'common.add': '추가',

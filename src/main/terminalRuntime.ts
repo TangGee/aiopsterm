@@ -518,6 +518,8 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
   const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCreateOptions) => {
     return createSshTerminalSession(id, options, {
       lifecycle: (event) => {
+        const record = sessions.get(event.id)
+        if (record?.info) record.info = { ...record.info, cwd: event.cwd || record.info.cwd, lifecycle: event }
         logRuntimeEvent(event.stage === 'error' ? 'error' : 'info', 'terminal.lifecycle', {
           id: event.id,
           kind: event.kind,
@@ -579,6 +581,8 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
   const createLocalTerminal = (owner: BrowserWindow, id: string, options: TerminalCreateOptions) =>
     createLocalTerminalSession(id, options, {
       lifecycle: (event) => {
+        const record = sessions.get(event.id)
+        if (record?.info) record.info = { ...record.info, cwd: event.cwd || record.info.cwd, lifecycle: event }
         logRuntimeEvent(event.stage === 'error' ? 'error' : 'info', 'terminal.lifecycle', {
           id: event.id,
           kind: event.kind,

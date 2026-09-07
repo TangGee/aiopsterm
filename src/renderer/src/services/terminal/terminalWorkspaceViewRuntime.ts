@@ -45,6 +45,7 @@ type XtermLike = {
   rows: number
   options: XtermRuntimeOptions
   buffer: {
+    normal?: { length: number; getLine: (index: number) => TerminalBufferLineLike | undefined }
     active: {
       viewportY: number
       cursorX: number
@@ -597,7 +598,7 @@ export const createTerminalWorkspaceViewRuntime = ({
 
   const createThreadedViewForPanel = (panel: TerminalPanel) => {
     const theme = terminalTheme()
-    const initialOutput = tailTextByBytes(panel.output, terminalThreadedLiveOutputTailBytes)
+    const initialOutput = panel.restoredHistory ? panel.output : tailTextByBytes(panel.output, terminalThreadedLiveOutputTailBytes)
     const terminal = createThreadedTerminalHost({
       terminalId: panel.id,
       sessionId: panel.sessionId,

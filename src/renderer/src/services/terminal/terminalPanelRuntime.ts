@@ -58,6 +58,8 @@ export const createManagedAiSessionContentViewState = (): ManagedAiSessionConten
 })
 
 export type TerminalPanel = {
+  restoredHistory?: boolean
+  cwdVerified?: boolean
   id: string
   title: string
   titleSource?: 'system' | 'user' | 'auto'
@@ -252,6 +254,8 @@ export const clearTerminalPanelSplitState = (panel: TerminalPanel) => {
 }
 
 export const resetTerminalPanelToDefault = (panel: TerminalPanel) => {
+  panel.restoredHistory = undefined
+  panel.cwdVerified = undefined
   panel.id = 'panel-main'
   panel.title = defaultTerminalPanelTitle
   panel.cwd = '~'
@@ -771,6 +775,7 @@ export const applyTerminalLifecycleToPanel = (panel: TerminalPanel, event: Termi
   }
   panel.kind = 'terminal'
   if (event.cwd) panel.cwd = event.cwd
+  if (event.cwdVerified === true) panel.cwdVerified = true
   if (nextSshSession) panel.sshSession = nextSshSession
   if (event.stage === 'starting' || event.stage === 'connecting' || event.stage === 'proxy-opening') {
     panel.status = 'connecting'

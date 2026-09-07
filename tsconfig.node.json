@@ -11,6 +11,9 @@
     "src/shared/**/*.ts",
     "src/main/**/*.ts",
     "src/preload/**/*.ts",
-    "tests/local-editor-files-backend.test.ts"
+    "tests/local-editor-files-backend.test.ts",
+    "tests/ssh-terminal-recovery-backend.test.ts",
+    "tests/ssh-terminal-recovery-integration-backend.test.ts",
+    "tests/terminal-recovery-store-backend.test.ts"
   ]
 }

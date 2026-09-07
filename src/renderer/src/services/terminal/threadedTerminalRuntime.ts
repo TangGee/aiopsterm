@@ -1663,14 +1663,14 @@ export class ThreadedTerminalHost {
     }
   }
 
-  readScreen(tailLines?: number) {
+  readScreen(tailLines?: number, normalBuffer = false) {
     if (!this.coreCreated) {
       return Promise.resolve({ text: this.snapshotLines.slice(-(tailLines || this.rows)).join('\n').replace(/\s+$/g, ''), cols: this.cols, rows: this.rows })
     }
     const requestId = nextRequestId('screen')
     return new Promise<{ text: string; cols: number; rows: number }>((resolve, reject) => {
       requestMap.set(requestId, { kind: 'screen', resolve, reject })
-      postCore(this.coreHandle, { type: 'read-screen', terminalId: this.terminalId, requestId, tailLines })
+      postCore(this.coreHandle, { type: 'read-screen', terminalId: this.terminalId, requestId, tailLines, normalBuffer })
       window.setTimeout(() => {
         if (!requestMap.has(requestId)) return
         requestMap.delete(requestId)

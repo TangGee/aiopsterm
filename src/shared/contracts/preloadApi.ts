@@ -1,3 +1,4 @@
+import type { TerminalRecoverySnapshot, TerminalRecoveryLoadResult } from './terminalRecovery'
 import type { AiopstermDeepLinkPayload } from '../deepLink'
 import type { AiopsMutationResult } from './common'
 import type {
@@ -630,6 +631,8 @@ export type AiopsPreloadApi = {
   deleteQuickCommandSnippet: (id: number) => Promise<QuickCommandSnippetDeleteResult>
   reorderQuickCommands: (input: QuickCommandReorderInput) => Promise<QuickCommandReorderResult>
   planQuickCommandScript: (input: QuickCommandScriptPlanInput) => Promise<QuickCommandScriptPlanResult>
+  loadTerminalRecovery: () => Promise<TerminalRecoveryLoadResult>
+  saveTerminalRecovery: (snapshot: TerminalRecoverySnapshot) => Promise<void>
   createTerminal: (options?: TerminalCreateOptions) => Promise<TerminalSessionInfo>
   writeTerminal: (id: string, data: string) => Promise<TerminalWriteResult>
   ackTerminalData: (id: string, bytes: number) => void

@@ -43,6 +43,9 @@ export type TerminalUserConfig = {
   lineHeight: number
   pinchZoomStatus: boolean
   showCloseButton: boolean
+  sshAutoReconnect?: boolean
+  sshShellIntegration?: boolean
+  restoreTerminalTabs?: boolean
   sshAgentsStatus: boolean
   middleMouseEvent: TerminalMouseEventAction
   rightMouseEvent: Exclude<TerminalMouseEventAction, 'closeTab'>

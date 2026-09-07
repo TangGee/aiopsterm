@@ -140,6 +140,9 @@ export const defaultConfig: UserConfig = {
     pinchZoomStatus: true,
     showCloseButton: true,
     sshAgentsStatus: false,
+    sshAutoReconnect: true,
+    sshShellIntegration: true,
+    restoreTerminalTabs: true,
     middleMouseEvent: 'paste',
     rightMouseEvent: 'contextMenu'
   },

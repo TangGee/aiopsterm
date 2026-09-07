@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
-import { chmodSync, mkdirSync, writeFileSync } from 'fs'
+import { chmodSync, mkdirSync, writeFileSync, statSync, readlinkSync } from 'fs'
 import { tmpdir } from 'os'
 import { basename, delimiter, join } from 'path'
 import type { TerminalCreateOptions, TerminalDisconnectReason, TerminalLifecycleEvent } from '@shared/contracts/terminalSessions'
@@ -29,6 +29,7 @@ export type LocalPtyRuntime = {
 export type LocalProcessRuntime = Pick<typeof import('child_process'), 'spawn'>
 
 export type LocalTerminalSession = {
+  getCwd?(): string | undefined
   write(data: string | Buffer): void
   writeBinary(data: Buffer): boolean
   runBackgroundCommand?(options: TerminalBackgroundCommandOptions): Promise<TerminalBackgroundCommandResult>
@@ -99,7 +100,14 @@ export const configureLocalTerminalBackendRuntime = (config: LocalTerminalRuntim
 
 const getShell = (options: TerminalCreateOptions) => options.shell || runtimeConfig.getDefaultShell?.() || defaultShell()
 
-const getCwd = (options: TerminalCreateOptions) => options.cwd || runtimeConfig.getDefaultCwd?.() || defaultCwd()
+const getCwd = (options: TerminalCreateOptions) => {
+  const fallback = runtimeConfig.getDefaultCwd?.() || defaultCwd()
+  if (!options.cwd) return fallback
+  if (options.restoreFromRecovery) {
+    try { if (!statSync(options.cwd).isDirectory()) return fallback } catch { return fallback }
+  }
+  return options.cwd
+}
 
 const getEnv = () => runtimeConfig.getEnv?.() || process.env
 
@@ -486,6 +494,9 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
     ptyProcess.onExit((event) => {
       finish(event.exitCode, 'process', 'Local shell exited.')
     })
+    session.getCwd = () => {
+      try { return getPlatform() === 'linux' && ptyProcess.pid ? readlinkSync(`/proc/${ptyProcess.pid}/cwd`) : undefined } catch { return undefined }
+    }
     return { shell: terminalShell, cwd, session, lifecycle, runtimeKind: 'pty' }
   }
 

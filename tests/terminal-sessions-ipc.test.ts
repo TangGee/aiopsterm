@@ -205,7 +205,7 @@ describe('terminal sessions IPC registrar', () => {
 
     registerTerminalSessionsIpc(ipcMain, createRegistrationInput())
 
-    expect([...handlers.keys()]).toEqual(['terminal:create', 'terminal:ack-data', 'terminal:write', 'terminal:write-binary', 'terminal:resize', 'terminal:kill'])
+    expect([...handlers.keys()]).toEqual(['terminal:recovery:save', 'terminal:recovery:load', 'terminal:create', 'terminal:ack-data', 'terminal:write', 'terminal:write-binary', 'terminal:resize', 'terminal:kill'])
   })
 
   it('rejects terminal creation when no owner window is available', async () => {
@@ -427,6 +427,8 @@ describe('terminal sessions IPC registrar', () => {
     expect(handlers.get('terminal:write')?.({}, 'ssh-1', 'whoami\r')).toEqual({ ok: true, data: { id: 'ssh-1', bytes: 7 } })
     expect(sshProcess.write).toHaveBeenCalledWith('whoami\r')
     expect(input.recordTerminalCommandHistory).not.toHaveBeenCalled()
+    sshProcess.write.mockImplementationOnce(() => { throw new Error('SSH is reconnecting.') })
+    expect(handlers.get('terminal:write')?.({}, 'ssh-1', 'do-not-replay\r')).toEqual({ ok: false, errorCode: 'TERMINAL_NOT_READY', errorMessage: 'SSH is reconnecting.' })
   })
 
   it('writes binary payloads and reports empty, missing, and unsupported cases', async () => {
@@ -487,6 +489,8 @@ describe('terminal sessions IPC registrar', () => {
 
     expect(handlers.get('terminal:write-binary')?.({}, 'ssh-binary', new Uint8Array([6, 7]).buffer)).toEqual({ ok: true, data: { id: 'ssh-binary', bytes: 2 } })
     expect(sshProcess.write).toHaveBeenCalledWith(Buffer.from([6, 7]))
+    sshProcess.write.mockImplementationOnce(() => { throw new Error('SSH is reconnecting.') })
+    expect(handlers.get('terminal:write-binary')?.({}, 'ssh-binary', [8])).toEqual({ ok: false, errorCode: 'TERMINAL_NOT_READY', errorMessage: 'SSH is reconnecting.' })
   })
 
   it('resizes and kills existing sessions while keeping missing-session results stable', async () => {

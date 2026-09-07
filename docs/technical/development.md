@@ -374,3 +374,7 @@ npm run test:e2e:packaged
 ```
 
 The packaged E2E launches the unpacked packaged app with an isolated user-data directory, checks the main window, local terminal surface, Files module entry point, and verifies packaged control notifications through the platform control socket or Windows named pipe.
+
+## Terminal Recovery Verification
+
+Run the focused supervisor, persistence, real SSH/PTY and renderer suites documented in [Terminal Recovery Validation](ssh-session-persistence-test-plan.md). The Electron test in `tests/e2e/terminal-recovery.spec.ts` verifies both renderer reload with the same local process and full application restart with a new process. Switch native modules to Node before backend tests and Electron before desktop tests. Tabby and tmux checkouts remain reference-only outside the application source and package inputs.

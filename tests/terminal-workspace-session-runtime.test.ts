@@ -116,6 +116,25 @@ const createHarness = (panels: TerminalPanel[], options: { isMacroRecording?: bo
 }
 
 describe('terminalWorkspaceSessionRuntime', () => {
+  it('passes local cwd and only verified remote cwd to new shells', async () => {
+    const local = localPanel(); local.cwd = '/work/remembered'; local.restoredHistory = true
+    const ssh = sshPanel(); ssh.cwd = '/srv/verified'
+    const f = createHarness([local, ssh])
+    await f.runtime.startLocalTerminalForPanel(local)
+    expect(f.createTerminal.mock.calls[0][0]).toMatchObject({ cwd: '/work/remembered', restoreFromRecovery: true })
+    await f.runtime.startSshTerminalForPanel(ssh)
+    expect(f.createTerminal.mock.calls[1][0].cwd).toBeUndefined()
+    ssh.cwd = '/srv/verified'; ssh.cwdVerified = true
+    await f.runtime.startSshTerminalForPanel(ssh)
+    expect(f.createTerminal.mock.calls[2][0].cwd).toBe('/srv/verified')
+  })
+  it('stops an existing reconnect attempt before manually starting another session', async () => {
+    const panel = sshPanel(); panel.sessionId = 'retrying'
+    const f = createHarness([panel])
+    await f.runtime.reconnectTerminalPanel(panel)
+    expect(f.killTerminal).toHaveBeenCalledWith('retrying')
+    expect(f.killTerminal.mock.invocationCallOrder[0]).toBeLessThan(f.createTerminal.mock.invocationCallOrder[0])
+  })
   it('starts local and SSH terminal sessions through one bridge boundary', async () => {
     const local = localPanel()
     const ssh = sshPanel()

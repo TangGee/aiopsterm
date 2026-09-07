@@ -1101,8 +1101,8 @@ const flushRecord = (record: CoreTerminalRecord) => {
   })
 }
 
-const readScreenText = (record: CoreTerminalRecord, tailLines = record.terminal.rows) => {
-  const buffer = record.terminal.buffer.active
+const readScreenText = (record: CoreTerminalRecord, tailLines = record.terminal.rows, normalBuffer = false) => {
+  const buffer = normalBuffer ? record.terminal.buffer.normal : record.terminal.buffer.active
   const start = Math.max(0, buffer.length - Math.max(1, tailLines))
   const lines: string[] = []
   for (let index = start; index < buffer.length; index += 1) {
@@ -1373,7 +1373,7 @@ const handleMessage = (message: ThreadedTerminalCoreRequest) => {
         type: 'read-screen-result',
         requestId: message.requestId,
         terminalId: record.terminalId,
-        text: readScreenText(record, message.tailLines),
+        text: readScreenText(record, message.tailLines, message.normalBuffer),
         cols: record.terminal.cols,
         rows: record.terminal.rows
       })

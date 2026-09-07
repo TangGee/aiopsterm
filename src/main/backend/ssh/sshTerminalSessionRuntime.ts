@@ -1,3 +1,4 @@
+import { sshRecoveryShellCommand } from './sshShellRecovery'
 import type { ConnectConfig } from 'ssh2'
 import type { SshProxyConfig } from '@shared/contracts/appRuntime'
 import type {
@@ -664,7 +665,7 @@ export const createSshTerminalSession = (
       )
     }, getSshShellReadyTimeoutMs())
     try {
-      authClient.shell({ term: terminalType, cols, rows }, (error, channel) => {
+      const onShell = (error: Error | undefined, channel: SshTerminalChannel) => {
         if (shellCallbackSettled) {
           try {
             channel?.close?.()
@@ -700,8 +701,10 @@ export const createSshTerminalSession = (
         }
         channel.on('data', (chunk: Buffer | string) => sink.data(chunk))
         channel.stderr.on('data', (chunk: Buffer | string) => sink.data(chunk))
-        channel.on('close', (code?: number | null) =>
-          finish(Number.isFinite(code) ? Number(code) : 0, 'process', {
+        let receivedExitStatus = false
+        channel.on('exit', () => { receivedExitStatus = true })
+        channel.on('close', (code?: number | null) => {
+          const closeShell = () => finish(Number.isFinite(code) ? Number(code) : null, 'process', {
             message: sshConnectionPoolRegistry.target.isByKeys(
               [targetClientPoolKey, targetClientAuthenticatedPoolKey],
               authClient
@@ -709,8 +712,23 @@ export const createSshTerminalSession = (
               ? 'SSH shell session exited; connection remains reusable.'
               : 'SSH shell session exited.'
           })
-        )
-      })
+          if (Number.isFinite(code) || receivedExitStatus) closeShell()
+          else {
+            // Transport shutdown can close channels before client end arrives.
+            // Give that event a chance to classify the loss. A healthy transport
+            // closing a channel without exit-status is a normal shell exit.
+            setImmediate(closeShell).unref()
+          }
+        })
+      }
+      if (options.sshShellIntegration && authClient.exec) {
+        const execWithPty = authClient.exec as unknown as (
+          command: string, options: Record<string, unknown>, callback: typeof onShell
+        ) => unknown
+        execWithPty.call(authClient, sshRecoveryShellCommand(options.cwd), { pty: { term: terminalType, cols, rows } }, onShell)
+      } else {
+        authClient.shell({ term: terminalType, cols, rows }, onShell)
+      }
     } catch (error) {
       handleShellOpenFailure(authClient, error)
     }

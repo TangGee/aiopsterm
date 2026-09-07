@@ -1,5 +1,8 @@
 import { completeLocaleMessages } from './complete'
 export const arAR = completeLocaleMessages({
+  'settings.terminal.sshAutoReconnect': 'إعادة الاتصال تلقائيا عبر SSH',
+  'settings.terminal.sshShellIntegration': 'استعادة دليل العمل في Bash عبر SSH',
+  'settings.terminal.restoreTerminalTabs': 'استعادة علامات تبويب الطرفية والسجل عند التشغيل',
   'common.ai': 'AI',
   'common.agents': 'Agents',
   'common.add': 'إضافة',

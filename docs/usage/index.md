@@ -32,6 +32,7 @@ Detailed reference:
 - [Product Sessions And Agents Mode](product-sessions.md)
 - [Quick Commands](quick-commands.md)
 - [Settings Help](settings/index.md)
+- [Terminal Recovery](terminal-recovery.md)
 - [Terminal Workspace](terminal-workspace.md)
 - [Troubleshooting](troubleshooting.md)
 - [User Account](user-account.md)

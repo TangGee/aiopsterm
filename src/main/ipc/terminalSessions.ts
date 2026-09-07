@@ -1,3 +1,7 @@
+import { app } from 'electron'
+import { join } from 'node:path'
+import { createTerminalRecoveryStore } from '../backend/terminal/terminalRecoveryStore'
+import type { TerminalSessionInfo } from '@shared/contracts/terminalSessions'
 import { createHash } from 'crypto'
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import type { UserConfig } from '@shared/contracts/userConfig'
@@ -17,6 +21,7 @@ import type { ClineAgentHostTarget } from '@shared/contracts/clineAgent'
 import { shouldUseTerminalDebugLogs } from '@shared/runtimeSwitches'
 
 type TerminalRuntimeProcess = {
+  getCwd?: () => string | undefined
   write: (data: string | Buffer) => void
   resize: (cols: number, rows: number) => void
   kill: (reason?: TerminalDisconnectReason) => void
@@ -32,6 +37,7 @@ export type TerminalSession = {
   kind: 'local' | 'ssh'
   host?: string
   classicTarget?: ClineAgentHostTarget
+  info?: TerminalSessionInfo
 }
 
 type LocalTerminalCreateResult = {
@@ -118,6 +124,10 @@ const normalizeTerminalCreateOptions = (inputOptions: TerminalCreateOptions, inp
   const savedTerminalType = input.normalizeTerminalType(savedConfig.terminal?.terminalType, defaultTerminalType)
   return {
     ...inputOptions,
+    ...(inputOptions.kind === 'ssh' || inputOptions.ssh || inputOptions.assetId ? {
+      sshAutoReconnect: inputOptions.sshAutoReconnect ?? savedConfig.terminal?.sshAutoReconnect !== false,
+      sshShellIntegration: inputOptions.sshShellIntegration ?? savedConfig.terminal?.sshShellIntegration !== false
+    } : {}),
     terminalType: input.normalizeTerminalType(inputOptions.terminalType, savedTerminalType)
   }
 }
@@ -151,6 +161,21 @@ const classicLocalTarget = (terminalSessionId: string, cwd: string): ClineAgentH
 })
 
 export const registerTerminalSessionsIpc = (ipcMain: IpcMain, input: RegisterTerminalSessionsIpcInput) => {
+  const recovery = createTerminalRecoveryStore(() => join(app.getPath('userData'), 'terminal-recovery.json'))
+  ipcMain.handle('terminal:recovery:save', (event, snapshot) => {
+    if (!input.getOwnerWindow(event)) throw new Error('No owner window for terminal recovery.')
+    return recovery.save(snapshot)
+  })
+  ipcMain.handle('terminal:recovery:load', async (event) => {
+    const owner = input.getOwnerWindow(event)
+    if (!owner) throw new Error('No owner window for terminal recovery.')
+    const snapshot = await recovery.load()
+    const liveSessions = (snapshot?.tabs || []).flatMap((tab) => {
+      const session = tab.sessionId ? input.sessions.get(tab.sessionId) : undefined
+      return session?.window === owner && session.info ? [{ ...session.info, cwd: session.process.getCwd?.() || tab.cwd || session.info.cwd }] : []
+    })
+    return { snapshot, liveSessions }
+  })
   const terminalDebugLogs = shouldUseTerminalDebugLogs()
   const logTerminalDebug = (event: string, details?: Record<string, unknown>) => {
     if (terminalDebugLogs) input.logRuntimeEvent('debug', event, details)
@@ -191,7 +216,8 @@ export const registerTerminalSessionsIpc = (ipcMain: IpcMain, input: RegisterTer
           window: owner,
           kind: 'ssh',
           host: result.connection.host,
-          classicTarget
+          classicTarget,
+          info: { id, kind: 'ssh', shell: result.shell, cwd: result.cwd, connection, lifecycle: result.lifecycle, classicTarget }
         }
         input.sessions.set(id, terminalRecord)
         input.registerTerminalForCodexBridge(terminalRecord, {
@@ -235,7 +261,8 @@ export const registerTerminalSessionsIpc = (ipcMain: IpcMain, input: RegisterTer
       window: owner,
       kind: 'local',
       host: 'local',
-      classicTarget
+      classicTarget,
+      info: { id, kind: 'local', shell: result.shell, cwd: result.cwd, lifecycle: result.lifecycle, classicTarget }
     }
     input.sessions.set(id, terminalRecord)
     input.registerTerminalForCodexBridge(terminalRecord, {
@@ -268,7 +295,11 @@ export const registerTerminalSessionsIpc = (ipcMain: IpcMain, input: RegisterTer
       return input.createTerminalWriteResult(id, data, false)
     }
     logTerminalDebug('terminal.write.request', { id, kind: session.kind, bytes })
-    writeTerminal(session, data)
+    try {
+      writeTerminal(session, data)
+    } catch (error) {
+      return { ok: false, errorCode: 'TERMINAL_NOT_READY', errorMessage: error instanceof Error ? error.message : 'Terminal is unavailable.' }
+    }
     logTerminalDebug('terminal.write.accepted', { id, kind: session.kind, bytes })
     return input.createTerminalWriteResult(id, data, true)
   })
@@ -284,7 +315,13 @@ export const registerTerminalSessionsIpc = (ipcMain: IpcMain, input: RegisterTer
         errorMessage: 'Terminal binary payload is empty.'
       }
     }
-    if (!writeTerminalBinary(session, buffer)) {
+    let written = false
+    try {
+      written = writeTerminalBinary(session, buffer)
+    } catch (error) {
+      return { ok: false, errorCode: 'TERMINAL_NOT_READY', errorMessage: error instanceof Error ? error.message : 'Terminal is unavailable.' }
+    }
+    if (!written) {
       return {
         ok: false,
         errorCode: 'TERMINAL_BINARY_UNSUPPORTED',

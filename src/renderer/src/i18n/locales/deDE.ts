@@ -1,5 +1,8 @@
 import { completeLocaleMessages } from './complete'
 export const deDE = completeLocaleMessages({
+  'settings.terminal.sshAutoReconnect': 'SSH automatisch wiederverbinden',
+  'settings.terminal.sshShellIntegration': 'SSH-Bash-Arbeitsverzeichnis wiederherstellen',
+  'settings.terminal.restoreTerminalTabs': 'Terminal-Tabs und Verlauf beim Start wiederherstellen',
   'common.ai': 'AI',
   'common.agents': 'Agents',
   'common.add': 'Hinzufügen',

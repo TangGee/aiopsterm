@@ -3,6 +3,9 @@ import type { ClineAgentHostTarget } from './clineAgent'
 
 export type TerminalCreateOptions = {
   cwd?: string
+  restoreFromRecovery?: boolean
+  sshAutoReconnect?: boolean
+  sshShellIntegration?: boolean
   shell?: string
   cols?: number
   rows?: number
@@ -84,6 +87,7 @@ export type TerminalLifecycleEvent = {
   kind: 'local' | 'ssh'
   stage: TerminalLifecycleStage
   at: number
+  cwdVerified?: boolean
   processId?: number
   processGroupId?: number
   shell?: string

@@ -277,6 +277,9 @@ export const createSettingsWorkspaceGeneralTerminalPages = (
             numberRow(t('settings.terminal.lineHeight'), workspace.terminalSettings.lineHeight, 1, 3, (value) => workspace.updateTerminalSettings({ lineHeight: value }), 0.1),
             switchRow(t('settings.terminal.pinchZoom'), workspace.terminalSettings.pinchZoomStatus, (checked) => workspace.updateTerminalSettings({ pinchZoomStatus: checked })),
             switchRow(t('settings.terminal.showCloseButton'), workspace.terminalSettings.showCloseButton, (checked) => workspace.updateTerminalSettings({ showCloseButton: checked })),
+            switchRow(t('settings.terminal.sshAutoReconnect'), workspace.terminalSettings.sshAutoReconnect !== false, (checked) => workspace.updateTerminalSettings({ sshAutoReconnect: checked })),
+            switchRow(t('settings.terminal.sshShellIntegration'), workspace.terminalSettings.sshShellIntegration !== false, (checked) => workspace.updateTerminalSettings({ sshShellIntegration: checked })),
+            switchRow(t('settings.terminal.restoreTerminalTabs'), workspace.terminalSettings.restoreTerminalTabs !== false, (checked) => workspace.updateTerminalSettings({ restoreTerminalTabs: checked })),
             switchRow(t('settings.terminal.sshAgents'), workspace.terminalSettings.sshAgentsStatus, (checked) => workspace.updateTerminalSettings({ sshAgentsStatus: checked })),
             switchRow(t('settings.terminal.debugLogs'), workspace.terminalSettings.debugLogs === true, (checked) => workspace.updateTerminalSettings({ debugLogs: checked })),
             workspace.terminalSettings.sshAgentsStatus

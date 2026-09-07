@@ -114,6 +114,8 @@ export const createTerminalWorkspaceSessionRuntime = ({
     try {
       const session = await createTerminal({
         kind: 'local',
+        ...(panel.restoredHistory ? { restoreFromRecovery: true } : {}),
+        ...(panel.cwd && panel.cwd !== '~' ? { cwd: panel.cwd } : {}),
         panelId: panel.id,
         workspaceId: 'workspace',
         cols: size.cols,
@@ -142,6 +144,7 @@ export const createTerminalWorkspaceSessionRuntime = ({
     try {
       const session = await createTerminal({
         kind: 'ssh',
+        ...(panel.cwdVerified && panel.cwd?.startsWith('/') ? { cwd: panel.cwd } : {}),
         panelId: panel.id,
         assetId: ssh.assetId,
         title: panel.title,
@@ -210,6 +213,7 @@ export const createTerminalWorkspaceSessionRuntime = ({
   }
 
   const reconnectTerminalPanel = async (panel: TerminalPanel) => {
+    if (panel.sessionId && !await disconnectTerminalPanel(panel)) return false
     return panel.sshSession ? startSshTerminalForPanel(panel) : startLocalTerminalForPanel(panel)
   }
 

@@ -1,3 +1,4 @@
+import { createTerminalWorkspaceRecoveryRuntime } from './terminalWorkspaceRecoveryRuntime'
 import { computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useTerminalControlSurface, type TerminalControlSurfaceView } from '@/composables/useTerminalControlSurface'
 import { useWorkspaceStore, type TerminalPanel } from '@/stores/workspace'
@@ -883,7 +884,36 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     void workspace.closeIdlePanels()
   }
 
+  const recoveryRuntime = createTerminalWorkspaceRecoveryRuntime({
+    workspace,
+    beforeRestore: () => disposeTerminalViews(),
+    afterDomUpdate: async () => { await nextTick(); syncPanelViews() },
+    start: (panel) => panel.sshSession ? startSshTerminalForPanel(panel) : startLocalTerminalForPanel(panel),
+    readHistory: async (panel) => {
+      const terminal = terminalViews.get(panel.id)?.terminal
+      if (!terminal) return panel.output
+      if (isThreadedTerminalHost(terminal)) return (await terminal.readScreen(1000, true)).text
+      const buffer = terminal.buffer.normal
+      if (!buffer) return panel.output
+      const lines: string[] = []
+      for (let row = Math.max(0, buffer.length - 1000); row < buffer.length; row++) {
+        lines.push(buffer.getLine(row)?.translateToString(true) || '')
+      }
+      return lines.join('\n').replace(/\s+$/g, '')
+    }
+  })
+  let recoveryTimer: number | undefined
+  let recoveryDebounce: number | undefined
+  const saveRecoveryOnLeave = () => { void recoveryRuntime.save() }
+  watch(() => workspace.panels.map((panel) => `${panel.id}:${panel.sessionId || ''}:${panel.title}:${panel.cwd}:${panel.splitGroupId || ''}:${panel.splitOrder || 0}`).join('|') + workspace.activePanelId + workspace.terminalSettings.restoreTerminalTabs, () => {
+    window.clearTimeout(recoveryDebounce)
+    recoveryDebounce = window.setTimeout(() => { void recoveryRuntime.save() }, 1000)
+  })
+
   onMounted(() => {
+    void recoveryRuntime.restore()
+    recoveryTimer = window.setInterval(() => { void recoveryRuntime.save() }, 5000)
+    window.addEventListener('pagehide', saveRecoveryOnLeave)
     terminalRuntimeMounted = true
     activeTerminalWorkspaceRuntimeToken = runtimeToken
     workspace.initializePanelActivity()
@@ -967,6 +997,10 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   })
 
   onUnmounted(() => {
+    window.clearInterval(recoveryTimer)
+    window.clearTimeout(recoveryDebounce)
+    window.removeEventListener('pagehide', saveRecoveryOnLeave)
+    recoveryRuntime.dispose()
     if (workspaceIdleCleanupTimer !== null) window.clearInterval(workspaceIdleCleanupTimer)
     workspaceIdleCleanupTimer = null
     setThreadedTerminalDataConsumedSink(null)

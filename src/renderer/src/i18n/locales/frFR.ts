@@ -1,5 +1,8 @@
 import { completeLocaleMessages } from './complete'
 export const frFR = completeLocaleMessages({
+  'settings.terminal.sshAutoReconnect': 'Reconnecter SSH automatiquement',
+  'settings.terminal.sshShellIntegration': 'Restaurer le répertoire de travail Bash SSH',
+  'settings.terminal.restoreTerminalTabs': 'Restaurer les onglets et l’historique au démarrage',
   'common.ai': 'IA',
   'common.agents': 'Agents',
   'common.add': 'Ajouter',

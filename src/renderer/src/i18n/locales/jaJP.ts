@@ -1,5 +1,8 @@
 import { completeLocaleMessages } from './complete'
 export const jaJP = completeLocaleMessages({
+  'settings.terminal.sshAutoReconnect': 'SSH 切断時に自動再接続',
+  'settings.terminal.sshShellIntegration': 'SSH Bash の作業ディレクトリを復元',
+  'settings.terminal.restoreTerminalTabs': '起動時にターミナルのタブと履歴を復元',
   'common.ai': 'AI',
   'common.agents': 'Agents',
   'common.add': '追加',

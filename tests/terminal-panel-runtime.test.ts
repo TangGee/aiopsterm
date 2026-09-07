@@ -146,8 +146,15 @@ describe('terminalPanelRuntime', () => {
     panel.splitGroupId = 'group-1'
     expect(isWelcomeTerminalPanelPlaceholder(panel)).toBe(false)
 
+    panel.restoredHistory = true
+    panel.cwdVerified = true
+    const beforeReset = Date.now()
     resetTerminalPanelToDefault(panel)
-    expect(panel).toEqual(createEmptyTerminalPanel('panel-main', defaultTerminalPanelTitle))
+    expect(panel.lastActivityAt).toBeGreaterThanOrEqual(beforeReset)
+    expect(panel.lastActivityAt).toBeLessThanOrEqual(Date.now())
+    expect(panel).toEqual({ ...createEmptyTerminalPanel('panel-main', defaultTerminalPanelTitle), lastActivityAt: panel.lastActivityAt })
+    expect(panel.restoredHistory).toBeUndefined()
+    expect(panel.cwdVerified).toBeUndefined()
     expect(isWelcomeTerminalPanelPlaceholder(panel)).toBe(true)
   })
 

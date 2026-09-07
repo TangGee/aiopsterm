@@ -483,6 +483,20 @@ describe('ssh terminal backend runtime', () => {
     }
   })
 
+  it('does not reconnect a healthy transport when a shell closes without exit status', async () => {
+    const backend = await loadSshTerminalBackend()
+    const ssh = createSshRuntime()
+    const events = createRecorder()
+    backend.configureSshTerminalBackendRuntime({ ssh2Runtime: asRuntime(ssh.runtime), getConfig: () => runtimeConfig(), getEnv: () => ({ SSH_AUTH_SOCK: '' }) })
+    backend.createSshTerminalSession('no-status', { kind: 'ssh', sshAutoReconnect: true, ssh: { host: 'host', username: 'user', password: 'secret' } }, createSink(events))
+    await waitForMicrotasks(4)
+    ssh.channels[0].emit('close')
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(events.exit).toHaveLength(1)
+    expect(events.exit[0].event.reason).toBe('process')
+    expect(events.lifecycle.at(-1)?.stage).toBe('closed')
+  })
+
   it('reports an active SSH transport failure as a network disconnect', async () => {
     const backend = await loadSshTerminalBackend()
     const ssh = createSshRuntime()

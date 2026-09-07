@@ -10,7 +10,13 @@ export type {
   SshTerminalTarget
 } from './sshTerminalTypes'
 export { resolveSshTerminalTarget } from './sshTerminalRuntimeConfig'
-export { createSshTerminalSession } from './sshTerminalSessionRuntime'
+import { createSshTerminalSession as createSession } from './sshTerminalSessionRuntime'
+import { createRecoveringSshTerminalSession } from './sshTerminalRecovery'
+import type { TerminalCreateOptions } from '@shared/contracts/terminalSessions'
+import type { SshTerminalEventSink } from './sshTerminalTypes'
+
+export const createSshTerminalSession = (id: string, options: TerminalCreateOptions, sink: SshTerminalEventSink) =>
+  (options.sshAutoReconnect || options.sshShellIntegration) ? createRecoveringSshTerminalSession(id, options, sink, createSession) : createSession(id, options, sink)
 
 export const configureSshTerminalBackendRuntime = (config: SshTerminalRuntimeConfig = {}) => {
   setSshTerminalBackendRuntimeConfig(config)

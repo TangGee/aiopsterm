@@ -1,5 +1,8 @@
 import { completeLocaleMessages } from './complete'
 export const ruRU = completeLocaleMessages({
+  'settings.terminal.sshAutoReconnect': 'Автоматически переподключать SSH',
+  'settings.terminal.sshShellIntegration': 'Восстанавливать рабочий каталог Bash SSH',
+  'settings.terminal.restoreTerminalTabs': 'Восстанавливать вкладки и историю терминала при запуске',
   'common.ai': 'AI',
   'common.agents': 'Agents',
   'common.add': 'Добавить',

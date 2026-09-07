@@ -22,3 +22,7 @@ ELECTRON_RUN_AS_NODE=1 <aiopsterm-executable> <helper.js>
 Local terminals created by aiopsterm expose `aio`, `aictl`, `aiopsterm-control`, `aiopen`, `aiossh`, `aioic`, and `aiobc` on PATH. `aio` is the preferred short command for the control helper. `aiopen <path>...` opens existing local text files in the main workspace editor, resolving relative paths from the command's current directory. `aiossh <managed-host>` is the short SSH entry for hosts already saved in aiopsterm. `aioic` runs configured idle-panel cleanup, while `aiobc` immediately closes background panels and preserves the current panel. These shims internally use aiopsterm's packaged runtime instead of relying on a system `node` binary.
 
 Development and package-build dependencies are documented separately in [Development Commands](development-commands.md) and [Package Verification](package-verification.md).
+
+## Terminal Recovery
+
+Automatic SSH reconnect and terminal history recovery are built in and enabled by default. They require no tmux installation or remote background service. Bash directory recovery uses a transient SSH PTY exec initialization on supported POSIX hosts. See [Terminal Recovery](terminal-recovery.md) for settings and supported behavior.

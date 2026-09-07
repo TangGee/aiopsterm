@@ -271,7 +271,7 @@ export type ThreadedTerminalCoreRequest =
   | { type: 'scroll-to-line'; terminalId: string; line: number }
   | { type: 'search'; terminalId: string; query: string; direction: 'next' | 'previous'; caseSensitive?: boolean; incremental?: boolean }
   | { type: 'search-clear'; terminalId: string }
-  | { type: 'read-screen'; terminalId: string; requestId: string; tailLines?: number }
+  | { type: 'read-screen'; terminalId: string; requestId: string; tailLines?: number; normalBuffer?: boolean }
   | { type: 'read-selection'; terminalId: string; requestId: string; range: ThreadedTerminalSelectionRange }
   | { type: 'mouse-event'; terminalId: string; event: ThreadedTerminalMouseEventPayload }
   | { type: 'export'; terminalId: string; requestId: string }
