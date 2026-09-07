@@ -44,8 +44,41 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # `npm test` would re-run the audits above; run vitest directly instead.
-      # E2E (Playwright), live-environment tests, and electron-builder packaging
-      # are intentionally excluded from this workflow.
       - name: Unit tests (vitest)
-        run: npx vitest run
+        run: npx vitest run --reporter=default --reporter=junit --outputFile=test-results/unit.xml
+
+      - name: Upload unit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-results
+          path: test-results/unit.xml
+
+  desktop:
+    name: Core desktop (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0 libnss3 libasound2 libgbm1 fonts-noto-cjk
+      - run: npm run test:regression -- core
+      - name: Upload desktop results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 14

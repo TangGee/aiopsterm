@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
+import { access, mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { basename, delimiter, join } from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -9,6 +9,7 @@ type ExportMcpInstallerBackend = {
     getHomeDir?: () => string
     getEnv?: () => NodeJS.ProcessEnv
     getPlatform?: () => NodeJS.Platform
+    access?: typeof access
     getExportMcpScriptPath?: () => string
     getJsRuntimeExecutable?: () => string
     getExportMcpToken?: () => string
@@ -107,6 +108,10 @@ describe('Export MCP installer backend', () => {
       getHomeDir: () => home,
       getPlatform: () => 'darwin',
       getEnv: () => ({ HOME: home, CODEX_HOME: codexHome, PATH: '/usr/bin' }),
+      access: async (file, mode) => {
+        if (!String(file).startsWith(home)) throw new Error('Outside isolated test home')
+        return access(file, mode)
+      },
       getExportMcpScriptPath: () => scriptPath,
       getJsRuntimeExecutable: () => runtimePath,
       getExportMcpToken: () => token
@@ -207,6 +212,10 @@ describe('Export MCP installer backend', () => {
       getHomeDir: () => home,
       getPlatform: () => 'darwin',
       getEnv: () => ({ HOME: home, CODEX_HOME: codexHome, PATH: '/usr/bin:/bin' }),
+      access: async (file, mode) => {
+        if (!String(file).startsWith(home)) throw new Error('Outside isolated test home')
+        return access(file, mode)
+      },
       getExportMcpScriptPath: () => scriptPath,
       getJsRuntimeExecutable: () => runtimePath,
       getExportMcpToken: () => token,

@@ -2,6 +2,7 @@ import { _electron as electron, expect, test, type ElectronApplication, type Pag
 import { mkdir, readFile, rm, writeFile } from 'fs/promises'
 import os from 'os'
 import path from 'path'
+import { isolatedEnvironment } from '../regression/support/environment'
 
 const stressEnabled = process.env.AIOPSTERM_TERMINAL_STRESS === '1'
 const stressDurationMs = Number(process.env.AIOPSTERM_TERMINAL_STRESS_DURATION_MS || 20 * 60 * 1000)
@@ -253,10 +254,11 @@ const launchStressApp = async () => {
   const userDataDir = path.join(os.tmpdir(), `aiopsterm-terminal-stress-${Date.now()}`)
   await mkdir(userDataDir, { recursive: true })
   const app = await electron.launch({
-    args: ['--js-flags=--expose-gc', '.'],
+    args: ['--js-flags=--expose-gc', '.', '--lang=zh-CN'],
     env: {
-      ...process.env,
+      ...await isolatedEnvironment(userDataDir),
       NODE_ENV: 'test',
+      AIOPSTERM_TERMINAL_STRESS: '1',
       AIOPSTERM_USER_DATA_DIR: userDataDir,
       AIOPSTERM_THREADED_TERMINAL: '1',
       VITE_AIOPSTERM_THREADED_TERMINAL: '1',
@@ -621,6 +623,11 @@ const logStressResult = (result: StressResult) => {
 
 test('threaded terminal renderer keeps foreground frames healthy under 10 foreground and 40 background streams', async () => {
   const { app, userDataDir } = await launchStressApp()
+  const startedAt = Date.now()
+  const progress = setInterval(() => {
+    console.log(`[terminal-stress] elapsed=${Math.round((Date.now() - startedAt) / 1000)}s requested=${stressDurationMs / 1000}s`)
+  }, 60_000)
+  progress.unref()
   try {
     const page = await app.firstWindow()
     await page.waitForFunction(() => Boolean((window as any).__AIOPSTERM_TERMINAL_STRESS__?.run), undefined, { timeout: 30_000 })
@@ -648,6 +655,8 @@ test('threaded terminal renderer keeps foreground frames healthy under 10 foregr
     const heapArtifacts = await heapProfiler.stop()
     result.heapArtifacts = heapArtifacts
     logStressResult(result)
+    await mkdir(stressArtifactDir, { recursive: true })
+    await writeFile(path.join(stressArtifactDir, 'summary.json'), JSON.stringify(result, null, 2))
     expect(result.profile).toBe(stressProfile)
     expect(result.foreground).toBeGreaterThanOrEqual(10)
     expect(result.background).toBeGreaterThanOrEqual(40)
@@ -735,6 +744,7 @@ test('threaded terminal renderer keeps foreground frames healthy under 10 foregr
     expect(result.p99FrameMs).toBeLessThan(100)
     expect(result.errors.filter((message) => !message.includes('Timed out waiting for PTY echo marker'))).toEqual([])
   } finally {
+    clearInterval(progress)
     await app.close().catch(() => undefined)
     await rm(userDataDir, { recursive: true, force: true })
   }

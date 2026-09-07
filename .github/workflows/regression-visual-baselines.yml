@@ -1,0 +1,46 @@
+name: Review visual baselines
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      AIOPSTERM_FULL_VISUAL: '1'
+      AIOPSTERM_VISUAL_BASELINES: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0 libnss3 libasound2 libgbm1 fonts-noto-cjk
+      - run: npm run build
+      - run: npm run native:ensure:electron
+      - name: Capture candidate baselines, never auto-commit them
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a npx playwright test -c playwright.regression.config.ts --grep @visual --update-snapshots
+          else
+            npx playwright test -c playwright.regression.config.ts --grep @visual --update-snapshots
+          fi
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-candidates-${{ matrix.os }}
+          path: |
+            tests/regression/snapshots/
+            playwright-report/
+            test-results/

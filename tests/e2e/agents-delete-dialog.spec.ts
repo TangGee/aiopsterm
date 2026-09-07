@@ -2,6 +2,7 @@ import { _electron as electron, expect, test } from '@playwright/test'
 import { mkdir, rm } from 'fs/promises'
 import os from 'os'
 import path from 'path'
+import { isolatedEnvironment } from '../regression/support/environment'
 
 test('session delete confirmation follows the application theme @quick', async () => {
   const userDataDir = path.join(os.tmpdir(), `aiopsterm-e2e-agents-delete-${Date.now()}`)
@@ -9,9 +10,9 @@ test('session delete confirmation follows the application theme @quick', async (
   await mkdir('test-results', { recursive: true })
 
   const app = await electron.launch({
-    args: ['.'],
+    args: ['.', '--lang=zh-CN'],
     env: {
-      ...process.env,
+      ...await isolatedEnvironment(userDataDir),
       NODE_ENV: 'test',
       AIOPSTERM_USER_DATA_DIR: userDataDir,
       AIOPSTERM_CHAT_HISTORY_ENABLE_SEED: '1',

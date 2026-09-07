@@ -1,0 +1,63 @@
+name: Full desktop regression
+
+on:
+  schedule:
+    - cron: '20 18 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-regression-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  full:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0 libnss3 libasound2 libgbm1 fonts-noto-cjk
+      - run: npm run test:regression -- full
+      - name: Upload full regression artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-${{ matrix.os }}
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 21
+
+  stress:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0 libnss3 libasound2 libgbm1
+      - run: npm run test:regression -- stress
+      - name: Upload performance samples and traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stress-linux
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 30

@@ -1,0 +1,77 @@
+name: Packaged desktop regression
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '20 19 * * 6'
+
+permissions:
+  contents: read
+
+jobs:
+  packaged:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            container: ubuntu:20.04
+          - os: windows-latest
+          - os: macos-latest
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+    timeout-minutes: 180
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - name: Prepare Ubuntu 20.04 release toolchain
+        if: runner.os == 'Linux'
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git build-essential python3 pkg-config musl-tools libcap-dev clang libc++-dev libc++abi-dev lld libssl-dev xz-utils dpkg-dev fakeroot xvfb libgtk-3-0 libnss3 libasound2 libgbm1 fonts-noto-cjk unzip zip
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/regression-rustup.sh
+          sh /tmp/regression-rustup.sh -y --profile minimal --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: npm run generate:icons
+      - run: npm run build:codex
+      - run: npm run build:cline-sidecar
+      - run: npm run build
+      - run: npm run native:ensure:electron
+      - name: Build distributables and runnable package
+        run: npx electron-builder --config electron-builder.yml --config.mac.notarize=false --publish never
+      - name: Record artifact commit and hashes
+        run: npm run test:release:gate -- dist
+      - run: npm run audit:packaged-app
+      - run: npm run test:regression -- packaged
+      - name: Verify tested artifacts were not changed
+        run: npm run test:release:gate -- dist --verify
+      - name: Upload package regression artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaged-${{ matrix.os }}
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 21
+      - name: Upload tested distributables
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ runner.os }}
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/regression-provenance-*.json
+          retention-days: 7

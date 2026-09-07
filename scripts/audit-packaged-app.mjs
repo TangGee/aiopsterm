@@ -12,7 +12,7 @@ const { listPackage } = require('@electron/asar')
 const platform = process.argv.includes('--platform')
   ? process.argv[process.argv.indexOf('--platform') + 1]
   : process.platform
-const distDir = resolve('dist')
+const distDir = resolve(process.env.AIOPSTERM_DIST_DIR || 'dist')
 
 const unpackedDirForPlatform = () => {
   if (platform === 'win32') return join(distDir, 'win-unpacked')

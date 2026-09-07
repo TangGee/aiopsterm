@@ -6,6 +6,7 @@ import { createConnection, type AddressInfo } from 'net'
 import os from 'os'
 import path from 'path'
 import { deflateRawSync } from 'zlib'
+import { isolatedEnvironment } from '../regression/support/environment'
 
 const e2eUserDataDir = (name: string) => path.join(os.tmpdir(), `aiopsterm-e2e-${name}-${Date.now()}`)
 
@@ -13,9 +14,9 @@ const launchApp = async (name: string, env: NodeJS.ProcessEnv = {}, options: { u
   const userDataDir = options.userDataDir || e2eUserDataDir(name)
   await mkdir(userDataDir, { recursive: true })
   return electron.launch({
-    args: ['.'],
+    args: ['.', '--lang=zh-CN'],
     env: {
-      ...process.env,
+      ...await isolatedEnvironment(userDataDir),
       ...env,
       NODE_ENV: 'test',
       AIOPSTERM_USER_DATA_DIR: userDataDir,
@@ -1734,7 +1735,7 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(sqlSaveButton).toBeEnabled()
     await expect(sqlSaveAsButton).toBeEnabled()
     await page.locator('.db-sql-editor').fill("select id, service from public.orders where status = 'open' order by updated_at desc limit 5; select * from ops.ops_incidents;")
-    const e2eSqlSavePath = path.join(os.homedir(), 'Downloads', 'Query-1-orders-postgres-orders-public.sql')
+    const e2eSqlSavePath = path.join(await app.evaluate(({ app }) => app.getPath('downloads')), 'Query-1-orders-postgres-orders-public.sql')
     await rm(e2eSqlSavePath, { force: true })
     await sqlSaveAsButton.click()
     await expect(page.locator('.db-sql-save-state')).toContainText('已保存：')

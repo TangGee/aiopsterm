@@ -3,6 +3,7 @@ import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { isolatedEnvironment } from '../regression/support/environment'
 
 const defaultExecutablePath = () => {
   if (process.platform === 'win32') return 'dist/win-unpacked/aiopsterm.exe'
@@ -59,9 +60,9 @@ test('packaged app starts, opens interactive local and Codex terminals, browses 
 
   const app = await electron.launch({
     executablePath,
-    args: process.platform === 'linux' ? ['--no-sandbox'] : [],
+    args: ['--lang=zh-CN', ...(process.platform === 'linux' ? ['--no-sandbox'] : [])],
     env: {
-      ...process.env,
+      ...await isolatedEnvironment(userDataDir),
       NODE_ENV: 'test',
       AIOPSTERM_USER_DATA_DIR: userDataDir,
       AIOPSTERM_FILES_ENABLE_SEED: '1',
@@ -101,7 +102,9 @@ test('packaged app starts, opens interactive local and Codex terminals, browses 
     const terminalInput = page.locator('.terminal-pane.active .threaded-terminal-input, .terminal-pane.active .xterm-helper-textarea').first()
     await terminalInput.focus()
     await page.keyboard.type(
-      `printf '__AIOPSTERM_COLOR_ENV__=%s|%s|%s|%s\\n' "$TERM" "$COLORTERM" "$CLICOLOR" "$TERM_PROGRAM"`
+      process.platform === 'win32'
+        ? 'Write-Output ("__AIOPSTERM_COLOR_ENV__={0}|{1}|{2}|{3}" -f $env:TERM, $env:COLORTERM, $env:CLICOLOR, $env:TERM_PROGRAM)'
+        : `printf '__AIOPSTERM_COLOR_ENV__=%s|%s|%s|%s\\n' "$TERM" "$COLORTERM" "$CLICOLOR" "$TERM_PROGRAM"`
     )
     await page.keyboard.press('Enter')
     let terminalOutput = ''
@@ -115,7 +118,9 @@ test('packaged app starts, opens interactive local and Codex terminals, browses 
         terminalOutput = String(replay.data?.snapshot_text || '')
         return terminalOutput
       })
-      .toContain('__AIOPSTERM_COLOR_ENV__=xterm-256color|truecolor|')
+      .toMatch(/[\r\n]__AIOPSTERM_COLOR_ENV__=[^\r\n]*\|[^\r\n]*\|[^\r\n]*\|[^\r\n]*(?:[\r\n]|$)/)
+    // Linux inherits color preferences; only macOS supplies these defaults.
+    if (process.platform !== 'win32') expect(terminalOutput).toContain('__AIOPSTERM_COLOR_ENV__=xterm-256color|')
     if (process.platform === 'darwin') {
       expect(terminalOutput).toContain('__AIOPSTERM_COLOR_ENV__=xterm-256color|truecolor|1|aiopsterm')
     }

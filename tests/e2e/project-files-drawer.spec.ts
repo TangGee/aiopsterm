@@ -2,6 +2,7 @@ import { _electron as electron, expect, test } from '@playwright/test'
 import { mkdir, readFile, rm, writeFile } from 'fs/promises'
 import os from 'os'
 import path from 'path'
+import { isolatedEnvironment } from '../regression/support/environment'
 
 test('project files switches the persistent AI panel content surface', async () => {
   test.setTimeout(120_000)
@@ -18,7 +19,7 @@ test('project files switches the persistent AI panel content surface', async () 
   const app = await electron.launch({
     args: ['.', '--lang=zh-CN'],
     env: {
-      ...process.env,
+      ...await isolatedEnvironment(userDataDir),
       NODE_ENV: 'test',
       AIOPSTERM_USER_DATA_DIR: userDataDir,
       AIOPSTERM_WORKSPACE_PREFERENCES_ENABLE_SEED: '1',
