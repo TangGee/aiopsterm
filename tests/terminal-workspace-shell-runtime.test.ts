@@ -191,6 +191,85 @@ const createRuntime = (options: {
 }
 
 describe('terminalWorkspaceShellRuntime', () => {
+  it.each(['clear', 'copy', 'copy-empty', 'font-increase', 'font-decrease', 'connection', 'unsplit', 'escape'])('restores terminal keyboard focus after the %s menu action', async (action) => {
+    const button = document.createElement('button')
+    const input = document.createElement('textarea')
+    document.body.append(button, input)
+    const { calls, runtime, state } = createRuntime({
+      selection: action === 'copy-empty' ? '' : 'output',
+      afterDomUpdate: async () => { button.remove() }
+    })
+    calls.focusPanel.mockImplementation(() => {
+      expect(button.isConnected).toBe(false)
+      expect(state.termMenu.visible).toBe(false)
+      input.focus()
+    })
+    try {
+      runtime.openTerminalMenu(createMouseEvent(), 'panel-1')
+      button.focus()
+      if (action === 'clear') await runtime.clearTerminal('panel-1')
+      if (action.startsWith('copy')) await runtime.copySelection('panel-1')
+      if (action === 'font-increase') await runtime.increaseFontFromMenu()
+      if (action === 'font-decrease') await runtime.decreaseFontFromMenu()
+      if (action === 'connection') await runtime.togglePanelConnection('panel-1')
+      if (action === 'unsplit') await runtime.unsplitFromTermMenu()
+      if (action === 'escape') await runtime.handleShortcut(createKeyboardEvent({ key: 'Escape' }))
+      expect(calls.focusPanel).toHaveBeenCalledWith('panel-1')
+      expect(document.activeElement).toBe(input)
+    } finally {
+      button.remove()
+      input.remove()
+    }
+  })
+
+  it.each(['clear', 'font-increase', 'copy', 'connection'])('does not reclaim focus after the user switches panels during %s', async (action) => {
+    const { calls, runtime, workspace } = createRuntime({
+      selection: 'output',
+      afterDomUpdate: async () => { workspace.createPanel() }
+    })
+    if (action === 'clear') await runtime.clearTerminal('panel-1')
+    if (action === 'font-increase') await runtime.increaseFontFromMenu()
+    if (action === 'copy') await runtime.copySelection('panel-1')
+    if (action === 'connection') await runtime.togglePanelConnection('panel-1')
+    expect(calls.focusPanel).not.toHaveBeenCalled()
+  })
+
+  it('does not dismiss a new menu when an earlier copy finishes', async () => {
+    let finishCopy!: (copied: boolean) => void
+    const copied = new Promise<boolean>((resolve) => { finishCopy = resolve })
+    const { calls, runtime, state } = createRuntime({ selection: 'output', copyToClipboard: () => copied })
+    runtime.openTerminalMenu(createMouseEvent(), 'panel-1')
+    const copy = runtime.copySelection('panel-1')
+    expect(state.termMenu.visible).toBe(false)
+    runtime.openTerminalMenu(createMouseEvent(), 'panel-1')
+    finishCopy(true)
+    await copy
+    expect(state.termMenu.visible).toBe(true)
+    expect(calls.focusPanel).not.toHaveBeenCalled()
+  })
+
+  it.each(['terminal-close', 'tab-close', 'close-others'])('focuses the remaining active terminal after %s', async (action) => {
+    const { calls, runtime, state, workspace } = createRuntime()
+    workspace.panels.push(createPanel({ id: 'panel-2' }))
+    const close = async () => {
+      workspace.panels.splice(0, 1)
+      workspace.selectPanelForLifecycle('panel-2')
+      return { closed: true, panelId: 'panel-1', terminalStatus: 'none' as const }
+    }
+    vi.mocked(workspace.closePanel).mockImplementation(close)
+    vi.mocked(workspace.closeOthers).mockImplementation(async () => {
+      workspace.panels.splice(1)
+      return [{ closed: true, panelId: 'panel-2', terminalStatus: 'none' as const }]
+    })
+    state.menu.panelId = 'panel-1'
+    runtime.openTerminalMenu(createMouseEvent(), 'panel-1')
+    if (action === 'terminal-close') await runtime.closeTerminalFromMenu()
+    if (action === 'tab-close') await runtime.closeSelected()
+    if (action === 'close-others') await runtime.closeOtherTabsFromMenu()
+    expect(calls.focusPanel).toHaveBeenCalledWith(action === 'close-others' ? 'panel-1' : 'panel-2')
+    expect(state.termMenu.visible).toBe(false)
+  })
+
   it('returns keyboard input to the terminal after clicking paste and removing the menu', async () => {
     const menuElement = document.createElement('div')
     const button = document.createElement('button')
@@ -580,6 +659,7 @@ describe('terminalWorkspaceShellRuntime', () => {
     expect(calls.focusPanel).toHaveBeenCalledWith('panel-3')
     expect(calls.startLocalTerminalForPanel).toHaveBeenCalledWith(expect.objectContaining({ id: 'panel-3' }))
 
+    runtime.openTerminalMenu(createMouseEvent(), 'panel-1')
     await runtime.togglePanelConnection('panel-1')
     expect(calls.focusPanel).toHaveBeenCalledWith('panel-1')
     expect(calls.syncTerminalView).toHaveBeenCalledWith(workspace.panels[0])

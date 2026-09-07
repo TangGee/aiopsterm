@@ -1,5 +1,6 @@
 import { computed, nextTick, reactive, ref, watch, type Ref } from 'vue'
 import { terminalClient } from '@/services/terminal/terminalClient'
+import { captureUiFocus } from '@/services/app/uiFocusCoordinator'
 import type { TerminalView } from '@/services/terminal/terminalWorkspaceViewRuntime'
 import type { TerminalPanel, useWorkspaceStore } from '@/stores/workspace'
 import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
@@ -632,14 +633,25 @@ export const createTerminalWorkspaceCommandRuntime = ({
   }
 
   const toggleGlobalInput = () => {
+    const panelId = workspace.activePanelId
+    const interaction = captureUiFocus().interaction
     globalInputVisible.value = !globalInputVisible.value
     termMenu.visible = false
+    menu.visible = false
     aiButtonPanelId.value = ''
     if (globalInputVisible.value) {
       nextTick(() => {
         const input = Array.isArray(globalCommandInput.value) ? globalCommandInput.value[0] : globalCommandInput.value
         input?.focus()
         input?.select()
+      })
+    } else {
+      nextTick(() => {
+        if (captureUiFocus().interaction !== interaction || workspace.activePanelId !== panelId) return
+        if (globalInputVisible.value || menu.visible || termMenu.visible || commandDialog.visible || searchOverlayPanelId.value || commandLinePanelId.value) return
+        if (document.activeElement && document.activeElement !== document.body) return
+        const panel = panelById(panelId)
+        if (panel && isTerminalWorkspacePanel(panel)) focusPanel(panelId)
       })
     }
   }

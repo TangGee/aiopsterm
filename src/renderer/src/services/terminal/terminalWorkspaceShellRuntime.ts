@@ -248,6 +248,25 @@ export const createTerminalWorkspaceShellRuntime = (
     termMenu.visible = false
   }
 
+  const closeMenusForTerminalAction = (panelId: string) => {
+    const interaction = captureUiFocus().interaction
+    closeTerminalMenusFromDocument()
+    return async (targetPanelId = panelId) => {
+      await afterDomUpdate()
+      const panel = panelById(targetPanelId)
+      if (
+        captureUiFocus().interaction === interaction &&
+        workspace.activePanelId === targetPanelId &&
+        panel && isTerminalWorkspacePanel(panel) &&
+        terminalWorkspaceVisible?.value !== false &&
+        !menu.visible && !termMenu.visible &&
+        !commandDialog.visible && !searchOverlayPanelId.value
+      ) {
+        focusPanel(targetPanelId)
+      }
+    }
+  }
+
   const activatePanel = (panelId: string, cause: UiFocusCause = 'keyboard') =>
     workspace.activatePanelSurface(panelId, { cause })
 
@@ -343,8 +362,9 @@ export const createTerminalWorkspaceShellRuntime = (
   }
 
   const closeSelected = async () => {
+    const restoreFocus = closeMenusForTerminalAction(menu.panelId)
     await workspace.closePanel(menu.panelId)
-    menu.visible = false
+    await restoreFocus(workspace.activePanelId)
   }
 
   const closeTab = async (panelId: string) => {
@@ -356,8 +376,9 @@ export const createTerminalWorkspaceShellRuntime = (
   }
 
   const closeOtherTabsFromMenu = async () => {
+    const restoreFocus = closeMenusForTerminalAction(menu.panelId)
     await workspace.closeOthers(menu.panelId)
-    menu.visible = false
+    await restoreFocus(workspace.activePanelId)
   }
 
   const closeAllTabsFromMenu = async () => {
@@ -428,10 +449,10 @@ export const createTerminalWorkspaceShellRuntime = (
   }
 
   const unsplitSelected = () => {
+    const restoreFocus = closeMenusForTerminalAction(menu.panelId)
     workspace.unsplitPanel(menu.panelId)
-    menu.visible = false
     refitAfterLayoutChange()
-    focusActivePanel()
+    return restoreFocus(workspace.activePanelId)
   }
 
   const forkSshFromPanel = async (sourcePanelId: string) => {
@@ -478,31 +499,30 @@ export const createTerminalWorkspaceShellRuntime = (
   }
 
   const copySelection = async (panelId = workspace.activePanelId) => {
-    const terminal = terminalViews.get(panelId)?.terminal
-    if (
-      terminal &&
-      isThreadedTerminalHost(terminal) &&
-      typeof terminal.copySelectionToClipboard === 'function'
-    ) {
-      const copied = await terminal.copySelectionToClipboard()
-      if (copied) workspace.setTopNotice('终端内容已复制')
-      menu.visible = false
-      termMenu.visible = false
-      return
+    const restoreFocus = closeMenusForTerminalAction(panelId)
+    try {
+      const terminal = terminalViews.get(panelId)?.terminal
+      if (
+        terminal &&
+        isThreadedTerminalHost(terminal) &&
+        typeof terminal.copySelectionToClipboard === 'function'
+      ) {
+        const copied = await terminal.copySelectionToClipboard()
+        if (copied) workspace.setTopNotice('终端内容已复制')
+        return
+      }
+      const selectedText = terminal?.getSelection()
+      if (selectedText) {
+        const copied = await copyToClipboard(selectedText)
+        workspace.setTopNotice(copied ? '终端内容已复制' : '终端复制失败')
+      }
+    } finally {
+      await restoreFocus()
     }
-    const selectedText = terminal?.getSelection()
-    if (selectedText) {
-      const copied = await copyToClipboard(selectedText)
-      workspace.setTopNotice(copied ? '终端内容已复制' : '终端复制失败')
-    }
-    menu.visible = false
-    termMenu.visible = false
   }
 
   const pasteClipboard = async (panelId = workspace.activePanelId) => {
-    const interaction = captureUiFocus().interaction
-    menu.visible = false
-    termMenu.visible = false
+    const restoreTerminalFocus = closeMenusForTerminalAction(panelId)
     let restoreFocus = true
     try {
       const clipboardRead = await readClipboard()
@@ -524,32 +544,20 @@ export const createTerminalWorkspaceShellRuntime = (
       restoreFocus = result?.status === 'allow'
       if (restoreFocus) syncTerminalView(panel)
     } finally {
-      await afterDomUpdate()
-      const panel = panelById(panelId)
-      if (
-        restoreFocus &&
-        captureUiFocus().interaction === interaction &&
-        workspace.activePanelId === panelId &&
-        panel && isTerminalWorkspacePanel(panel) &&
-        terminalWorkspaceVisible?.value !== false &&
-        !menu.visible && !termMenu.visible &&
-        !commandDialog.visible && !searchOverlayPanelId.value
-      ) {
-        focusPanel(panelId)
-      }
+      if (restoreFocus) await restoreTerminalFocus()
     }
   }
 
   const clearTerminal = (panelId = workspace.activePanelId) => {
     const panel = panelById(panelId)
     if (!panel || !isTerminalWorkspacePanel(panel)) return
+    const restoreFocus = closeMenusForTerminalAction(panelId)
     workspace.replaceTerminalOutput(panel.id, '')
     const view = terminalViews.get(panelId)
     view?.clearPendingOutput?.()
     if (!view?.clearPendingOutput) view?.terminal.clear()
     if (view) view.lastOutput = ''
-    menu.visible = false
-    termMenu.visible = false
+    return restoreFocus()
   }
 
   const increaseFont = (panelId = workspace.activePanelId) => updateFontSize(panelId, terminalFontSizeForPanel(panelId) + 1)
@@ -557,15 +565,17 @@ export const createTerminalWorkspaceShellRuntime = (
   const resetFont = (panelId = workspace.activePanelId) => updateFontSize(panelId, workspace.terminalSettings.fontSize || DEFAULT_TERMINAL_FONT_SIZE)
 
   const increaseFontFromMenu = () => {
-    increaseFont(termMenu.panelId || workspace.activePanelId)
-    termMenu.visible = false
-    menu.visible = false
+    const panelId = termMenu.panelId || workspace.activePanelId
+    const restoreFocus = closeMenusForTerminalAction(panelId)
+    increaseFont(panelId)
+    return restoreFocus()
   }
 
   const decreaseFontFromMenu = () => {
-    decreaseFont(termMenu.panelId || workspace.activePanelId)
-    termMenu.visible = false
-    menu.visible = false
+    const panelId = termMenu.panelId || workspace.activePanelId
+    const restoreFocus = closeMenusForTerminalAction(panelId)
+    decreaseFont(panelId)
+    return restoreFocus()
   }
 
   const handleTerminalWheel = (panelId: string, event: WheelEvent) => {
@@ -737,6 +747,7 @@ export const createTerminalWorkspaceShellRuntime = (
   const togglePanelConnection = async (panelId: string) => {
     const panel = panelById(panelId)
     if (!panel || !isTerminalWorkspacePanel(panel)) return
+    const restoreFocus = closeMenusForTerminalAction(panelId)
     const wasNeverConnected = !panel.sessionId && panel.status === 'ready'
     if (!panel.sessionId) {
       if (pendingPanelConnectionIds.has(panelId)) return
@@ -752,13 +763,11 @@ export const createTerminalWorkspaceShellRuntime = (
       if (disconnected) workspace.setTopNotice('终端已断开连接')
     }
     syncTerminalView(panel)
-    focusPanel(panelId)
-    termMenu.visible = false
+    await restoreFocus()
   }
 
   const toggleTabConnectionFromMenu = async () => {
     await togglePanelConnection(menu.panelId)
-    menu.visible = false
   }
 
   const createTerminalFromMenu = async () => {
@@ -768,8 +777,9 @@ export const createTerminalWorkspaceShellRuntime = (
   }
 
   const closeTerminalFromMenu = async () => {
+    const restoreFocus = closeMenusForTerminalAction(termMenu.panelId)
     await workspace.closePanel(termMenu.panelId)
-    termMenu.visible = false
+    await restoreFocus(workspace.activePanelId)
   }
 
   const splitFromTermMenu = (direction: PanelDirection) => {
@@ -778,10 +788,10 @@ export const createTerminalWorkspaceShellRuntime = (
   }
 
   const unsplitFromTermMenu = () => {
+    const restoreFocus = closeMenusForTerminalAction(termMenu.panelId)
     workspace.unsplitPanel(termMenu.panelId)
-    termMenu.visible = false
     refitAfterLayoutChange()
-    focusActivePanel()
+    return restoreFocus(workspace.activePanelId)
   }
 
   const openFileManagerFromMenu = () => {
@@ -831,11 +841,13 @@ export const createTerminalWorkspaceShellRuntime = (
       return
     }
     if (event.key === 'Escape') {
-      menu.visible = false
-      termMenu.visible = false
+      const restoreFocus = (menu.visible || termMenu.visible)
+        ? closeMenusForTerminalAction(workspace.activePanelId)
+        : null
       closeSearchOverlay()
       if (commandDialog.visible) closeCommandDialog()
       hideSuggestions()
+      await restoreFocus?.()
       return
     }
     if (hasPrimaryModifier && event.shiftKey && key === 'k') {
