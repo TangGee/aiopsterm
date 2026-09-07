@@ -7,6 +7,7 @@ import {
 import type { ClipboardTextReadResult } from '@/services/app/clipboardRuntime'
 import type { TerminalView } from '@/services/terminal/terminalWorkspaceViewRuntime'
 import type { TerminalPanel, useWorkspaceStore } from '@/stores/workspace'
+import { installUiFocusCoordinator } from '@/services/app/uiFocusCoordinator'
 
 type WorkspaceStore = ReturnType<typeof useWorkspaceStore>
 
@@ -125,6 +126,7 @@ const createWorkspace = (panel = createPanel()) => {
 }
 
 const createRuntime = (options: {
+  afterDomUpdate?: () => void | Promise<void>
   copyToClipboard?: (text: string) => Promise<boolean>
   dashboardVisible?: boolean
   readClipboard?: () => Promise<ClipboardTextReadResult>
@@ -179,7 +181,7 @@ const createRuntime = (options: {
       ...calls
     },
     {
-      afterDomUpdate: vi.fn(async () => undefined),
+      afterDomUpdate: options.afterDomUpdate ?? vi.fn(async () => undefined),
       copyToClipboard: options.copyToClipboard ?? vi.fn(async () => true),
       getViewportSize: () => ({ innerWidth: 300, innerHeight: 260 }),
       readClipboard: options.readClipboard ?? vi.fn(async (): Promise<ClipboardTextReadResult> => ({ ok: true, text: 'pwd\n' }))
@@ -189,6 +191,88 @@ const createRuntime = (options: {
 }
 
 describe('terminalWorkspaceShellRuntime', () => {
+  it('returns keyboard input to the terminal after clicking paste and removing the menu', async () => {
+    const menuElement = document.createElement('div')
+    const button = document.createElement('button')
+    const input = document.createElement('textarea')
+    menuElement.append(button)
+    document.body.append(menuElement, input)
+    const onEnter = vi.fn()
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') onEnter()
+    })
+    let resolveClipboard!: (result: ClipboardTextReadResult) => void
+    const clipboard = new Promise<ClipboardTextReadResult>((resolve) => { resolveClipboard = resolve })
+    const { calls, runtime, state } = createRuntime({
+      readClipboard: () => clipboard,
+      afterDomUpdate: async () => { menuElement.remove() }
+    })
+    calls.focusPanel.mockImplementation(() => {
+      expect(state.termMenu.visible).toBe(false)
+      expect(menuElement.isConnected).toBe(false)
+      input.focus()
+    })
+    try {
+      runtime.openTerminalMenu(createMouseEvent(), 'panel-1')
+      button.focus()
+      let paste: Promise<void> | undefined
+      button.addEventListener('click', () => { paste = runtime.pasteClipboard('panel-1') })
+      button.click()
+      expect(state.termMenu.visible).toBe(false)
+      resolveClipboard({ ok: true, text: 'pwd' })
+      await paste
+      expect(calls.focusPanel).toHaveBeenCalledWith('panel-1')
+      expect(document.activeElement).toBe(input)
+      document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))
+      expect(onEnter).toHaveBeenCalledOnce()
+    } finally {
+      menuElement.remove()
+      input.remove()
+    }
+  })
+
+  it.each(['switch-panel', 'command-dialog', 'new-menu', 'removed-panel'])('does not restore paste focus after %s', async (change) => {
+    let resolveClipboard!: (result: ClipboardTextReadResult) => void
+    const clipboard = new Promise<ClipboardTextReadResult>((resolve) => { resolveClipboard = resolve })
+    const { calls, commandDialog, runtime, state, workspace } = createRuntime({ readClipboard: () => clipboard })
+    const paste = runtime.pasteClipboard('panel-1')
+    if (change === 'switch-panel') workspace.createPanel()
+    if (change === 'command-dialog') commandDialog.visible = true
+    if (change === 'new-menu') state.termMenu.visible = true
+    if (change === 'removed-panel') workspace.panels.splice(0)
+    resolveClipboard({ ok: true, text: 'pwd' })
+    await paste
+    expect(calls.focusPanel).not.toHaveBeenCalled()
+    if (change === 'new-menu') expect(state.termMenu.visible).toBe(true)
+  })
+
+  it('restores terminal focus even when the clipboard is empty', async () => {
+    const { calls, runtime } = createRuntime({ readClipboard: async () => ({ ok: true, text: '' }) })
+    await runtime.pasteClipboard('panel-1')
+    expect(calls.focusPanel).toHaveBeenCalledWith('panel-1')
+  })
+
+  it('does not reclaim focus after another user interaction during paste', async () => {
+    installUiFocusCoordinator()
+    let resolveClipboard!: (result: ClipboardTextReadResult) => void
+    const clipboard = new Promise<ClipboardTextReadResult>((resolve) => { resolveClipboard = resolve })
+    const { calls, runtime } = createRuntime({ readClipboard: () => clipboard })
+    const paste = runtime.pasteClipboard('panel-1')
+    document.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
+    resolveClipboard({ ok: true, text: 'pwd' })
+    await paste
+    expect(calls.focusPanel).not.toHaveBeenCalled()
+  })
+
+  it('does not restore focus when the terminal cannot accept pasted input', async () => {
+    const { calls, runtime, workspace } = createRuntime()
+    vi.mocked(workspace.runTerminalCommand).mockResolvedValue({
+      status: 'unavailable', command: 'pwd', panelIds: ['panel-1'], reason: 'Terminal disconnected'
+    })
+    await runtime.pasteClipboard('panel-1')
+    expect(calls.focusPanel).not.toHaveBeenCalled()
+  })
+
   it('owns floating menu state, pointer policies, and tab rename actions', async () => {
     const { calls, runtime, state, workspace } = createRuntime()
 

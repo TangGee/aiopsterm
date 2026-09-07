@@ -4,7 +4,7 @@ import { windowControlsClient } from '@/services/app/windowControlsClient'
 import type { TerminalPanel, useWorkspaceStore } from '@/stores/workspace'
 import { isTerminalWorkspacePanel, type PanelDirection } from '@/services/terminal/terminalPanelRuntime'
 import type { TerminalFocusReason, TerminalView } from '@/services/terminal/terminalWorkspaceViewRuntime'
-import type { UiFocusCause } from '@/services/app/uiFocusCoordinator'
+import { captureUiFocus, type UiFocusCause } from '@/services/app/uiFocusCoordinator'
 import { isThreadedTerminalHost } from '@/services/terminal/threadedTerminalRuntime'
 import { managedAssetDisplayName, managedAssetEndpoint } from '@shared/assetDisplayRuntime'
 import { DEFAULT_TERMINAL_FONT_SIZE } from '@shared/terminalTypography'
@@ -500,31 +500,44 @@ export const createTerminalWorkspaceShellRuntime = (
   }
 
   const pasteClipboard = async (panelId = workspace.activePanelId) => {
-    const clipboardRead = await readClipboard()
-    if (!clipboardRead.ok) {
-      workspace.setTopNotice(clipboardRead.error === 'unavailable' ? '终端剪贴板读取服务不可用' : clipboardRead.message || '终端剪贴板读取失败')
-      termMenu.visible = false
-      return
-    }
-    const text = clipboardRead.text
-    if (!text) {
-      termMenu.visible = false
-      return
-    }
-    const panel = panelById(panelId)
-    if (!panel || !isTerminalWorkspacePanel(panel)) {
-      termMenu.visible = false
-      return
-    }
-    const result = await workspace.runTerminalCommand(panel.id, text, {
-      inputText: text,
-      shellText: text,
-      writeToShell: true,
-      source: 'manual-paste'
-    })
-    if (result?.status === 'allow') syncTerminalView(panel)
+    const interaction = captureUiFocus().interaction
     menu.visible = false
     termMenu.visible = false
+    let restoreFocus = true
+    try {
+      const clipboardRead = await readClipboard()
+      if (!clipboardRead.ok) {
+        workspace.setTopNotice(clipboardRead.error === 'unavailable' ? '终端剪贴板读取服务不可用' : clipboardRead.message || '终端剪贴板读取失败')
+        return
+      }
+      const text = clipboardRead.text
+      if (!text) return
+      const panel = panelById(panelId)
+      if (!panel || !isTerminalWorkspacePanel(panel)) return
+      restoreFocus = false
+      const result = await workspace.runTerminalCommand(panel.id, text, {
+        inputText: text,
+        shellText: text,
+        writeToShell: true,
+        source: 'manual-paste'
+      })
+      restoreFocus = result?.status === 'allow'
+      if (restoreFocus) syncTerminalView(panel)
+    } finally {
+      await afterDomUpdate()
+      const panel = panelById(panelId)
+      if (
+        restoreFocus &&
+        captureUiFocus().interaction === interaction &&
+        workspace.activePanelId === panelId &&
+        panel && isTerminalWorkspacePanel(panel) &&
+        terminalWorkspaceVisible?.value !== false &&
+        !menu.visible && !termMenu.visible &&
+        !commandDialog.visible && !searchOverlayPanelId.value
+      ) {
+        focusPanel(panelId)
+      }
+    }
   }
 
   const clearTerminal = (panelId = workspace.activePanelId) => {
