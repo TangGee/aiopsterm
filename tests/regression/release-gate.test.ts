@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -36,7 +36,10 @@ it('release gate refuses empty artifacts and detects changed build hashes', asyn
       await writeFile(join(payload, 'out', name), 'compiled-test')
       files[name] = createHash('sha256').update('compiled-test').digest('hex')
     }
-    const stamp = { schemaVersion: 1, commit: git('rev-parse', 'HEAD').toString().trim(), dirty: false, files }
+    const provenance = spawnSync(process.execPath, [resolve('scripts/record-build-provenance.mjs'), join(payload, 'out')], { cwd: root, encoding: 'utf8' })
+    expect(provenance.status, provenance.stderr).toBe(0)
+    const stamp = JSON.parse(await readFile(join(payload, 'out', 'build-provenance.json'), 'utf8'))
+    expect(stamp).toEqual({ schemaVersion: 1, commit: git('rev-parse', 'HEAD').toString().trim(), dirty: false, files })
     const pack = async () => {
       await writeFile(join(payload, 'out', 'build-provenance.json'), JSON.stringify(stamp))
       await createPackage(payload, join(resource, 'app.asar'))
