@@ -156,7 +156,8 @@ export const createAssetKeyEditorRuntime = ({
       return
     }
     const isPrivateKey = /^-----BEGIN (?:OPENSSH )?PRIVATE KEY-----/i.test(text) ||
-      /^-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----/i.test(text)
+      /^-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----/i.test(text) ||
+      /^PuTTY-User-Key-File-\d+:/i.test(text)
     const isPublicKey = !isPrivateKey && (
       /^-----BEGIN (?:OPENSSH )?PUBLIC KEY-----/i.test(text) ||
       text.split(/\s+/).some((token) => /^(?:ssh-|ecdsa-|sk-)/i.test(token))
@@ -199,8 +200,8 @@ export const createAssetKeyEditorRuntime = ({
         defaultPath: '~/.ssh',
         properties: ['openFile', 'showHiddenFiles'],
         filters: [
-          { name: 'Key Files', extensions: ['pem', 'key', 'txt', 'pub', 'asc', 'crt', 'cer', 'der', 'p12', 'pfx', 'ssh', 'ppk', 'gpg'] },
-          { name: 'All Files', extensions: ['*'] }
+          { name: 'All Files', extensions: ['*'] },
+          { name: 'Key Files', extensions: ['pem', 'key', 'txt', 'pub', 'asc', 'crt', 'cer', 'der', 'p12', 'pfx', 'ssh', 'ppk', 'gpg'] }
         ]
       })
       if (result?.canceled) {
