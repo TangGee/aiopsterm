@@ -143,7 +143,7 @@ const clientDefinitions: ExportMcpClientDefinition[] = [
     source: 'claude-code',
     label: 'Claude Code',
     binaryName: 'claude',
-    configPathFor: () => join(getHomeDir(), '.claude.json')
+    configPathFor: (env) => join(cleanText(env.CLAUDE_CONFIG_DIR) ? resolveHomePath(env.CLAUDE_CONFIG_DIR!) : getHomeDir(), '.claude.json')
   }
 ]
 

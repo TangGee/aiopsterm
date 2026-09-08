@@ -17,7 +17,7 @@ type ExportMcpInstallerBackend = {
     execFile?: (file: string, args: string[], options?: { env?: NodeJS.ProcessEnv; windowsVerbatimArguments?: boolean }) => Promise<{ stdout: string; stderr: string }>
   }) => void
   listExportMcpInstallers: () => Promise<{
-    clients: Array<{ source: ExportMcpClientSource; serverId: ExportMcpServerId; binaryPath: string; installed: boolean; warnings: string[] }>
+    clients: Array<{ source: ExportMcpClientSource; serverId: ExportMcpServerId; binaryPath: string; configPath: string; installed: boolean; warnings: string[] }>
   }>
   installExportMcp: (input: { source: ExportMcpClientSource; serverId: ExportMcpServerId }) => Promise<{ ok: boolean; errorCode?: string; errorMessage?: string }>
   uninstallExportMcp: (input: { source: ExportMcpClientSource; serverId: ExportMcpServerId }) => Promise<{ ok: boolean; errorCode?: string }>
@@ -47,7 +47,7 @@ const loadBackend = async () => {
   return { installer }
 }
 
-const prepareRuntime = async (options: { token?: string; managedToken?: string } = {}) => {
+const prepareRuntime = async (options: { token?: string; managedToken?: string; claudeConfigDir?: string } = {}) => {
   const { installer } = await loadBackend()
   const home = await mkdtemp(join(tmpdir(), 'aiopsterm-export-mcp-'))
   cleanupDirs.push(home)
@@ -74,6 +74,7 @@ const prepareRuntime = async (options: { token?: string; managedToken?: string }
     getEnv: () => ({
       HOME: home,
       CODEX_HOME: codexHome,
+      ...(options.claudeConfigDir ? { CLAUDE_CONFIG_DIR: join(home, options.claudeConfigDir) } : {}),
       PATH: binDir,
       AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN: token
     }),
@@ -97,6 +98,13 @@ afterEach(async () => {
 })
 
 describe('Export MCP installer backend', () => {
+  it('uses the actual Claude global config path when CLAUDE_CONFIG_DIR is set', async () => {
+    const { installer, home } = await prepareRuntime({ claudeConfigDir: 'claude-profile' })
+    const result = await installer.listExportMcpInstallers()
+    const clients = result.clients.filter((client) => client.source === 'claude-code')
+    expect(clients.length).toBeGreaterThan(0)
+    expect(clients.every((client) => client.configPath === join(home, 'claude-profile', '.claude.json'))).toBe(true)
+  })
   it('finds a user-installed Codex CLI outside a macOS GUI PATH', async () => {
     const { installer, home, codexHome, scriptPath, runtimePath, token } = await prepareRuntime()
     const npmBinDir = join(home, '.npm-global', 'bin')

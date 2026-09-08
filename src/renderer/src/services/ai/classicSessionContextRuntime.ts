@@ -39,9 +39,10 @@ export const isClassicLocalHostContext = (
   const id = text(context.id).toLowerCase()
   const label = text(context.label).toLowerCase()
   const host = text(context.host).toLowerCase()
-  return context.isLocalShell === true ||
-    id === 'opened-local' ||
-    id === 'hosts.127.0.0.1' ||
+  if (context.isLocalShell === true || id === 'opened-local') return true
+  // An explicitly bound SSH asset may legitimately use a loopback endpoint.
+  if (context.isLocalShell === false || text(context.assetId) || text(context.connectionId)) return false
+  return id === 'hosts.127.0.0.1' ||
     label === '127.0.0.1' ||
     host === '127.0.0.1'
 }

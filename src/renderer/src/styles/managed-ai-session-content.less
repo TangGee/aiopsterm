@@ -8,6 +8,7 @@
 }
 
 .managed-ai-session-content-header {
+  flex-shrink: 0;
   min-height: 58px;
   display: flex;
   align-items: center;
@@ -17,7 +18,14 @@
   padding: 9px 14px;
 }
 
+.managed-ai-session-content-header > div:first-child {
+  min-width: 0;
+}
+
 .managed-ai-session-content-header h3 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   margin: 0;
   font-size: 14px;
   font-weight: 700;
@@ -128,6 +136,8 @@
 }
 
 .managed-ai-session-content-toolbar {
+  flex-shrink: 0;
+  flex-wrap: wrap;
   min-height: 46px;
   display: flex;
   align-items: center;
@@ -138,6 +148,7 @@
 }
 
 .managed-ai-session-content-toolbar-primary {
+  flex-wrap: wrap;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -160,7 +171,8 @@
 }
 
 .managed-ai-session-record-summary {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
+  white-space: nowrap;
   min-width: 0;
   display: inline-flex;
   align-items: center;

@@ -14,6 +14,11 @@ import type { AiContextCatalog, AiContextOption } from '@shared/contracts/aiChat
 const emptyCatalog = (): AiContextCatalog => ({ categories: [], openedHosts: [], selectedDefaults: [] })
 
 describe('Classic session context runtime', () => {
+  it('keeps loopback SSH assets distinct from the local shell target', () => {
+    expect(classicHostTargetId({ id: 'ssh-loopback', assetId: 'ssh-loopback', host: '127.0.0.1', terminalSessionId: 'ssh-session' })).toBe('ssh-loopback::ssh-session')
+    expect(classicHostTargetId({ id: 'connection-loopback', connectionId: 'connection-loopback', label: '127.0.0.1', terminalSessionId: 'ssh-session' })).toBe('connection-loopback::ssh-session')
+    expect(classicHostTargetId({ id: 'opened-local', host: '127.0.0.1', isLocalShell: true })).toBe('opened-local')
+  })
   it('uses the configured asset name while preserving the exact terminal binding', () => {
     expect(classicHostContextWithCatalog({
       id: 'asset-prod',

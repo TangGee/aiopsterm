@@ -3704,6 +3704,10 @@ describe('workspace store', () => {
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         terminal: {
+          debugLogs: undefined,
+          restoreTerminalTabs: true,
+          sshAutoReconnect: true,
+          sshShellIntegration: true,
           terminalType: 'vt220',
           fontFamily: 'Fira Code, monospace',
           fontSize: 16,

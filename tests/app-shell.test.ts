@@ -17508,9 +17508,9 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('ScrollBack')
     await workspace.findAll('.cursor-style-button').find((button) => button.attributes('title') === '竖线光标')!.trigger('click')
     expect(store.terminalSettings.cursorStyle).toBe('bar')
-    await workspace.findAll('.settings-switch input').at(2)!.setValue(false)
+    await workspace.findAll('.settings-form-row').find((row) => row.text().includes('显示关闭按钮'))!.find('.settings-switch input').setValue(false)
     expect(store.terminalSettings.showCloseButton).toBe(false)
-    await workspace.findAll('.settings-switch input').at(3)!.setValue(true)
+    await workspace.findAll('.settings-form-row').find((row) => row.text().includes('SSH Agents'))!.find('.settings-switch input').setValue(true)
     expect(store.terminalSettings.sshAgentsStatus).toBe(true)
     await workspace.vm.$nextTick()
     const agentRow = workspace.findAll('.settings-form-row').find((row) => row.text().includes('SSH Agent 设置'))!
