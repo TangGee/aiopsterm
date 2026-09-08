@@ -42,6 +42,18 @@ test('every event-backed builtin preserves imported events @core', async ({ desk
     expect(result.ok, `${parser.source}: ${JSON.stringify(result)}`).toBe(true)
     expect(result.data.records.length, parser.source).toBeGreaterThan(0)
     expect(JSON.stringify(result.data.records)).toContain(`REGRESSION_${parser.source}`)
+    const first = result.data.records[0]
+    const mutation = { source: parser.source, sessionId, recordId: first.recordId, sourceRevision: first.sourceRevision }
+    // Event-only adapters must reject unsupported mutations, never pretend to save.
+    expect((await desktop.api('updateManagedAiSessionContentRecord', { ...mutation, content: 'REGRESSION_MUST_NOT_SAVE' })).errorCode).toBe('MANAGED_AI_CONTENT_READ_ONLY')
+    expect((await desktop.api('deleteManagedAiSessionContentRecord', mutation)).errorCode).toBe('MANAGED_AI_CONTENT_READ_ONLY')
+    expect(JSON.stringify((await desktop.api('listManagedAiSessionContent', { source: parser.source, sessionId })).data.records)).not.toContain('REGRESSION_MUST_NOT_SAVE')
+  }
+  await desktop.restart()
+  for (const parser of builtinAgentSessionParserDefinitions.filter((item) => item.storage.kind === 'events')) {
+    const restored = await desktop.api('listManagedAiSessionContent', { source: parser.source, sessionId: `regression-${parser.source}` })
+    expect(restored.ok, parser.source).toBe(true)
+    expect(JSON.stringify(restored.data.records), parser.source).toContain(`REGRESSION_${parser.source}`)
   }
 })
 

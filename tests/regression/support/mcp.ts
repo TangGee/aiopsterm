@@ -33,6 +33,7 @@ export function mcpClient(script: string, socket: string, token: string, scope: 
   child.on('error', fail)
   child.on('exit', (code) => fail(new Error(`MCP exited: ${code}`)))
   return {
+    pid: child.pid,
     request(method: string, params: Record<string, unknown> = {}) {
       const id = ++sequence
       return new Promise<any>((resolve, reject) => {
@@ -45,7 +46,8 @@ export function mcpClient(script: string, socket: string, token: string, scope: 
       if (child.exitCode !== null || child.signalCode !== null) return
       const exited = once(child, 'exit')
       child.kill()
-      await exited
+      const timer = setTimeout(() => child.kill('SIGKILL'), 5000)
+      try { await exited } finally { clearTimeout(timer) }
     }
   }
 }

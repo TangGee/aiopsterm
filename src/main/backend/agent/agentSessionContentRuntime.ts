@@ -280,11 +280,13 @@ const replaceJsonlAndInvalidateCodexProjection = async (
 ) => {
   const transactions = beginCodexProjectionInvalidation(config, session)
   try {
-    await rename(tempPath, path)
+    // Invalidate rebuildable projections before publishing the new authoritative file.
+    // A failed rename may leave an empty cache, but never an old cache for new content.
     transactions.forEach((transaction) => {
       transaction.db.prepare('COMMIT').run()
       transaction.transactionOpen = false
     })
+    await rename(tempPath, path)
   } catch (error) {
     transactions.forEach((transaction) => {
       if (!transaction.transactionOpen) return

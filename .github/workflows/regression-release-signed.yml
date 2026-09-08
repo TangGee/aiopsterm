@@ -1,0 +1,77 @@
+name: Signed release acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  signed:
+    if: github.ref == 'refs/heads/master'
+    environment: release-signing-${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Require signing credentials without printing them
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          node -e "const keys=['CSC_LINK','CSC_KEY_PASSWORD',...(process.platform==='darwin'?['APPLE_ID','APPLE_APP_SPECIFIC_PASSWORD','APPLE_TEAM_ID']:[])];const missing=keys.filter(k=>!process.env[k]);if(missing.length)throw new Error('Missing release-signing environment secrets: '+missing.join(', '))"
+      - run: npm ci
+      - run: npm install --prefix .cache/regression-clients --no-save @anthropic-ai/claude-code@2.1.220 @moonshot-ai/kimi-code@0.29.1
+      - run: node -e "require('fs').appendFileSync(process.env.GITHUB_PATH, require('path').resolve('.cache/regression-clients/node_modules/.bin') + require('os').EOL)"
+      - run: npm run generate:icons
+      - run: npm run build:codex
+      - run: npm run build:cline-sidecar
+      - run: npm run build
+      - run: npm run native:ensure:electron
+      - name: Sign and notarize actual installers
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npx electron-builder --config electron-builder.yml --publish never
+      - run: npm run test:release:gate -- dist --require-signatures
+      - name: Test the signed payload with reviewed visual baselines
+        env:
+          AIOPSTERM_REQUIRE_SIGNATURES: '1'
+          AIOPSTERM_VISUAL_BASELINES: '1'
+        run: npm run test:regression -- packaged
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/fetch-previous-installer.mjs
+      - run: node scripts/test-installed-release.mjs dist
+      - run: npm run test:release:gate -- dist --verify --require-signatures
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: signed-acceptance-${{ runner.os }}
+          path: |
+            test-results/
+            playwright-report/
+      - name: Retain only accepted signed installers, never auto-publish
+        uses: actions/upload-artifact@v4
+        with:
+          name: accepted-signed-${{ runner.os }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/regression-provenance-*.json
+          if-no-files-found: error

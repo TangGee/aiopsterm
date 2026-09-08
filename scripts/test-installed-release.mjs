@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process'
-import { mkdtemp, readdir, readFile, cp, rm, lstat, readlink, access } from 'node:fs/promises'
+import { mkdtemp, readdir, cp, rm, access } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { createHash } from 'node:crypto'
+import payloadAudit from './regression-installed-payload.cjs'
 
 // Native installers may modify OS registration. Run only on disposable CI machines.
 if (process.env.CI !== 'true') throw new Error('Installer regression requires a disposable CI runner.')
@@ -47,23 +47,6 @@ const smoke = (executable, phase) => {
   if (process.platform === 'linux' && !process.env.DISPLAY) run('xvfb-run', ['-a', process.execPath, ...args], { env })
   else run(process.execPath, args, { env })
 }
-const hash = async (path) => createHash('sha256').update(await readFile(path)).digest('hex')
-const compare = async (expected, actual, prefix = '') => {
-  for (const entry of await readdir(expected, { withFileTypes: true })) {
-    const left = join(expected, entry.name), right = join(actual, entry.name)
-    const target = await lstat(right)
-    if (entry.isSymbolicLink()) {
-      if (!target.isSymbolicLink() || await readlink(left) !== await readlink(right)) throw new Error(`Installed link differs: ${prefix}${entry.name}`)
-    } else if (entry.isDirectory()) {
-      if (!target.isDirectory()) throw new Error(`Installed directory differs: ${prefix}${entry.name}`)
-      await compare(left, right, `${prefix}${entry.name}/`)
-    }
-    else if (entry.isFile()) {
-      if (!target.isFile()) throw new Error('Installed payload is not a regular file.')
-      if ((await hash(left)) !== (await hash(right))) throw new Error(`Installed payload differs from tested package: ${prefix}${entry.name}`)
-    }
-  }
-}
 const uninstall = async (executable) => {
   if (process.platform === 'win32') {
     const uninstallers = (await readdir(installed)).filter((name) => /^Uninstall.*\.exe$/i.test(name))
@@ -87,11 +70,12 @@ try {
   const executable = await install(current)
   const unpacked = join(dist, process.platform === 'win32' ? 'win-unpacked' : process.platform === 'darwin' ? (process.arch === 'arm64' ? 'mac-arm64' : 'mac') : 'linux-unpacked')
   const payload = process.platform === 'linux' ? '/opt/aiopsterm' : installed
-  await compare(unpacked, payload)
+  await payloadAudit.compareInstalledPayload(unpacked, payload)
   smoke(executable, 'verify-upgrade')
   await uninstall(executable)
   // Reinstall proves the explicitly isolated user settings survive removal.
   const reinstalled = await install(current)
+  await payloadAudit.compareInstalledPayload(unpacked, payload)
   smoke(reinstalled, 'verify-reinstall')
   await uninstall(reinstalled)
 } finally {

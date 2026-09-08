@@ -4,6 +4,7 @@ import { mcpClient } from './support/mcp'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { transcriptFor } from './support/corpus'
+import { sampleProcessTree } from './support/process-tree'
 
 test('AI streaming, long-session viewers and MCP lifecycle stay bounded @lifecycle', async ({ desktop }, info) => {
   const duration = Number(process.env.AIOPSTERM_LIFECYCLE_DURATION_MS || 600000)
@@ -26,18 +27,25 @@ test('AI streaming, long-session viewers and MCP lifecycle stay bounded @lifecyc
     const status = installed.data.status
     const token = JSON.parse(await readFile(join(desktop.root, 'state', 'external-codex-mcp', 'token.json'), 'utf8')).token
     const samples: any[] = []
+    const observed = new Set<number>([process.pid, desktop.app.process().pid!])
     const sample = async (cycle: number) => {
       const session = await desktop.app.context().newCDPSession(desktop.page)
       await session.send('HeapProfiler.collectGarbage')
       const heap = await session.send('Runtime.getHeapUsage')
       await session.detach()
       const processes = await desktop.app.evaluate(({ app }) => app.getAppMetrics().map((item) => ({ type: item.type, pid: item.pid, memory: item.memory.workingSetSize })))
-      const value = { cycle, at: Date.now(), heap: heap.usedSize, processes, workingSetKb: processes.reduce((sum, item) => sum + item.memory, 0) }
+      const tree = await sampleProcessTree([...observed])
+      tree.forEach((row) => observed.add(row.pid))
+      const value = { cycle, at: Date.now(), heap: heap.usedSize, processes, workingSetKb: processes.reduce((sum, item) => sum + item.memory, 0),
+        tree, treeRssKb: tree.reduce((sum, row) => sum + row.rssKb, 0), handles: tree.reduce((sum, row) => sum + row.handles, 0) }
       samples.push(value)
       if (samples.length > 1) {
         expect(value.heap - samples[0].heap).toBeLessThan(96 * 1024 * 1024)
         expect(value.workingSetKb - samples[0].workingSetKb).toBeLessThan(512 * 1024)
         expect(value.processes.length - samples[0].processes.length).toBeLessThanOrEqual(2)
+        expect(value.tree.length - samples[0].tree.length, 'External child process accumulation').toBeLessThanOrEqual(2)
+        expect(value.treeRssKb - samples[0].treeRssKb, 'Whole process tree RSS growth').toBeLessThan(512 * 1024)
+        expect(value.handles - samples[0].handles, 'OS handles or file descriptors accumulated').toBeLessThan(256)
       }
       return value
     }

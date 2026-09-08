@@ -41,7 +41,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: npm ci
-      - run: npm install --prefix .cache/regression-clients --no-save @anthropic-ai/claude-code@2.1.220
+      - run: npm install --prefix .cache/regression-clients --no-save @anthropic-ai/claude-code@2.1.220 @moonshot-ai/kimi-code@0.29.1
       - run: node -e "require('fs').appendFileSync(process.env.GITHUB_PATH, require('path').resolve('.cache/regression-clients/node_modules/.bin') + require('os').EOL)"
       - run: npm run generate:icons
       - run: npm run build:codex

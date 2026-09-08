@@ -29,8 +29,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Install pinned external MCP client
-        run: npm install --prefix .cache/regression-clients --no-save @anthropic-ai/claude-code@2.1.220
+      - name: Install pinned real agent and MCP clients
+        run: npm install --prefix .cache/regression-clients --no-save @anthropic-ai/claude-code@2.1.220 @moonshot-ai/kimi-code@0.29.1
       - name: Add isolated client directory to PATH
         run: node -e "require('fs').appendFileSync(process.env.GITHUB_PATH, require('path').resolve('.cache/regression-clients/node_modules/.bin') + require('os').EOL)"
       - if: runner.os == 'Linux'
