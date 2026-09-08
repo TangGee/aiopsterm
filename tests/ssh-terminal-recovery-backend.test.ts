@@ -4,21 +4,21 @@ import { createSshCwdTracker, sshRecoveryShellCommand, validRecoveryCwd } from '
 import type { SshTerminalCreateResult, SshTerminalEventSink } from '../src/main/backend/ssh/sshTerminalTypes'
 import type { TerminalCreateOptions, TerminalLifecycleEvent } from '../src/shared/contracts/terminalSessions'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const lifecycle = (stage: TerminalLifecycleEvent['stage'], rest: Partial<TerminalLifecycleEvent> = {}): TerminalLifecycleEvent => ({ id: 's1', kind: 'ssh', stage, at: Date.now(), ...rest })
-const fixture = () => {
+const fixture = (options: TerminalCreateOptions = {}) => {
   const attempts: { options: TerminalCreateOptions; sink: SshTerminalEventSink; process: NonNullable<SshTerminalCreateResult['session']> }[] = []
-  const sink = { data: vi.fn(), lifecycle: vi.fn(), exit: vi.fn(), closed: vi.fn() }
+  const sink = { data: vi.fn(), lifecycle: vi.fn(), exit: vi.fn(), closed: vi.fn(), keyboardInteractive: vi.fn(async () => ['response']), keyboardInteractiveResult: vi.fn() }
   const factory = vi.fn((_id, options, events): SshTerminalCreateResult => {
     const process = { write: vi.fn(), kill: vi.fn(), resize: vi.fn(), pause: vi.fn(), resume: vi.fn() }
     attempts.push({ options, sink: events, process })
     events.lifecycle(lifecycle('connecting'))
     return { shell: 'ssh', cwd: '/home/test', session: process, connection: { host: 'host', port: 22, username: 'test' }, lifecycle: lifecycle('connecting') }
   })
-  const result = createRecoveringSshTerminalSession('s1', { sshShellIntegration: true }, sink, factory)
+  const result = createRecoveringSshTerminalSession('s1', { sshShellIntegration: true, ...options }, sink, factory)
   const ready = (index = attempts.length - 1) => attempts[index].sink.lifecycle(lifecycle('shell-ready'))
   const end = (reason: TerminalLifecycleEvent['reason'] = 'network', index = attempts.length - 1) => {
     const event = lifecycle('error', { reason, isNetworkDisconnect: reason === 'network' })
@@ -104,6 +104,85 @@ describe('SSH automatic recovery', () => {
     expect(() => f.result.session!.write('x')).toThrow()
     expect(f.sink.exit).toHaveBeenCalledTimes(1)
   })
+  it('honors disabled auto-reconnect while continuing verified cwd reporting', () => {
+    const f = fixture({ sshAutoReconnect: false })
+    f.ready()
+    f.attempts[0].sink.data('\x1b]1337;CurrentDir=/verified\x07')
+    expect(f.sink.lifecycle).toHaveBeenLastCalledWith(expect.objectContaining({ cwd: '/verified', cwdVerified: true }))
+    f.end(); vi.runAllTimers()
+    expect(f.attempts).toHaveLength(1)
+    expect(f.sink.exit).toHaveBeenCalledTimes(1)
+  })
+  it('does not mark manual cancellation of a retry as a network failure', () => {
+    const f = fixture(); f.ready(); f.end(); f.result.session!.kill()
+    expect(f.sink.exit).toHaveBeenLastCalledWith(expect.objectContaining({ reason: 'manual', isNetworkDisconnect: false }), 0)
+  })
+  it('resets backoff after recovery and allocates only one timer for duplicate exits', () => {
+    const f = fixture(); f.ready(); f.end(); f.end()
+    expect(vi.getTimerCount()).toBe(1)
+    vi.advanceTimersByTime(1000); f.end()
+    vi.advanceTimersByTime(2000); f.ready(); f.end()
+    vi.advanceTimersByTime(999); expect(f.attempts).toHaveLength(3)
+    vi.advanceTimersByTime(1); expect(f.attempts).toHaveLength(4)
+    f.result.session!.kill(); expect(vi.getTimerCount()).toBe(0)
+  })
+  it('survives a synchronous exception starting a retry and emits one terminal error', () => {
+    const f = fixture(); f.ready(); f.end()
+    f.factory.mockImplementationOnce(() => { throw new Error('asset was removed') })
+    expect(() => vi.advanceTimersByTime(1000)).not.toThrow()
+    expect(f.sink.exit).toHaveBeenCalledWith(expect.objectContaining({ stage: 'error', errorMessage: 'asset was removed' }), undefined)
+    f.result.session!.kill(); expect(f.sink.exit).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+  it('rejects stale authentication prompts and ignores stale authentication results', async () => {
+    const f = fixture(); f.ready()
+    const request = { id: 'auth' } as Parameters<NonNullable<SshTerminalEventSink['keyboardInteractive']>>[0]
+    expect(await f.attempts[0].sink.keyboardInteractive!(request)).toEqual(['response'])
+    f.end(); vi.advanceTimersByTime(1000)
+    await expect(f.attempts[0].sink.keyboardInteractive!(request)).rejects.toThrow('no longer active')
+    f.attempts[0].sink.keyboardInteractiveResult?.({ id: 'auth', status: 'failed' })
+    expect(f.sink.keyboardInteractive).toHaveBeenCalledTimes(1)
+    expect(f.sink.keyboardInteractiveResult).not.toHaveBeenCalled()
+    await f.attempts[1].sink.keyboardInteractive!(request)
+    expect(f.sink.keyboardInteractive).toHaveBeenCalledTimes(2)
+    f.end('error'); expect(vi.getTimerCount()).toBe(0)
+  })
+  it('forwards binary and background commands only to the current ready session', async () => {
+    const f = fixture(); f.ready()
+    const run = vi.fn(async () => ({ output: 'ok', exitCode: 0, durationMs: 1, timedOut: false }))
+    f.attempts[0].process.runBackgroundCommand = run
+    const input = Buffer.from([0, 255, 13])
+    f.result.session!.write(input)
+    expect(f.attempts[0].process.write).toHaveBeenCalledWith(input)
+    const command = { command: 'pwd', timeoutMs: 100 }
+    expect((await f.result.session!.runBackgroundCommand!(command)).output).toBe('ok')
+    f.end()
+    expect(() => f.result.session!.write(input)).toThrow()
+    expect(() => f.result.session!.runBackgroundCommand!(command)).toThrow()
+    vi.advanceTimersByTime(1000); f.ready()
+    await expect(f.result.session!.runBackgroundCommand!(command)).rejects.toThrow('unavailable')
+    expect(run).toHaveBeenCalledTimes(1)
+  })
+  it('deduplicates directory reports and releases pause after a resized retry', () => {
+    const f = fixture(); f.ready()
+    f.attempts[0].sink.data('\x1b]1337;CurrentDir=/cwd\x07')
+    const count = f.sink.lifecycle.mock.calls.length
+    f.attempts[0].sink.data('\x1b]1337;CurrentDir=/cwd\x07')
+    expect(f.sink.lifecycle).toHaveBeenCalledTimes(count)
+    f.result.session!.pause?.(); f.end(); f.result.session!.resize(80, 24)
+    f.result.session!.resize(120, 40); f.result.session!.resume?.()
+    vi.advanceTimersByTime(1000); f.ready()
+    expect(f.attempts[1].process.pause).not.toHaveBeenCalled()
+    expect(f.attempts[1].options).toMatchObject({ cols: 120, rows: 40, cwd: '/cwd' })
+  })
+  it('completes 100 reconnect and cancel cycles with no live retry timers or duplicate exits', () => {
+    for (let i = 0; i < 100; i++) {
+      const f = fixture(); f.ready(); f.end(); vi.advanceTimersByTime(1000); f.ready(); f.result.session!.kill(); f.result.session!.kill()
+      expect(f.sink.exit).toHaveBeenCalledTimes(1)
+      expect(f.attempts).toHaveLength(2)
+    }
+    expect(vi.getTimerCount()).toBe(0)
+  })
   it('uses bounded exponential backoff and gives up after eight retries', () => {
     const f = fixture()
     f.ready()
@@ -156,6 +235,33 @@ describe('SSH shell directory integration', () => {
       expect(output).toContain('USABLE')
     } finally { rmSync(root, { recursive: true, force: true }) }
   })
+  it.skipIf(process.platform !== 'linux').each(['scalar', 'array'] as const)('preserves %s PROMPT_COMMAND and restores cwd after bashrc changes it', (mode) => {
+    const root = mkdtempSync(join(tmpdir(), 'aiopsterm-prompt-'))
+    const cwd = join(root, 'project'); mkdirSync(cwd)
+    writeFileSync(join(root, '.bashrc'), mode === 'array'
+      ? `cd /\nPROMPT_COMMAND=('printf ARRAY_ONE' 'printf ARRAY_TWO')\n`
+      : `cd /\nPROMPT_COMMAND='printf SCALAR_PROMPT'\n`)
+    try {
+      const output = execFileSync('/bin/sh', ['-c', sshRecoveryShellCommand(cwd)], {
+        input: 'printf "\\nACTUAL=%s\\n" "$PWD"\nexit\n', cwd: root,
+        env: { ...process.env, HOME: root, SHELL: '/bin/bash', HISTFILE: '/dev/null' }, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000
+      })
+      expect(output).toContain(`ACTUAL=${cwd}`)
+      expect(output).toContain(mode === 'array' ? 'ARRAY_ONEARRAY_TWO' : 'SCALAR_PROMPT')
+      expect(output).toContain(`\x1b]1337;CurrentDir=${cwd}\x07`)
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+  it.skipIf(process.platform !== 'linux' || process.getuid?.() === 0)('leaves an interactive shell usable when cwd permission is denied', () => {
+    const root = mkdtempSync(join(tmpdir(), 'aiopsterm-cwd-permission-'))
+    const cwd = join(root, 'denied'); mkdirSync(cwd); chmodSync(cwd, 0)
+    try {
+      const output = execFileSync('/bin/sh', ['-c', sshRecoveryShellCommand(cwd)], {
+        input: 'printf "USABLE\\n"\nexit\n', cwd: root,
+        env: { ...process.env, HOME: root, SHELL: '/bin/bash', HISTFILE: '/dev/null' }, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000
+      })
+      expect(output).toContain('USABLE')
+    } finally { chmodSync(cwd, 0o700); rmSync(root, { recursive: true, force: true }) }
+  })
   it('rejects control bytes and relative directories', () => {
     for (const cwd of ['../x', '/bad\ncmd', '/bad\x1b', '/bad\x00', '/' + 'a'.repeat(4096)]) expect(validRecoveryCwd(cwd)).toBe(false)
   })
@@ -165,10 +271,11 @@ describe('SSH shell directory integration', () => {
     mkdirSync(cwd)
     try {
       const output = execFileSync('/bin/sh', ['-c', sshRecoveryShellCommand(cwd)], {
-        input: 'printf "\\nRECOVERED=%s\\n" "$PWD"\nexit\n',
+        input: 'printf "\\nRECOVERED=%s\\n" "$PWD"\nexit\n', cwd: root,
         env: { ...process.env, HOME: root, SHELL: '/bin/bash' }, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000
       })
       expect(output).toContain(`RECOVERED=${cwd}`)
+      expect(existsSync(join(root, 'SHOULD_NOT_EXIST'))).toBe(false)
       expect(output).toContain(`\x1b]1337;CurrentDir=${cwd}\x07`)
     } finally { rmSync(root, { recursive: true, force: true }) }
   })

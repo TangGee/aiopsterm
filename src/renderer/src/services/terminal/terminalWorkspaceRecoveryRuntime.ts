@@ -1,5 +1,5 @@
 import type { TerminalRecoverySnapshot, TerminalRecoveryTab } from '@shared/contracts/terminalRecovery'
-import type { TerminalPanel } from './terminalPanelRuntime'
+import { isWelcomeTerminalPanelPlaceholder, type TerminalPanel } from './terminalPanelRuntime'
 import { terminalClient } from './terminalClient'
 import type { useWorkspaceStore } from '@/stores/workspace'
 
@@ -37,6 +37,7 @@ export const createTerminalWorkspaceRecoveryRuntime = (input: {
   client?: Pick<typeof terminalClient, 'loadTerminalRecovery' | 'saveTerminalRecovery'>
 }) => {
   const { workspace } = input
+  const recoveryEnabled = () => workspace.terminalSettings.restoreTerminalTabs !== false
   const client = input.client || terminalClient
   let initialized = false
   let disposed = false
@@ -46,22 +47,26 @@ export const createTerminalWorkspaceRecoveryRuntime = (input: {
   const eligiblePanels = () => workspace.panels.filter((panel) =>
     (!panel.kind || panel.kind === 'terminal') && (panel.sessionId || panel.sshSession || panel.output)
   ).slice(0, tabLimit)
-  const report = (error: unknown) => workspace.setTopNotice(error instanceof Error ? error.message : 'Terminal recovery failed.')
+  const report = (error: unknown) => {
+    if (!disposed) workspace.setTopNotice(error instanceof Error ? error.message : 'Terminal recovery failed.')
+  }
   const save = async () => {
     if (!initialized || disposed || !client.saveTerminalRecovery()) return
     if (saving) { saveAgain = true; return }
     saving = true
     try {
-      const panels = workspace.terminalSettings.restoreTerminalTabs === false ? [] : eligiblePanels()
+      const panels = !recoveryEnabled() ? [] : eligiblePanels()
       const tabs: TerminalRecoveryTab[] = []
       // Bound worker requests and storage. Avoid reading all terminals simultaneously.
       for (const panel of panels) {
         const history = await input.readHistory(panel)
+        if (disposed) return
         if (!workspace.panels.includes(panel)) continue
         tabs.push(recoveryTabFromPanel(panel, history))
       }
       if (disposed) return
-      const snapshot: TerminalRecoverySnapshot = { version: 1, activePanelId: workspace.activePanelId, tabs }
+      const remaining = !recoveryEnabled() ? [] : tabs.filter((tab) => panels.some((panel) => panel.id === tab.id && workspace.panels.includes(panel)))
+      const snapshot: TerminalRecoverySnapshot = { version: 1, activePanelId: workspace.activePanelId, tabs: remaining }
       const serialized = JSON.stringify(snapshot)
       if (serialized !== lastSaved) {
         await client.saveTerminalRecovery()!(snapshot)
@@ -77,9 +82,9 @@ export const createTerminalWorkspaceRecoveryRuntime = (input: {
     if (initialized || disposed) return
     const initialPanels = workspace.panels
     try {
-      if (workspace.terminalSettings.restoreTerminalTabs === false || !client.loadTerminalRecovery()) return
+      if (!recoveryEnabled() || !client.loadTerminalRecovery()) return
       const result = await client.loadTerminalRecovery()!()
-      if (disposed || workspace.panels !== initialPanels || initialPanels.some((panel) => panel.sessionId || panel.sshSession) || initialPanels.length > 1) return
+      if (disposed || !recoveryEnabled() || workspace.panels !== initialPanels || initialPanels.some((panel) => !isWelcomeTerminalPanelPlaceholder(panel))) return
       const snapshot = result.snapshot
       if (!snapshot?.tabs.length) return
       const panels = snapshot.tabs.map(panelFromRecoveryTab)
@@ -87,18 +92,20 @@ export const createTerminalWorkspaceRecoveryRuntime = (input: {
       if (!workspace.restorePanelCollection(panels, snapshot.activePanelId)) return
       await input.afterDomUpdate()
       for (const tab of snapshot.tabs) {
-        if (disposed) return
+        if (disposed || !recoveryEnabled()) return
         const panel = workspace.panels.find((item) => item.id === tab.id)
         if (!panel) continue
-        const live = result.liveSessions.find((session) => session.id === tab.sessionId)
-        if (live) {
-          if (tab.ssh) workspace.applySshTerminalSession(panel.id, live, { ...tab.ssh, id: tab.ssh.assetId, name: tab.ssh.assetName })
-          else workspace.applyLocalTerminalSession(panel.id, live)
-        } else if (tab.resume) {
-          await input.start(panel)
-        }
-        panel.title = tab.title
-        panel.titleSource = 'user'
+        try {
+          const live = result.liveSessions.find((session) => session.id === tab.sessionId)
+          if (live) {
+            if (tab.ssh) workspace.applySshTerminalSession(panel.id, live, { ...tab.ssh, id: tab.ssh.assetId, name: tab.ssh.assetName })
+            else workspace.applyLocalTerminalSession(panel.id, live)
+          } else if (tab.resume) {
+            await input.start(panel)
+          }
+          panel.title = tab.title
+          panel.titleSource = 'user'
+        } catch (error) { report(error) }
       }
     } catch (error) { report(error) }
     finally { initialized = true }

@@ -1,3 +1,4 @@
+import { toRaw } from 'vue'
 import { terminalClient } from '@/services/terminal/terminalClient'
 import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
 import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
@@ -40,6 +41,23 @@ export const createTerminalWorkspaceSessionRuntime = ({
     if (shouldUseTerminalDebugLogs()) writeRuntimeLog('debug', event, details)
   }
   const panelById = (panelId: string) => workspace.panels.find((panel) => panel.id === panelId || panel.sessionId === panelId)
+  const launches = new WeakMap<TerminalPanel, number>()
+  let launchSequence = 0
+  const beginLaunch = (panel: TerminalPanel) => {
+    const owner = toRaw(panel)
+    const sequence = ++launchSequence
+    launches.set(owner, sequence)
+    return () => launches.get(owner) === sequence && toRaw(panelById(panel.id)) === owner
+  }
+  const discardUnattachedSession = async (session: TerminalSessionInfo) => {
+    if (!session.id) return
+    try { await client.killTerminal()?.(session.id) }
+    catch (error) {
+      writeRuntimeLog('warn', 'renderer.terminal-recovery.orphan-kill-failed', {
+        sessionId: session.id, message: error instanceof Error ? error.message : 'Unable to close unattached terminal.'
+      })
+    }
+  }
 
   const writeXtermInput = async (panelId: string, data: string) => {
     const inputTimestamp = Date.now()
@@ -109,7 +127,9 @@ export const createTerminalWorkspaceSessionRuntime = ({
       workspace.setTopNotice('本地终端启动服务不可用')
       return false
     }
+    const isCurrentLaunch = beginLaunch(panel)
     await afterDomUpdate()
+    if (!isCurrentLaunch()) return false
     const size = terminalViewSize(panel.id)
     try {
       const session = await createTerminal({
@@ -122,10 +142,15 @@ export const createTerminalWorkspaceSessionRuntime = ({
         rows: size.rows,
         terminalType: workspace.terminalSettings.terminalType
       })
+      if (!isCurrentLaunch()) { await discardUnattachedSession(session); return false }
       const connected = Boolean(workspace.applyLocalTerminalSession(panel.id, session))
-      if (!connected) workspace.setTopNotice('本地终端启动失败')
+      if (!connected) {
+        await discardUnattachedSession(session)
+        workspace.setTopNotice('本地终端启动失败')
+      }
       return connected
     } catch (error) {
+      if (!isCurrentLaunch()) return false
       workspace.setTopNotice(error instanceof Error ? error.message : '本地终端启动失败')
       return false
     }
@@ -139,7 +164,9 @@ export const createTerminalWorkspaceSessionRuntime = ({
       workspace.setTopNotice('SSH 终端启动服务不可用')
       return false
     }
+    const isCurrentLaunch = beginLaunch(panel)
     await afterDomUpdate()
+    if (!isCurrentLaunch()) return false
     const size = terminalViewSize(panel.id)
     try {
       const session = await createTerminal({
@@ -161,6 +188,7 @@ export const createTerminalWorkspaceSessionRuntime = ({
           ...(ssh.forkFromConnectionId ? { forkFromConnectionId: ssh.forkFromConnectionId } : {})
         }
       })
+      if (!isCurrentLaunch()) { await discardUnattachedSession(session); return false }
       const connected = Boolean(workspace.applySshTerminalSession(panel.id, session, {
         id: ssh.assetId,
         name: ssh.assetName,
@@ -175,15 +203,20 @@ export const createTerminalWorkspaceSessionRuntime = ({
         proxyName: ssh.proxyName,
         jumpHostId: ssh.jumpHostId
       }))
-      if (!connected) workspace.setTopNotice('SSH 终端启动失败')
+      if (!connected) {
+        await discardUnattachedSession(session)
+        workspace.setTopNotice('SSH 终端启动失败')
+      }
       return connected
     } catch (error) {
+      if (!isCurrentLaunch()) return false
       workspace.setTopNotice(error instanceof Error ? error.message : 'SSH 终端启动失败')
       return false
     }
   }
 
   const disconnectTerminalPanel = async (panel: TerminalPanel) => {
+    launches.delete(toRaw(panel))
     if (!panel.sessionId) {
       workspace.setTopNotice('终端会话不可用，请先打开本地 shell 或连接 SSH')
       return false

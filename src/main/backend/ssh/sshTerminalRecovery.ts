@@ -128,7 +128,7 @@ export const createRecoveringSshTerminalSession = (
     kill: (reason = 'manual') => {
       if (stopped) return
       const session = active
-      finish({ ...lastEvent, stage: 'closed', at: Date.now(), reason, message: 'SSH session closed.' }, 0)
+      finish({ ...lastEvent, stage: 'closed', at: Date.now(), reason, isNetworkDisconnect: reason === 'network', errorCode: undefined, errorMessage: undefined, message: 'SSH session closed.' }, 0)
       session?.kill(reason)
     }
   } }

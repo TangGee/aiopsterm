@@ -1,5 +1,7 @@
 import { EventEmitter } from 'events'
 import { readFileSync, statSync } from 'fs'
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { basename, delimiter, join } from 'path'
 import { PassThrough } from 'stream'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -40,7 +42,7 @@ type LocalTerminalBackend = {
   managedLocalTerminalEnvironment: (id: string, options: { panelId?: string; workspaceId?: string }, baseEnv?: NodeJS.ProcessEnv) => NodeJS.ProcessEnv
   createLocalTerminalSession: (
     id: string,
-    options: { kind?: 'local'; shell?: string; cwd?: string; cols?: number; rows?: number; terminalType?: string; panelId?: string; workspaceId?: string },
+    options: { kind?: 'local'; shell?: string; cwd?: string; restoreFromRecovery?: boolean; cols?: number; rows?: number; terminalType?: string; panelId?: string; workspaceId?: string },
     sink: ReturnType<typeof createSink>
   ) => {
     shell: string
@@ -149,6 +151,33 @@ describe('local terminal backend runtime', () => {
   beforeEach(async () => {
     const backend = await loadBackend()
     backend.configureLocalTerminalBackendRuntime()
+  })
+
+  it.each(['missing', 'file', 'directory'])('validates restored local cwd against a real %s', async (kind) => {
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-local-recovery-'))
+    const requested = join(root, 'saved directory')
+    try {
+      if (kind === 'file') await writeFile(requested, 'file')
+      if (kind === 'directory') await mkdir(requested)
+      const backend = await loadBackend()
+      const spawnedCwds: string[] = []
+      backend.configureLocalTerminalBackendRuntime({
+        getDefaultShell: () => '/bin/bash',
+        getDefaultCwd: () => root,
+        loadPty: () => ({ spawn: (_shell, _args, options) => {
+          spawnedCwds.push(options.cwd)
+          return new MockPtyProcess()
+        } })
+      })
+      const restored = backend.createLocalTerminalSession('restored', { cwd: requested, restoreFromRecovery: true }, createSink(createRecorder()))
+      expect(restored.cwd).toBe(kind === 'directory' ? requested : root)
+      expect(spawnedCwds).toEqual([restored.cwd])
+      restored.session.kill()
+      const explicit = backend.createLocalTerminalSession('explicit', { cwd: requested }, createSink(createRecorder()))
+      expect(explicit.cwd).toBe(requested)
+      expect(spawnedCwds[1]).toBe(requested)
+      explicit.session.kill()
+    } finally { await rm(root, { recursive: true, force: true }) }
   })
 
   it('forwards only pty output through terminal data while lifecycle owns local shell status', async () => {

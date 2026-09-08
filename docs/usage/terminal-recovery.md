@@ -1,6 +1,6 @@
 # Terminal recovery
 
-SSH reconnects automatically after an unexpected network disconnect. Keep the tab open; pressing Enter is unnecessary. The tab and existing history remain visible while the connection retries. Input during reconnection is rejected and is never automatically sent later.
+SSH reconnects automatically after an unexpected network disconnect. A closed connection is detected quickly; a silent outage can take about 60 seconds to detect with the default keepalive settings. Reconnection then starts automatically. Keep the tab open; pressing Enter is unnecessary. The tab and existing history remain visible while the connection retries. Input during reconnection is rejected and is never automatically sent later.
 
 Successful reconnection starts a new shell. Normal `exit`, manual disconnect and closing a tab stop automatic reconnection. Authentication may require a password or verification code. Eight consecutive unsuccessful retries stop and show an error; the terminal's reconnect action can start another attempt.
 

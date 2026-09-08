@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, stat, open } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { TerminalRecoverySnapshot, TerminalRecoveryTab } from '@shared/contracts/terminalRecovery'
 
@@ -6,12 +6,13 @@ export const terminalRecoveryLimits = { tabs: 32, historyChars: 128 * 1024, file
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 const text = (value: unknown, limit = 4096) => typeof value === 'string' ? value.slice(0, limit) : ''
 const identifier = (value: unknown) => text(value, 256).replace(/[\x00-\x1f\x7f]/g, '')
-const cwd = (value: unknown) => typeof value === 'string' && !/[\x00-\x1f\x7f-\x9f]/.test(value) ? text(value) : ''
+const cwd = (value: unknown) => typeof value === 'string' && !/[\x00-\x1f\x7f-\x9f]/.test(value) && value.length <= 4096 ? value : ''
 // Snapshots are display text, never terminal input. Strip control sequences even
 // when an untrusted renderer supplies raw data instead of a buffer snapshot.
-export const recoveryHistoryText = (value: unknown) => text(value, terminalRecoveryLimits.historyChars * 2)
-  .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '')
-  .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+export const recoveryHistoryText = (value: unknown) => (typeof value === 'string' ? value.slice(-terminalRecoveryLimits.historyChars * 2) : '')
+  .replace(/(?:\x1b\]|\x9d)[\s\S]*?(?:\x07|\x1b\\|\x9c|$)/g, '')
+  .replace(/(?:\x1b[P_^]|[\x90\x98\x9e\x9f])[\s\S]*?(?:\x1b\\|\x9c|$)/g, '')
+  .replace(/(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]/g, '')
   .replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '')
   .slice(-terminalRecoveryLimits.historyChars)
 
@@ -29,7 +30,7 @@ export const normalizeTerminalRecovery = (input: unknown): TerminalRecoverySnaps
     const username = identifier(ssh.username)
     if (tab.ssh && (!host || !username || !Number.isInteger(ssh.port) || Number(ssh.port) < 1 || Number(ssh.port) > 65535)) throw new Error('Invalid SSH recovery target.')
     return {
-      id, title: identifier(tab.title), cwd: cwd(tab.cwd), history: recoveryHistoryText(tab.history), cwdVerified: tab.cwdVerified === true, resume: tab.resume === true,
+      id, title: identifier(tab.title), cwd: cwd(tab.cwd), history: recoveryHistoryText(tab.history), cwdVerified: tab.cwdVerified === true && cwd(tab.cwd).startsWith('/'), resume: tab.resume === true,
       ...(identifier(tab.sessionId) ? { sessionId: identifier(tab.sessionId) } : {}),
       ...(tab.split === 'right' || tab.split === 'below' ? { split: tab.split } : {}),
       ...(identifier(tab.splitSourceId) ? { splitSourceId: identifier(tab.splitSourceId) } : {}),
@@ -59,7 +60,11 @@ export const createTerminalRecoveryStore = (getPath: () => string) => {
     const operation = pending.catch(() => {}).then(async () => {
       const file = getPath()
       await mkdir(dirname(file), { recursive: true, mode: 0o700 })
-      await writeFile(file + '.tmp', payload, { mode: 0o600 })
+      const temporary = await open(file + '.tmp', 'w', 0o600)
+      try {
+        await temporary.chmod(0o600)
+        await temporary.writeFile(payload)
+      } finally { await temporary.close() }
       await rename(file + '.tmp', file)
     })
     pending = operation

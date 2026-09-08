@@ -1,11 +1,18 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IpcMain } from 'electron'
 import {
+  type TerminalSessionInfo,
   type TerminalCreateOptions,
   type TerminalLifecycleEvent,
   type TerminalSshConnectionInfo
 } from '../src/shared/contracts/terminalSessions'
 import type { UserConfig } from '../src/shared/contracts/userConfig'
+
+const recoveryDirectory = vi.hoisted(() => ({ path: '' }))
+vi.mock('electron', () => ({ app: { getPath: () => recoveryDirectory.path } }))
 
 type IpcHandler = (event: unknown, ...args: any[]) => unknown
 
@@ -15,6 +22,7 @@ type TerminalSessionsIpcBackend = {
 }
 
 type TestTerminalProcess = {
+  getCwd?: () => string | undefined
   write: ReturnType<typeof vi.fn>
   writeBinary: ReturnType<typeof vi.fn>
   resize: ReturnType<typeof vi.fn>
@@ -22,6 +30,7 @@ type TestTerminalProcess = {
 }
 
 type TestTerminalSession = {
+  info?: TerminalSessionInfo
   id: string
   process: TestTerminalProcess | Omit<TestTerminalProcess, 'writeBinary'>
   shell: string
@@ -195,10 +204,66 @@ const createRegistrationInput = (overrides: Record<string, unknown> = {}) => {
 }
 
 describe('terminal sessions IPC registrar', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks()
+    recoveryDirectory.path = await mkdtemp(join(tmpdir(), 'aiopsterm-recovery-ipc-'))
   })
+  afterEach(async () => { await rm(recoveryDirectory.path, { recursive: true, force: true }) })
 
+  it('rejects recovery reads and writes without an owner window', async () => {
+    const { registerTerminalSessionsIpc } = await loadBackend()
+    const { ipcMain, handlers } = createIpcHarness()
+    const input = createRegistrationInput({ getOwnerWindow: () => null })
+    registerTerminalSessionsIpc(ipcMain, input)
+    await expect(handlers.get('terminal:recovery:load')!({})).rejects.toThrow('No owner window')
+    expect(() => handlers.get('terminal:recovery:save')!({}, { version: 1, tabs: [] })).toThrow('No owner window')
+  })
+  it('returns only the requesting window live sessions and reads their actual local cwd', async () => {
+    const { registerTerminalSessionsIpc } = await loadBackend()
+    const { ipcMain, handlers } = createIpcHarness()
+    const input = createRegistrationInput()
+    for (const id of ['own', 'other', 'no-info']) input.sessions.set(id, {
+      id, kind: 'local', shell: 'bash', cwd: '/initial', window: id === 'other' ? {} : input.ownerWindow,
+      process: { ...createLocalProcess(), getCwd: () => '/actual' },
+      ...(id !== 'no-info' ? { info: { id, kind: 'local', shell: 'bash', cwd: '/initial' } as TerminalSessionInfo } : {})
+    })
+    registerTerminalSessionsIpc(ipcMain, input)
+    await handlers.get('terminal:recovery:save')!({}, { version: 1, activePanelId: 'own', tabs: ['own', 'other', 'no-info', 'gone'].map((id) => ({ id, sessionId: id, title: id, cwd: '/checkpoint', history: 'text' })) })
+    const result = await handlers.get('terminal:recovery:load')!({}) as any
+    expect(result.liveSessions).toEqual([expect.objectContaining({ id: 'own', cwd: '/actual' })])
+    expect(result.snapshot.tabs).toHaveLength(4)
+  })
+  it('does not attach a checkpoint to a live session of a different SSH target or kind', async () => {
+    const { registerTerminalSessionsIpc } = await loadBackend()
+    const { ipcMain, handlers } = createIpcHarness()
+    const input = createRegistrationInput()
+    input.sessions.set('live', { id: 'live', process: createSshProcess(), kind: 'ssh', shell: 'ssh', cwd: '/', window: input.ownerWindow,
+      info: { id: 'live', shell: 'ssh', kind: 'ssh', cwd: '/', connection: { connectionId: 'live', host: 'real-host', username: 'user', port: 22, assetName: 'real-host', createdAt: 1 } } })
+    registerTerminalSessionsIpc(ipcMain, input)
+    const tab = { id: 'p', sessionId: 'live', title: 'saved', cwd: '/', history: '' }
+    const ssh = { host: 'real-host', username: 'user', port: 22, assetName: 'real-host' }
+    for (const entry of [tab, ...[{ host: 'other-host' }, { username: 'other-user' }, { port: 2222 }].map((change) => ({ ...tab, ssh: { ...ssh, ...change } }))]) {
+      await handlers.get('terminal:recovery:save')!({}, { version: 1, activePanelId: 'p', tabs: [entry] })
+      const result = await handlers.get('terminal:recovery:load')!({}) as any
+      expect(result.liveSessions).toEqual([])
+    }
+    const info = input.sessions.get('live')!.info!
+    info.cwd = '/verified-live-directory'
+    info.lifecycle = lifecycle('live', 'ssh', { cwdVerified: true, cwd: info.cwd })
+    await handlers.get('terminal:recovery:save')!({}, { version: 1, activePanelId: 'p', tabs: [{ ...tab, ssh }] })
+    const matched = await handlers.get('terminal:recovery:load')!({}) as any
+    expect(matched.liveSessions).toEqual([expect.objectContaining({ id: 'live', cwd: '/verified-live-directory' })])
+  })
+  it('preserves disabled SSH recovery settings and explicit per-session overrides', async () => {
+    const { registerTerminalSessionsIpc } = await loadBackend()
+    const { ipcMain, handlers } = createIpcHarness()
+    const input = createRegistrationInput({ getConfig: () => ({ terminal: { sshAutoReconnect: false, sshShellIntegration: false } }) })
+    registerTerminalSessionsIpc(ipcMain, input)
+    handlers.get('terminal:create')!({}, { kind: 'ssh', ssh: { host: 'h', username: 'u' } })
+    expect(input.createSshTerminal.mock.calls[0][2]).toMatchObject({ sshAutoReconnect: false, sshShellIntegration: false })
+    handlers.get('terminal:create')!({}, { kind: 'ssh', sshAutoReconnect: true, sshShellIntegration: true, ssh: { host: 'h', username: 'u' } })
+    expect(input.createSshTerminal.mock.calls[1][2]).toMatchObject({ sshAutoReconnect: true, sshShellIntegration: true })
+  })
   it('registers stable terminal session channels', async () => {
     const { registerTerminalSessionsIpc } = await loadBackend()
     const { ipcMain, handlers } = createIpcHarness()

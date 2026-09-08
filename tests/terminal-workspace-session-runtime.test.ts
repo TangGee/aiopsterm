@@ -116,6 +116,46 @@ const createHarness = (panels: TerminalPanel[], options: { isMacroRecording?: bo
 }
 
 describe('terminalWorkspaceSessionRuntime', () => {
+  it.each(['local', 'ssh'] as const)('kills a late %s session after its panel was removed', async (kind) => {
+    const panel = kind === 'local' ? localPanel() : sshPanel()
+    const f = createHarness([panel])
+    let resolve!: (info: TerminalSessionInfo) => void
+    f.createTerminal.mockImplementationOnce(() => new Promise<TerminalSessionInfo>((done) => { resolve = done }))
+    const starting = kind === 'local' ? f.runtime.startLocalTerminalForPanel(panel) : f.runtime.startSshTerminalForPanel(panel)
+    await vi.waitFor(() => expect(f.createTerminal).toHaveBeenCalledTimes(1))
+    f.workspace.panels = []
+    resolve(session('orphan', kind))
+    expect(await starting).toBe(false)
+    expect(f.killTerminal).toHaveBeenCalledWith('orphan')
+    expect(f.appliedLocal).toEqual([]); expect(f.appliedSsh).toEqual([])
+  })
+  it('lets the latest launch win and kills an older delayed SSH response', async () => {
+    const panel = sshPanel(); const f = createHarness([panel])
+    let resolve!: (info: TerminalSessionInfo) => void
+    f.createTerminal.mockImplementationOnce(() => new Promise<TerminalSessionInfo>((done) => { resolve = done }))
+    const old = f.runtime.startSshTerminalForPanel(panel)
+    await vi.waitFor(() => expect(f.createTerminal).toHaveBeenCalledTimes(1))
+    expect(await f.runtime.startSshTerminalForPanel(panel)).toBe(true)
+    resolve(session('obsolete', 'ssh'))
+    expect(await old).toBe(false)
+    expect(f.killTerminal).toHaveBeenCalledWith('obsolete')
+    expect(f.appliedSsh).toHaveLength(1)
+    expect(f.workspace.panels[0].sessionId).toBe('ssh-session')
+  })
+  it.each(['local', 'ssh'] as const)('ignores an obsolete %s launch error after a successful replacement', async (kind) => {
+    const panel = kind === 'local' ? localPanel() : sshPanel()
+    const f = createHarness([panel])
+    let reject!: (error: Error) => void
+    f.createTerminal.mockImplementationOnce(() => new Promise<TerminalSessionInfo>((_done, fail) => { reject = fail }))
+    const start = () => kind === 'local' ? f.runtime.startLocalTerminalForPanel(panel) : f.runtime.startSshTerminalForPanel(panel)
+    const old = start()
+    await vi.waitFor(() => expect(f.createTerminal).toHaveBeenCalledTimes(1))
+    expect(await start()).toBe(true)
+    reject(new Error('obsolete failure'))
+    expect(await old).toBe(false)
+    expect(f.notices).toEqual([])
+    expect(f.killTerminal).not.toHaveBeenCalled()
+  })
   it('passes local cwd and only verified remote cwd to new shells', async () => {
     const local = localPanel(); local.cwd = '/work/remembered'; local.restoredHistory = true
     const ssh = sshPanel(); ssh.cwd = '/srv/verified'

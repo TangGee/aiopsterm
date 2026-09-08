@@ -172,7 +172,13 @@ export const registerTerminalSessionsIpc = (ipcMain: IpcMain, input: RegisterTer
     const snapshot = await recovery.load()
     const liveSessions = (snapshot?.tabs || []).flatMap((tab) => {
       const session = tab.sessionId ? input.sessions.get(tab.sessionId) : undefined
-      return session?.window === owner && session.info ? [{ ...session.info, cwd: session.process.getCwd?.() || tab.cwd || session.info.cwd }] : []
+      if (!session || session.window !== owner || !session.info) return []
+      const connection = session.info.connection
+      if (tab.ssh) {
+        if (session.kind !== 'ssh' || !connection || connection.host !== tab.ssh.host || connection.username !== tab.ssh.username || connection.port !== tab.ssh.port) return []
+      } else if (session.kind !== 'local') return []
+      const cwd = session.process.getCwd?.() || (session.info.lifecycle?.cwdVerified ? session.info.cwd : tab.cwd || session.info.cwd)
+      return [{ ...session.info, cwd }]
     })
     return { snapshot, liveSessions }
   })

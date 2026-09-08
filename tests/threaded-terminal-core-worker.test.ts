@@ -96,6 +96,18 @@ describe('threadedTerminalCoreWorker', () => {
     await waitFor(() => messages.some((message) => message.type === 'created'))
   }
 
+  it('checkpoints only normal history while an alternate-screen program is visible', async () => {
+    await createTerminal()
+    const terminalId = createOptions().terminalId
+    send({ type: 'data', terminalId, data: 'NORMAL_HISTORY\r\n' })
+    await waitFor(() => { const snapshot = latestScreen(messages); return snapshot && visibleText(snapshot).includes('NORMAL_HISTORY') })
+    send({ type: 'data', terminalId, data: '\x1b[?1049h\x1b[2J\x1b[HALT_PRIVATE' })
+    await waitFor(() => { const snapshot = latestScreen(messages); return snapshot && visibleText(snapshot).includes('ALT_PRIVATE') })
+    send({ type: 'read-screen', terminalId, requestId: 'recovery', tailLines: 1000, normalBuffer: true })
+    const result = await waitFor(() => messages.find((message): message is Extract<ThreadedTerminalCoreResponse, { type: 'read-screen-result' }> => message.type === 'read-screen-result' && message.requestId === 'recovery'))
+    expect(result.text).toContain('NORMAL_HISTORY')
+    expect(result.text).not.toContain('ALT_PRIVATE')
+  })
   it('keeps the visible snapshot at the bottom while output grows', async () => {
     await createTerminal()
     send({
