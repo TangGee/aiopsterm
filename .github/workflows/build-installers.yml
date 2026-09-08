@@ -1,0 +1,125 @@
+name: Build installers for local signing
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to build
+        type: choice
+        options: [all, linux, windows, macos]
+        default: all
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  installers:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            os: ubuntu-22.04
+            container: ubuntu:20.04
+          - platform: windows
+            os: windows-latest
+          - platform: macos
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+    timeout-minutes: 180
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - name: Select platform
+        id: selected
+        shell: bash
+        run: echo "build=${{ inputs.platform == 'all' || inputs.platform == matrix.platform }}" >> "$GITHUB_OUTPUT"
+      - name: Prepare Ubuntu 20.04 release toolchain
+        if: steps.selected.outputs.build == 'true' && runner.os == 'Linux'
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git build-essential python3 pkg-config musl-tools libcap-dev clang libc++-dev libc++abi-dev lld libssl-dev xz-utils dpkg-dev fakeroot xvfb libgtk-3-0 libnss3 libasound2 libgbm1 fonts-noto-cjk unzip zip
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/regression-rustup.sh
+          sh /tmp/regression-rustup.sh -y --profile minimal --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@v4
+        if: steps.selected.outputs.build == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.selected.outputs.build == 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        if: steps.selected.outputs.build == 'true'
+        with:
+          python-version: '3.12'
+      - run: npm ci
+        if: steps.selected.outputs.build == 'true'
+      - run: npm install --prefix .cache/regression-clients --no-save @anthropic-ai/claude-code@2.1.220
+        if: steps.selected.outputs.build == 'true'
+      - run: node -e "require('fs').appendFileSync(process.env.GITHUB_PATH, require('path').resolve('.cache/regression-clients/node_modules/.bin') + require('os').EOL)"
+        if: steps.selected.outputs.build == 'true'
+      - run: npm run generate:icons
+        if: steps.selected.outputs.build == 'true'
+      - run: npm run build:codex
+        if: steps.selected.outputs.build == 'true'
+      - run: npm run build:cline-sidecar
+        if: steps.selected.outputs.build == 'true'
+      - run: npm run build
+        if: steps.selected.outputs.build == 'true'
+      - run: npm run native:ensure:electron
+        if: steps.selected.outputs.build == 'true'
+      - name: Build distributables and runnable package
+        if: steps.selected.outputs.build == 'true'
+        run: npx electron-builder --config electron-builder.yml --config.mac.identity=- --config.mac.notarize=false --config.win.signExecutable=false --publish never
+      - name: Record artifact commit and hashes
+        if: steps.selected.outputs.build == 'true'
+        run: npm run test:release:gate -- dist
+      - run: npm run audit:package-config
+        if: steps.selected.outputs.build == 'true'
+      - run: npm run audit:packaged-app
+        if: steps.selected.outputs.build == 'true'
+      - if: steps.selected.outputs.build == 'true' && runner.os == 'Linux'
+        run: npm run audit:linux-appimage
+      - if: steps.selected.outputs.build == 'true' && runner.os == 'Linux'
+        run: npm run audit:linux-deb
+      - run: npm run test:regression -- packaged
+        if: steps.selected.outputs.build == 'true'
+      - name: Export verified signing input or Linux checksums
+        if: steps.selected.outputs.build == 'true'
+        run: node scripts/prepare-local-signing.mjs dist
+      - name: Upload local signing bundle
+        if: steps.selected.outputs.build == 'true' && runner.os != 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: signing-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            dist/aiopsterm-signing-*.tar.gz
+            dist/aiopsterm-signing-*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload package regression artifacts
+        if: always() && steps.selected.outputs.build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaged-${{ matrix.os }}
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 21
+      - name: Upload tested distributables
+        if: steps.selected.outputs.build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ runner.os }}
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/regression-provenance-*.json
+            dist/SHA256SUMS-linux.txt
+          retention-days: 7

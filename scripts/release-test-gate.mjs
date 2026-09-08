@@ -43,20 +43,20 @@ for (const entry of files) {
 const unpackedRoot = join(root, process.platform === 'win32' ? 'win-unpacked'
   : process.platform === 'darwin' ? (process.arch === 'arm64' ? 'mac-arm64' : 'mac') : 'linux-unpacked')
 const archive = join(unpackedRoot, ...(process.platform === 'darwin' ? ['aiopsterm.app', 'Contents', 'Resources'] : ['resources']), 'app.asar')
-const built = JSON.parse(extractFile(archive, 'out/build-provenance.json').toString())
+const built = JSON.parse(extractFile(archive, join('out', 'build-provenance.json')).toString())
 if (built.schemaVersion !== 1 || built.commit !== sha || built.dirty !== false) throw new Error('Packaged build is dirty or was compiled from a different commit.')
 const packagedOutputs = listPackage(archive).map((name) => name.replace(/\\/g, '/').replace(/^\//, ''))
   .filter((name) => name.startsWith('out/') && name !== 'out/build-provenance.json')
 for (const [name, expected] of Object.entries(built.files || {})) {
   if (name.startsWith('/') || name.split('/').includes('..')) throw new Error('Invalid compiled output path.')
-  const actual = createHash('sha256').update(extractFile(archive, `out/${name}`)).digest('hex')
+  const actual = createHash('sha256').update(extractFile(archive, join('out', ...name.split('/')))).digest('hex')
   if (actual !== expected) throw new Error(`Packaged compiled output changed: ${name}`)
 }
 if (!built.files?.['main/index.js'] || !built.files?.['preload/index.js'] || !built.files?.['renderer/index.html']) throw new Error('Missing compiled output provenance.')
 // ASAR listings include directories; any extra file must also be attributed.
 for (const name of packagedOutputs) {
   if (Object.hasOwn(built.files, name.slice(4))) continue
-  try { extractFile(archive, name) } catch { continue }
+  try { extractFile(archive, join(...name.split('/'))) } catch { continue }
   throw new Error(`Unattributed compiled output: ${name}`)
 }
 const treeHash = createHash('sha256')
