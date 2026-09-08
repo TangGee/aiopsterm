@@ -743,6 +743,7 @@ export const uninstallCodexHooksFeature = (content: string) => {
 const codexHookEventLabel = (eventName: string) => {
   const labels: Record<string, string> = {
     PreToolUse: 'pre_tool_use',
+    PostToolUse: 'post_tool_use',
     PermissionRequest: 'permission_request',
     AskUserQuestion: 'ask_user_question',
     SessionStart: 'session_start',

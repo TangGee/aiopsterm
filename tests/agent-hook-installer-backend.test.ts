@@ -392,6 +392,8 @@ describe('agent hook installer backend', () => {
       )
       expect(command).not.toContain('printf')
       expect(codexHookHash('Stop', command, 5)).toBe('sha256:1f8728044e5ea2880e5c6069fbd69718aa139bbeb7319e4e579359f418df31df')
+      const postCommand = agentHookCommandFor('codex', 'PostToolUse', '/opt/aiopsterm/aiopsterm-agent-hook.js')
+      expect(codexHookHash('PostToolUse', postCommand, 5)).toBe('sha256:9543da54a2f4e9ee22a71a0a773f14ccfca94b66a85f145404489a43084f7a9b')
     } finally {
       backend.configureAgentHookInstallerRuntime()
     }
@@ -423,5 +425,7 @@ describe('agent hook installer backend', () => {
     expect(trusted).toContain('[hooks.state."/home/ops/.codex/hooks.json:stop:0:0"]')
     expect(trusted).toContain(`trusted_hash = "${codexHookHash('Stop', command, 5)}"`)
     expect(trusted).toContain('[hooks.state."/home/ops/.codex/hooks.json:permission_request:0:0"]')
+    expect(trusted).toContain('[hooks.state."/home/ops/.codex/hooks.json:post_tool_use:0:0"]')
+    expect(trusted).not.toContain('hooks.json:PostToolUse:')
   })
 })

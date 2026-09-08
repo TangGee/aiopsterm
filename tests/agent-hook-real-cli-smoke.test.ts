@@ -274,15 +274,16 @@ describe.skipIf(!runRealSmoke)('real agent hook CLI smoke', () => {
     const listed = await readCodexHooksList({ HOME: home, CODEX_HOME: codexHome })
     const hooks = listed.data?.flatMap((entry) => entry.hooks || []) || []
     const aiopsHooks = hooks.filter((hook) => typeof hook.command === 'string' && hook.command.includes('aiopsterm-agent-hook-v1'))
-    expect(aiopsHooks.map((hook) => hook.eventName).sort()).toEqual(['permissionRequest', 'preToolUse', 'sessionStart', 'stop', 'userPromptSubmit'])
-    expect(aiopsHooks.every((hook) => hook.trustStatus === 'trusted')).toBe(true)
+    expect(aiopsHooks.map((hook) => hook.eventName).sort()).toEqual(['permissionRequest', 'postToolUse', 'preToolUse', 'sessionStart', 'stop', 'userPromptSubmit'])
+    expect(aiopsHooks.every((hook) => hook.trustStatus === 'trusted'), JSON.stringify(aiopsHooks)).toBe(true)
 
     const socket = await startAgentSocket()
     const responses = await startFakeResponsesServer()
     try {
       const run = await spawnWithTimeout(
         'codex',
-        ['exec', '--skip-git-repo-check', '-c', `openai_base_url="${responses.baseUrl}/v1"`, '-C', process.cwd(), 'Run the shell smoke command.'],
+        // The loopback fixture only emits printf. Test hook delivery independently of host sandbox support.
+        ['exec', '--skip-git-repo-check', '--sandbox', 'danger-full-access', '-c', `openai_base_url="${responses.baseUrl}/v1"`, '-C', home, 'Run the shell smoke command.'],
         {
           env: {
             HOME: home,
@@ -300,11 +301,13 @@ describe.skipIf(!runRealSmoke)('real agent hook CLI smoke', () => {
       expect(run.code, run.stderr).toBe(0)
       expect(run.stdout).toContain('done')
       expect(responses.requests.filter((request) => request.method === 'POST' && request.url === '/v1/responses')).toHaveLength(2)
-      expect(socket.received).toEqual(
+      expect(socket.received.every((message) => message.method === 'agent.hook')).toBe(true)
+      expect(socket.received.map((message) => message.params), run.stderr).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ source: 'codex', event: 'SessionStart', terminalSessionId: 'real-codex-terminal-1' }),
           expect.objectContaining({ source: 'codex', event: 'UserPromptSubmit', terminalSessionId: 'real-codex-terminal-1' }),
           expect.objectContaining({ source: 'codex', event: 'PreToolUse', summary: expect.stringContaining('aiopsterm-real-codex-hook') }),
+          expect.objectContaining({ source: 'codex', event: 'PostToolUse', terminalSessionId: 'real-codex-terminal-1' }),
           expect.objectContaining({ source: 'codex', event: 'Stop', terminalSessionId: 'real-codex-terminal-1' })
         ])
       )
@@ -340,7 +343,8 @@ describe.skipIf(!runRealSmoke)('real agent hook CLI smoke', () => {
         }
       )
       expect(run.code, run.stderr || run.stdout).toBe(0)
-      expect(socket.received).toEqual(
+      expect(socket.received.every((message) => message.method === 'agent.hook')).toBe(true)
+      expect(socket.received.map((message) => message.params), run.stderr).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ source: 'claude-code', event: 'SessionStart', terminalSessionId: 'real-claude-terminal-1' }),
           expect.objectContaining({ source: 'claude-code', event: 'UserPromptSubmit', terminalSessionId: 'real-claude-terminal-1' }),
