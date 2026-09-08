@@ -41,6 +41,8 @@ jobs:
         with:
           python-version: '3.12'
       - run: npm ci
+      - run: npm install --prefix .cache/regression-clients --no-save @anthropic-ai/claude-code@2.1.220
+      - run: node -e "require('fs').appendFileSync(process.env.GITHUB_PATH, require('path').resolve('.cache/regression-clients/node_modules/.bin') + require('os').EOL)"
       - run: npm run generate:icons
       - run: npm run build:codex
       - run: npm run build:cline-sidecar
@@ -57,6 +59,12 @@ jobs:
       - if: runner.os == 'Linux'
         run: npm run audit:linux-deb
       - run: npm run test:regression -- packaged
+      - name: Download previous published installer for migration regression
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/fetch-previous-installer.mjs
+      - name: Install previous release, upgrade, compare payloads and reinstall
+        run: node scripts/test-installed-release.mjs dist
       - name: Verify tested artifacts were not changed
         run: npm run test:release:gate -- dist --verify
       - name: Upload package regression artifacts

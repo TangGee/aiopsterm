@@ -1,0 +1,45 @@
+import { test, expect } from './support/desktop'
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+
+test('native terminal history and process ownership survive reload and restart on every OS @core', async ({ desktop }) => {
+  await desktop.localTerminal()
+  const connected = async () => (await desktop.api('invokeControlRequest', 'terminal.list', {})).data.terminals.filter((tab: any) => tab.connected)
+  const initial = (await connected())[0]
+  expect(initial.processId).toBeGreaterThan(0)
+  await expect.poll(async () => (await desktop.api('loadTerminalRecovery')).snapshot?.tabs.some((tab: any) => tab.history.includes('REGRESSION_READY'))).toBe(true)
+  await desktop.page.reload()
+  await expect.poll(async () => (await connected())[0]?.sessionId).toBe(initial.sessionId)
+  expect((await connected())[0].processId).toBe(initial.processId)
+  await desktop.restart()
+  await expect.poll(async () => (await connected()).length).toBe(1)
+  expect((await connected())[0].processId).not.toBe(initial.processId)
+  await expect.poll(() => desktop.replay()).toContain('REGRESSION_READY')
+  await desktop.page.locator('.terminal-pane.active .xterm-host').click()
+  await desktop.page.keyboard.type('echo REGRESSION_RESTORED_INPUT')
+  await desktop.page.keyboard.press('Enter')
+  await expect.poll(() => desktop.replay()).toMatch(/[\r\n]REGRESSION_RESTORED_INPUT[\r\n]/)
+  await desktop.page.keyboard.type('exit')
+  await desktop.page.keyboard.press('Enter')
+  await expect.poll(async () => (await desktop.api('loadTerminalRecovery')).snapshot?.tabs[0]?.resume).toBe(false)
+  await desktop.restart()
+  expect(await connected()).toHaveLength(0)
+  await expect.poll(() => desktop.replay()).toContain('REGRESSION_RESTORED_INPUT')
+  expect(desktop.errors).toEqual([])
+})
+
+test('recovery opt-out and corrupt state do not reopen stale processes on every OS @core', async ({ desktop }) => {
+  await desktop.localTerminal()
+  await expect.poll(async () => (await desktop.api('loadTerminalRecovery')).snapshot?.tabs.length).toBe(1)
+  const config = await desktop.api('getConfig')
+  await desktop.api('saveConfig', { terminal: { ...config.terminal, restoreTerminalTabs: false } })
+  await desktop.restart()
+  expect((await desktop.api('invokeControlRequest', 'terminal.list', {})).data.terminals.some((tab: any) => tab.connected || tab.sessionId)).toBe(false)
+  await desktop.api('saveConfig', { terminal: { ...config.terminal, restoreTerminalTabs: true } })
+  await desktop.app.close()
+  await writeFile(join(desktop.root, 'state', 'terminal-recovery.json'), '{invalid')
+  await desktop.start()
+  expect((await desktop.api('invokeControlRequest', 'terminal.list', {})).data.terminals.some((tab: any) => tab.connected || tab.sessionId)).toBe(false)
+  await desktop.localTerminal()
+  expect(desktop.errors).toEqual([])
+})

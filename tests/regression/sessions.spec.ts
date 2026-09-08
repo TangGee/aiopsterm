@@ -61,8 +61,8 @@ for (const source of Object.keys(corpus) as CorpusAgent[]) {
   })
 }
 
-test('session viewer exposes search, pagination, edit and multiselect controls @core', async ({ desktop }) => {
-  const source = 'codex'
+for (const source of Object.keys(corpus) as CorpusAgent[]) {
+test(`${source} session viewer exposes search, pagination, edit and multiselect controls @core`, async ({ desktop }) => {
   const sessionId = 'regression-viewer'
   const filePath = join(desktop.root, 'viewer.jsonl')
   await writeFile(filePath, transcriptFor(source, 90))
@@ -87,9 +87,19 @@ test('session viewer exposes search, pagination, edit and multiselect controls @
   await expect(viewer.locator('.managed-ai-session-record-card')).toHaveCount(1)
   const editor = viewer.locator('.managed-ai-session-record-card textarea')
   await editor.fill('REGRESSION_UI_EDITED')
+  await writeFile(filePath, (await readFile(filePath, 'utf8')) + JSON.stringify({ type: 'future_record', text: 'REGRESSION_UI_APPEND' }) + '\n')
+  // A draft stays put after external append. Cancel a conflict, then explicitly overwrite.
+  await expect(editor).toHaveValue('REGRESSION_UI_EDITED')
+  page.once('dialog', (dialog) => dialog.dismiss())
+  await viewer.locator('.managed-ai-session-record-actions button.primary').click()
+  await expect(viewer.locator('.managed-ai-session-content-error')).toBeVisible()
+  expect(await readFile(filePath, 'utf8')).toContain('REGRESSION_USER')
+  await expect(editor).toHaveValue('REGRESSION_UI_EDITED')
+  page.once('dialog', (dialog) => dialog.accept())
   await viewer.locator('.managed-ai-session-record-actions button.primary').click()
   await expect.poll(() => readFile(filePath, 'utf8')).toContain('REGRESSION_UI_EDITED')
-  await search.fill('REGRESSION_')
+  expect(await readFile(filePath, 'utf8')).toContain('REGRESSION_UI_APPEND')
+  await search.fill('REGRESSION_PAGE_')
   await viewer.locator('.managed-ai-session-selection-toggle').click()
   await viewer.locator('.managed-ai-session-record-selector input').nth(1).check()
   await viewer.locator('.managed-ai-session-record-selector input').nth(2).check()
@@ -99,3 +109,4 @@ test('session viewer exposes search, pagination, edit and multiselect controls @
   await expect.poll(async () => (await desktop.api('listManagedAiSessionContent', { source, sessionId })).data.total).toBe(before - 2)
   await expect(viewer.locator('.managed-ai-session-record-selector input:checked')).toHaveCount(0)
 })
+}

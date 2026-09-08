@@ -8,8 +8,11 @@ export class Desktop {
   app!: ElectronApplication
   page!: Page
   errors: string[] = []
+  private launchEnv: NodeJS.ProcessEnv = {}
   constructor(readonly root: string) {}
   async start(env: NodeJS.ProcessEnv = {}) {
+    this.launchEnv = { ...this.launchEnv, ...env }
+    env = this.launchEnv
     const home = join(this.root, 'home')
     await mkdir(home, { recursive: true })
     const bin = join(this.root, 'bin')
@@ -25,7 +28,7 @@ export class Desktop {
     const clean = await isolatedEnvironment(this.root)
     this.app = await electron.launch({
       ...(process.env.AIOPSTERM_PACKAGED_APP ? { executablePath: resolve(process.env.AIOPSTERM_PACKAGED_APP) } : {}),
-      args: [...(process.env.AIOPSTERM_PACKAGED_APP ? [] : ['.']), '--lang=zh-CN', '--force-device-scale-factor=1',
+      args: [...(process.env.AIOPSTERM_PACKAGED_APP ? [] : ['.']), `--lang=${env.REGRESSION_LOCALE || 'zh-CN'}`, `--force-device-scale-factor=${env.REGRESSION_SCALE || '1'}`,
         ...(process.platform === 'linux' && process.getuid?.() === 0 ? ['--no-sandbox'] : [])],
       env: {
         ...clean, PATH: `${bin}${process.platform === 'win32' ? ';' : ':'}${clean.PATH || clean.Path || ''}`,
@@ -46,8 +49,8 @@ export class Desktop {
     await this.page.waitForLoadState('domcontentloaded')
     await this.app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].setSize(1280, 900) })
     await expect(this.page.locator('.app-shell')).toBeVisible()
-    if ((await this.api('getConfig')).language !== 'zh-CN') {
-      await this.api('saveConfig', { language: 'zh-CN' })
+    if ((await this.api('getConfig')).language !== (env.REGRESSION_LOCALE || 'zh-CN')) {
+      await this.api('saveConfig', { language: env.REGRESSION_LOCALE || 'zh-CN' })
       await this.page.reload()
       await expect(this.page.locator('.app-shell')).toBeVisible()
     }
@@ -57,7 +60,7 @@ export class Desktop {
   async api(method: string, ...args: unknown[]): Promise<any> {
     return this.page.evaluate(async ({ method, args }) => (window as any).aiops[method](...args), { method, args })
   }
-  async restart() { await this.app.close(); await this.start() }
+  async restart(env: NodeJS.ProcessEnv = {}) { await this.app.close(); await this.start(env) }
   async localTerminal() {
     await this.page.locator('[data-module-key="workspace"]').click()
     await this.page.locator('.workspace-search input').fill('127.0.0.1')

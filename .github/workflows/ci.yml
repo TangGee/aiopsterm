@@ -15,7 +15,11 @@ concurrency:
 jobs:
   test:
     name: Audit, typecheck and unit tests
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,7 +55,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: unit-results
+          name: unit-results-${{ matrix.os }}
           path: test-results/unit.xml
 
   desktop:

@@ -14,6 +14,8 @@ concurrency:
 
 jobs:
   full:
+    env:
+      AIOPSTERM_VISUAL_BASELINES: '1'
     strategy:
       fail-fast: false
       matrix:
@@ -27,6 +29,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Install pinned external MCP client
+        run: npm install --prefix .cache/regression-clients --no-save @anthropic-ai/claude-code@2.1.220
+      - name: Add isolated client directory to PATH
+        run: node -e "require('fs').appendFileSync(process.env.GITHUB_PATH, require('path').resolve('.cache/regression-clients/node_modules/.bin') + require('os').EOL)"
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0 libnss3 libasound2 libgbm1 fonts-noto-cjk
       - run: npm run test:regression -- full
@@ -46,7 +52,7 @@ jobs:
       matrix:
         os: [ubuntu-22.04, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -57,6 +63,10 @@ jobs:
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0 libnss3 libasound2 libgbm1
       - run: npm run test:regression -- stress
+      - name: AI, session viewer and MCP lifecycle soak
+        env:
+          AIOPSTERM_REGRESSION_REPORT: lifecycle
+        run: npm run test:regression -- lifecycle
       - name: Upload performance samples and traces
         if: always()
         uses: actions/upload-artifact@v4

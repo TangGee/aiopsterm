@@ -3,13 +3,14 @@ import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const profile = process.argv[2] || 'core'
-const profiles = ['core', 'full', 'visual', 'stress', 'packaged']
+const profiles = ['core', 'full', 'visual', 'stress', 'lifecycle', 'packaged']
 if (profile === '--help') {
-  console.log('Usage: npm run test:regression -- <core|full|visual|stress|packaged>\n'
+  console.log('Usage: npm run test:regression -- <core|full|visual|stress|lifecycle|packaged>\n'
     + 'core: isolated Electron focus, sessions, local AI and MCP.\n'
     + 'full: all deterministic scenarios, all themes and legacy desktop flows.\n'
     + 'visual: all theme screenshots and restart comparisons. Set AIOPSTERM_VISUAL_BASELINES=1 for approved golden checks.\n'
     + 'stress: 20-minute terminal load, memory and teardown budgets.\n'
+    + 'lifecycle: 10-minute real AI, session viewer and MCP resource lifecycle.\n'
     + 'packaged: run against AIOPSTERM_PACKAGED_APP or the platform dist directory.\n'
     + 'Set AIOPSTERM_REQUIRE_SIGNATURES=1 to require signed release provenance before package tests.\n'
     + 'Real external SSH, Kubernetes and paid-model compatibility are separate opt-in test:live commands.')
@@ -31,6 +32,7 @@ const playwright = (...args) => {
   else run(process.execPath, invocation)
 }
 if (profile !== 'packaged') {
+  if (profile === 'full') npm('build:codex')
   if (profile !== 'stress') npm('build:cline-sidecar')
   npm('build')
   npm('native:ensure:electron')
@@ -38,7 +40,7 @@ if (profile !== 'packaged') {
 if (profile === 'core') playwright('-c', 'playwright.regression.config.ts', '--grep', '@core')
 if (profile === 'full') {
   env.AIOPSTERM_FULL_VISUAL = '1'
-  playwright('-c', 'playwright.regression.config.ts')
+  playwright('-c', 'playwright.regression.config.ts', '--grep-invert', '@lifecycle')
   // Live CLI hooks are a separate opt-in lane, not counted as offline coverage.
   playwright('--grep-invert', 'threaded terminal renderer|managed AI session notifications')
 }
@@ -51,6 +53,7 @@ if (profile === 'stress') {
   env.AIOPSTERM_TERMINAL_STRESS_DURATION_MS ||= String(20 * 60 * 1000)
   playwright('-c', 'playwright.stress.config.ts')
 }
+if (profile === 'lifecycle') playwright('-c', 'playwright.regression.config.ts', '--grep', '@lifecycle')
 if (profile === 'packaged') {
   const dist = resolve(env.AIOPSTERM_DIST_DIR || 'dist')
   const executable = resolve(dist, process.platform === 'win32' ? 'win-unpacked/aiopsterm.exe'
@@ -63,5 +66,5 @@ if (profile === 'packaged') {
   }
   if (!existsSync(env.AIOPSTERM_PACKAGED_APP)) throw new Error(`Package not found: ${env.AIOPSTERM_PACKAGED_APP}`)
   playwright('-c', 'playwright.packaged.config.ts')
-  playwright('-c', 'playwright.regression.config.ts')
+  playwright('-c', 'playwright.regression.config.ts', '--grep-invert', '@lifecycle')
 }

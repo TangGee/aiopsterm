@@ -1,6 +1,7 @@
 import { defineConfig } from '@playwright/test'
 
-const reportName = process.env.AIOPSTERM_PACKAGED_APP ? 'regression-packaged' : 'regression'
+const reportName = process.env.AIOPSTERM_REGRESSION_REPORT || (process.env.AIOPSTERM_PACKAGED_APP ? 'regression-packaged' : 'regression')
+if (!/^[a-z0-9-]+$/.test(reportName)) throw new Error('Invalid regression report directory name.')
 
 export default defineConfig({
   testDir: 'tests/regression',

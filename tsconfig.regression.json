@@ -12,5 +12,5 @@
     "baseUrl": ".",
     "paths": { "@shared/*": ["src/shared/*"], "@/*": ["src/renderer/src/*"] }
   },
-  "include": ["tests/regression/**/*.ts", "playwright.regression.config.ts", "playwright.stress.config.ts", "vitest.workspace.ts"]
+  "include": ["tests/regression/**/*.ts", "tests/installed-e2e/**/*.ts", "playwright.install.config.ts", "playwright.regression.config.ts", "playwright.stress.config.ts", "vitest.workspace.ts"]
 }

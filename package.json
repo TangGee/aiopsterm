@@ -17,7 +17,7 @@
   "scripts": {
     "dev": "npm run native:ensure:electron && electron-vite dev",
     "start": "npm run native:ensure:electron && electron-vite preview",
-    "build": "npm run audit:i18n && npm run audit:state-ownership && npm run audit:best-practices-docs && npm run typecheck && electron-vite build",
+    "build": "npm run audit:i18n && npm run audit:state-ownership && npm run audit:best-practices-docs && npm run typecheck && electron-vite build && node scripts/record-build-provenance.mjs",
     "build:cline-sidecar": "node scripts/build-cline-sidecar.mjs",
     "codex:ensure-source": "node scripts/ensure-codex-source.mjs",
     "build:codex": "npm run codex:ensure-source && node scripts/build-codex-cli.mjs",
@@ -88,6 +88,7 @@
   },
   "devDependencies": {
     "@cline/sdk": "0.0.59",
+    "@electron/asar": "3.4.1",
     "@playwright/test": "^1.48.2",
     "@types/adm-zip": "^0.5.8",
     "@types/better-sqlite3": "^7.6.13",

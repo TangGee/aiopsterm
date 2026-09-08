@@ -3,6 +3,9 @@ import { createReadStream } from 'node:fs'
 import { readdir, readFile, readlink, writeFile } from 'node:fs/promises'
 import { resolve, join, basename } from 'node:path'
 import { createHash } from 'node:crypto'
+import { createRequire } from 'node:module'
+
+const { extractFile, listPackage } = createRequire(import.meta.url)('@electron/asar')
 
 const root = resolve(process.argv[2] || 'dist')
 const signatures = process.argv.includes('--require-signatures')
@@ -39,6 +42,23 @@ for (const entry of files) {
 }
 const unpackedRoot = join(root, process.platform === 'win32' ? 'win-unpacked'
   : process.platform === 'darwin' ? (process.arch === 'arm64' ? 'mac-arm64' : 'mac') : 'linux-unpacked')
+const archive = join(unpackedRoot, ...(process.platform === 'darwin' ? ['aiopsterm.app', 'Contents', 'Resources'] : ['resources']), 'app.asar')
+const built = JSON.parse(extractFile(archive, 'out/build-provenance.json').toString())
+if (built.schemaVersion !== 1 || built.commit !== sha || built.dirty !== false) throw new Error('Packaged build is dirty or was compiled from a different commit.')
+const packagedOutputs = listPackage(archive).map((name) => name.replace(/\\/g, '/').replace(/^\//, ''))
+  .filter((name) => name.startsWith('out/') && name !== 'out/build-provenance.json')
+for (const [name, expected] of Object.entries(built.files || {})) {
+  if (name.startsWith('/') || name.split('/').includes('..')) throw new Error('Invalid compiled output path.')
+  const actual = createHash('sha256').update(extractFile(archive, `out/${name}`)).digest('hex')
+  if (actual !== expected) throw new Error(`Packaged compiled output changed: ${name}`)
+}
+if (!built.files?.['main/index.js'] || !built.files?.['preload/index.js'] || !built.files?.['renderer/index.html']) throw new Error('Missing compiled output provenance.')
+// ASAR listings include directories; any extra file must also be attributed.
+for (const name of packagedOutputs) {
+  if (Object.hasOwn(built.files, name.slice(4))) continue
+  try { extractFile(archive, name) } catch { continue }
+  throw new Error(`Unattributed compiled output: ${name}`)
+}
 const treeHash = createHash('sha256')
 const hashTree = async (directory, prefix = '') => {
   const entries = (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name, 'en'))
