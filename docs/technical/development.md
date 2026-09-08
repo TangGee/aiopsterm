@@ -378,3 +378,19 @@ The packaged E2E launches the unpacked packaged app with an isolated user-data d
 ## Terminal Recovery Verification
 
 Run the focused supervisor, persistence, real SSH/PTY and renderer suites documented in [Terminal Recovery Validation](ssh-session-persistence-test-plan.md). The Electron test in `tests/e2e/terminal-recovery.spec.ts` verifies both renderer reload with the same local process and full application restart with a new process. Switch native modules to Node before backend tests and Electron before desktop tests. Tabby and tmux checkouts remain reference-only outside the application source and package inputs.
+
+## Local Signing Pipeline Verification
+
+The operating commands are documented in [CI Build And Local Release Signing](../usage/local-release-signing.md). `prepare-local-signing.mjs` exports a verified input archive; `download-signing-bundle.mjs` binds downloads to a successful repository workflow run; `local-sign-release.mjs` signs a copy and tests the signed application before generating final provenance. `sign-windows-file.mjs` integrates the user certificate store and checks the signer and timestamp after each signature.
+
+Run focused checks after changing this pipeline:
+
+```bash
+npx vitest run tests/regression/local-signing.test.ts tests/regression/release-gate.test.ts tests/package-config.test.ts
+npm run typecheck
+npm run audit:package-config
+```
+
+Tests cover commit/platform/version mismatches, added/removed/modified files, ASAR compiled provenance, dirty or mismatched builds, unlisted compiled output, executable modes, internal and escaping symlinks, archive round trips, copy isolation, and CI export ordering. ASAR lookup paths must use the host path separator even though manifest paths use forward slashes; real Windows validation exposed this distinction.
+
+The 2026-09-08 implementation validation passed 35 focused checks on Linux, 16 signing/provenance checks on macOS, and 15 on Windows, with one POSIX permission/symlink case skipped on Windows. Type checking and package configuration audit passed. Native CLI preflight used explicitly synthetic bundles. A separate macOS probe completed Developer ID signing and secure timestamp verification, and the original locked keychain state was restored. Windows actual signing timed out waiting for SimplySign interactive authentication. These results do not establish completion of a GitHub-produced installer's end-to-end signing or notarization; record that result separately after a successful workflow run and local signing pass. Do not store machine passwords, tokens or private key material in fixtures or reports.

@@ -170,3 +170,7 @@ signtool verify /pa /all /v .\dist\win-unpacked\aiopsterm.exe
 ```
 
 `Status` must be `Valid`, SignTool must succeed, the displayed publisher must match the intended release identity, and timestamp verification must succeed. Also enumerate packaged `.exe` helpers and verify their signatures before external release. See Microsoft's [SmartScreen reputation guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation), [SignTool reference](https://learn.microsoft.com/en-us/windows/win32/seccrypto/signtool), and Electron Builder's [code-signing configuration](https://www.electron.build/docs/features/code-signing/).
+
+## CI Build With Local Signing
+
+To compile on GitHub Actions and retain signing keys on local machines, use [CI Build And Local Release Signing](local-release-signing.md). This entrypoint verifies the downloaded payload and signs a copy without recompiling application source. Its final manifest is generated only after signature checks and packaged application tests pass.

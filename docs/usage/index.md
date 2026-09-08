@@ -29,6 +29,7 @@ Detailed reference:
 - [Knowledge Base](knowledge-base.md)
 - [MCP Servers](mcp-servers.md)
 - [Package Verification](package-verification.md)
+- [CI Build And Local Release Signing](local-release-signing.md)
 - [Product Sessions And Agents Mode](product-sessions.md)
 - [Quick Commands](quick-commands.md)
 - [Settings Help](settings/index.md)
