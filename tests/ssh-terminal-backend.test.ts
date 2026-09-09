@@ -297,8 +297,8 @@ describe('ssh terminal backend runtime', () => {
         username: 'deploy',
         password: 'secret',
         readyTimeout: 120000,
-        keepaliveInterval: 10000,
-        keepaliveCountMax: 5
+        keepaliveInterval: 5000,
+        keepaliveCountMax: 10
       })
     ])
     expect(ssh.shellOptions).toEqual([expect.objectContaining({ term: 'vt220', cols: 132, rows: 44 })])
@@ -1305,7 +1305,7 @@ describe('ssh terminal backend runtime', () => {
     pty.processes[0].emitData('ops@relay:~$ ')
     expect(pty.processes[0].writes).toHaveLength(1)
     const command = pty.processes[0].writes[0]
-    expect(command).toBe("ssh -o ServerAliveInterval=10 -o ServerAliveCountMax=5 -tt -p 22 -- 'root@target.internal'\n")
+    expect(command).toBe("ssh -o ServerAliveInterval=5 -o ServerAliveCountMax=10 -tt -p 22 -- 'root@target.internal'\n")
     expect(command).not.toContain('queued-before-relay')
     expect(command).not.toContain('__AIO_CTX')
     expect(command).not.toContain('printf')
@@ -1478,7 +1478,7 @@ describe('ssh terminal backend runtime', () => {
     pty.processes[0].emitData('ops@relay:~$ ')
     pty.processes[0].emitData('target login banner\n[root@target.internal ~]# ')
     expect(pty.processes[0].writes).toEqual([
-      "ssh -o ServerAliveInterval=10 -o ServerAliveCountMax=5 -tt -p 22 -- 'root@target.internal'\n"
+      "ssh -o ServerAliveInterval=5 -o ServerAliveCountMax=10 -tt -p 22 -- 'root@target.internal'\n"
     ])
 
     const backgroundPromise = result.session!.runBackgroundCommand!({ command: 'pwd && hostname', cwd: '/root', timeoutMs: 5000 })
@@ -1487,7 +1487,7 @@ describe('ssh terminal backend runtime', () => {
     expect(hidden).not.toBe(pty.processes[0])
     hidden.emitData('ops@relay:~$ ')
     expect(hidden.writes).toEqual([
-      "ssh -o ServerAliveInterval=10 -o ServerAliveCountMax=5 -tt -p 22 -- 'root@target.internal'\n"
+      "ssh -o ServerAliveInterval=5 -o ServerAliveCountMax=10 -tt -p 22 -- 'root@target.internal'\n"
     ])
     hidden.emitData('target login banner\n[root@target.internal ~]# ')
     expect(hidden.writes).toHaveLength(2)
@@ -1501,7 +1501,7 @@ describe('ssh terminal backend runtime', () => {
     const background = await backgroundPromise
 
     expect(pty.processes[0].writes).toEqual([
-      "ssh -o ServerAliveInterval=10 -o ServerAliveCountMax=5 -tt -p 22 -- 'root@target.internal'\n"
+      "ssh -o ServerAliveInterval=5 -o ServerAliveCountMax=10 -tt -p 22 -- 'root@target.internal'\n"
     ])
     expect(background).toEqual(
       expect.objectContaining({
@@ -1665,6 +1665,53 @@ describe('ssh terminal backend runtime', () => {
     expect(events.lifecycle[2].errorMessage).toContain('PasswordAuthentication')
     expect(events.exit).toEqual([{ event: events.lifecycle[2], code: 1 }])
     expect(events.data).toEqual([])
+  })
+
+  it('retires a cancelled handshake and absorbs late timeout errors without affecting another terminal', async () => {
+    const backend = await loadSshTerminalBackend()
+    const ssh = createSshRuntime({ manualReady: true })
+    backend.configureSshTerminalBackendRuntime({ ssh2Runtime: asRuntime(ssh.runtime), getConfig: () => runtimeConfig() })
+    const events = createRecorder()
+    const otherEvents = createRecorder()
+    const options = { kind: 'ssh' as const, ssh: { host: '127.0.0.1', username: 'test', password: 'test' } }
+    const first = backend.createSshTerminalSession('cancelled', options, createSink(events))
+    const other = backend.createSshTerminalSession('other', options, createSink(otherEvents))
+    await waitForMicrotasks(4)
+    first.session!.kill()
+    expect(() => ssh.clients[0].emit('error', new Error('Timed out while waiting for handshake'))).not.toThrow()
+    expect(() => ssh.clients[0].emit('error', new Error('Socket closed'))).not.toThrow()
+    expect(ssh.clients[0].endCalls).toBe(1)
+    expect(events.exit).toHaveLength(1)
+    expect(otherEvents.exit).toHaveLength(0)
+    ssh.clients[1].emit('ready')
+    await waitForMicrotasks(4)
+    expect(otherEvents.lifecycle.at(-1)?.stage).toBe('shell-ready')
+    other.session!.kill()
+  })
+
+  it('keeps retrying when a reconnect transport closes before handshake without an error event', async () => {
+    const backend = await loadSshTerminalBackend()
+    const ssh = createSshRuntime({ manualReady: true })
+    backend.configureSshTerminalBackendRuntime({ ssh2Runtime: asRuntime(ssh.runtime), getConfig: () => runtimeConfig() })
+    const events = createRecorder()
+    const terminal = backend.createSshTerminalSession('retry-close', {
+      kind: 'ssh', sshAutoReconnect: true, ssh: { host: '127.0.0.1', username: 'test', password: 'test' }
+    }, createSink(events))
+    await waitForMicrotasks(4)
+    ssh.clients[0].emit('ready')
+    await waitForMicrotasks(4)
+    vi.useFakeTimers()
+    try {
+      ssh.clients[0].emit('close')
+      await vi.advanceTimersByTimeAsync(1000)
+      ssh.clients[1].emit('close')
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(ssh.clients).toHaveLength(3)
+      expect(events.exit).toHaveLength(0)
+    } finally {
+      terminal.session!.kill()
+      vi.useRealTimers()
+    }
   })
 
   it('closes sessions, proxy sockets, and registry state from the backend kill path', async () => {

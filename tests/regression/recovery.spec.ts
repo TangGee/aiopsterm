@@ -1,6 +1,43 @@
 import { test, expect } from './support/desktop'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { startSshTarget } from './support/ssh-server'
+
+test('SSH reconnects without keyboard input and appends its prompt below the existing screen @core', async ({ desktop }, info) => {
+  const target = await startSshTarget(desktop.root, { nativePty: true })
+  try {
+    const saved = await desktop.api('saveAsset', { name: 'RECOVERY_SSH_TARGET', host: '127.0.0.1', port: target.port, username: 'regression', password: 'regression-only', auth_type: 'password', asset_type: 'person', group_name: 'Regression' })
+    expect(saved.ok).toBe(true)
+    await desktop.page.reload()
+    await desktop.page.locator('.workspace-search input').fill('RECOVERY_SSH_TARGET')
+    await desktop.page.locator('.workspace-host-row').filter({ hasText: 'RECOVERY_SSH_TARGET' }).dblclick()
+    const listed = async () => (await desktop.api('invokeControlRequest', 'terminal.list', {})).data.terminals.find((item: any) => item.connected)
+    await expect.poll(listed).toBeTruthy()
+    const initial = await listed()
+    const screen = async () => String((await desktop.api('invokeControlRequest', 'terminal.read_screen', { tailLines: 100 })).data?.text || '')
+    await expect.poll(screen).toMatch(/[$#>]\s*$/)
+    await desktop.page.locator('.terminal-pane.active .xterm-host').click()
+    await desktop.page.keyboard.type("printf '\\r\\nFIRST_HISTORY_ROW\\r\\nSECOND_HISTORY_ROW\\r\\n'")
+    await desktop.page.keyboard.press('Enter')
+    await expect.poll(screen).toMatch(/FIRST_HISTORY_ROW\nSECOND_HISTORY_ROW/)
+    const before = await screen()
+    const count = target.connectionCount()
+    target.disconnect()
+    // No keyboard events until the replacement shell is visible.
+    await expect.poll(target.connectionCount).toBe(count + 1)
+    await expect.poll(screen).not.toBe(before)
+    await expect.poll(listed).toBeTruthy()
+    expect((await listed()).sessionId).toBe(initial.sessionId)
+    const recovered = await screen()
+    expect(recovered).toContain('FIRST_HISTORY_ROW\nSECOND_HISTORY_ROW')
+    expect(recovered.slice(recovered.lastIndexOf('SECOND_HISTORY_ROW') + 'SECOND_HISTORY_ROW'.length).trim().split('\n').length).toBeGreaterThanOrEqual(2)
+    await desktop.page.keyboard.type("printf '\\r\\nAFTER_RECOVERY_ROW\\r\\n'")
+    await desktop.page.keyboard.press('Enter')
+    await expect.poll(screen).toMatch(/SECOND_HISTORY_ROW[\s\S]*\nAFTER_RECOVERY_ROW/)
+    await info.attach('reconnected-terminal', { body: await desktop.page.locator('.terminal-pane.active').screenshot(), contentType: 'image/png' })
+    expect(desktop.errors).toEqual([])
+  } finally { await target.close() }
+})
 
 test('native terminal history and process ownership survive reload and restart on every OS @core', async ({ desktop }) => {
   await desktop.localTerminal()

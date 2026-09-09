@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Terminal } from '@xterm/headless'
 
 const lifecycle = (stage: TerminalLifecycleEvent['stage'], rest: Partial<TerminalLifecycleEvent> = {}): TerminalLifecycleEvent => ({ id: 's1', kind: 'ssh', stage, at: Date.now(), ...rest })
 const fixture = (options: TerminalCreateOptions = {}) => {
@@ -70,6 +71,30 @@ describe('SSH automatic recovery', () => {
     f.end('process')
     expect(f.sink.closed).toHaveBeenCalledTimes(1)
     expect(f.sink.exit).toHaveBeenCalledTimes(1)
+  })
+  it.each([false, true])('keeps the new prompt below history after reconnect with alternate screen %s', async (alternate) => {
+    const f = fixture()
+    f.ready()
+    f.end()
+    vi.advanceTimersByTime(1000)
+    f.ready()
+    const reset = f.sink.data.mock.calls.map(([data]) => data.toString()).join('')
+    vi.useRealTimers()
+    const terminal = new Terminal({ cols: 80, rows: 24, allowProposedApi: true })
+    const write = (data: string) => new Promise<void>((resolve) => terminal.write(data, resolve))
+    try {
+      await write('first output\r\nsecond output\r\nold prompt$ ')
+      if (alternate) await write('\x1b[?1049h\x1b[Hfull screen\x1b[?25l\x1b[?1003h')
+      await write(reset + 'new prompt$ ')
+      const buffer = terminal.buffer.active
+      expect(buffer.type).toBe('normal')
+      expect(buffer.getLine(0)?.translateToString(true)).toBe('first output')
+      expect(buffer.getLine(1)?.translateToString(true)).toBe('second output')
+      expect(buffer.getLine(2)?.translateToString(true)).toBe('old prompt$ ')
+      expect(buffer.getLine(3)?.translateToString(true)).toBe('new prompt$ ')
+      expect(buffer.cursorY).toBe(3)
+      expect(terminal.modes.mouseTrackingMode).toBe('none')
+    } finally { terminal.dispose(); f.result.session!.kill() }
   })
   it.each(['manual', 'process', 'error'] as const)('does not reconnect after %s exit', (reason) => {
     const f = fixture()
@@ -183,10 +208,10 @@ describe('SSH automatic recovery', () => {
     }
     expect(vi.getTimerCount()).toBe(0)
   })
-  it('uses bounded exponential backoff and gives up after eight retries', () => {
+  it('keeps retrying long outages with bounded backoff until recovery or cancellation', () => {
     const f = fixture()
     f.ready()
-    for (const delay of [1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000]) {
+    for (const delay of [1000, 2000, 4000, 8000, 16000, ...Array(30).fill(30000)]) {
       f.end()
       const before = f.attempts.length
       vi.advanceTimersByTime(delay - 1)
@@ -194,9 +219,14 @@ describe('SSH automatic recovery', () => {
       vi.advanceTimersByTime(1)
       expect(f.attempts).toHaveLength(before + 1)
     }
+    expect(f.attempts).toHaveLength(36)
+    expect(f.sink.closed).not.toHaveBeenCalled()
+    f.ready()
+    f.result.session!.write('recovered\r')
+    expect(f.attempts.at(-1)!.process.write).toHaveBeenCalledWith('recovered\r')
     f.end()
-    vi.runAllTimers()
-    expect(f.attempts).toHaveLength(9)
+    f.result.session!.kill()
+    expect(vi.getTimerCount()).toBe(0)
     expect(f.sink.closed).toHaveBeenCalledTimes(1)
   })
 })

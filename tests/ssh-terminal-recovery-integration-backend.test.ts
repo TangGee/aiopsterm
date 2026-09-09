@@ -4,6 +4,7 @@ import { generateKeyPairSync } from 'node:crypto'
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createServer, type Socket } from 'node:net'
 import { spawn, type IPty } from 'node-pty'
 import { configureSshTerminalBackendRuntime, createSshTerminalSession } from '../src/main/backend/ssh/sshTerminal'
 import type { TerminalLifecycleEvent } from '../src/shared/contracts/terminalSessions'
@@ -17,6 +18,80 @@ const until = async (predicate: () => boolean, timeout = 6000) => {
 }
 
 describe.skipIf(process.platform !== 'linux')('real SSH transport recovery', () => {
+  it('closes a real pending handshake before its timeout without an uncaught error', async () => {
+    const sockets = new Set<Socket>()
+    const server = createServer((socket) => { sockets.add(socket); socket.on('error', () => {}); socket.resume() })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    configureSshTerminalBackendRuntime({ ssh2Runtime: { Client } as never, readyTimeoutMs: 150 })
+    const exits: TerminalLifecycleEvent[] = []
+    const terminal = createSshTerminalSession('cancel-handshake', {
+      kind: 'ssh', sshAutoReconnect: true, ssh: { host: '127.0.0.1', port: (server.address() as { port: number }).port, username: 'test', password: 'test-only' }
+    }, { lifecycle: () => {}, data: () => {}, exit: (event) => exits.push(event) })
+    try {
+      await until(() => sockets.size === 1)
+      terminal.session!.kill()
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      expect(exits).toHaveLength(1)
+      expect(exits[0].reason).toBe('manual')
+      expect([...sockets][0].destroyed).toBe(true)
+    } finally {
+      terminal.session?.kill()
+      for (const socket of sockets) socket.destroy()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+      configureSshTerminalBackendRuntime()
+    }
+  })
+
+  it('sends protocol keepalives, accepts their replies and never writes heartbeat text to the shell', async () => {
+    const hostKey = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs1', format: 'pem' })
+    const connections: Connection[] = []
+    const requests: string[] = []
+    let input = ''; let output = ''; let config: Record<string, unknown> = {}
+    const exits: unknown[] = []
+    class AuditedClient extends Client {
+      override connect(options: Parameters<Client['connect']>[0]) {
+        config = { ...options }
+        return super.connect({ ...options, debug: (message) => {
+          if (message.includes('Outbound: Sending ping')) requests.push(message)
+        } })
+      }
+    }
+    const server = new Server({ hostKeys: [hostKey] }, (connection) => {
+      connections.push(connection)
+      connection.on('error', () => {})
+      connection.on('authentication', (context) => context.accept())
+      connection.on('ready', () => connection.on('session', (accept) => {
+        const session = accept()
+        session.on('pty', (acceptPty) => acceptPty?.())
+        session.on('shell', (acceptShell) => {
+          const stream = acceptShell()
+          stream.write('idle prompt$ ')
+          stream.on('data', (data: Buffer) => { input += data.toString() })
+        })
+      }))
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    configureSshTerminalBackendRuntime({ ssh2Runtime: { Client: AuditedClient } as never, keepaliveIntervalMs: 40 })
+    const terminal = createSshTerminalSession('keepalive', {
+      kind: 'ssh', sshAutoReconnect: true, ssh: { host: '127.0.0.1', port: (server.address() as { port: number }).port, username: 'test', password: 'test-only' }
+    }, { lifecycle: () => {}, data: (data) => { output += data.toString() }, exit: (event) => exits.push(event) })
+    try {
+      await until(() => requests.length >= 12)
+      expect(config.keepaliveInterval).toBe(40)
+      expect(config.keepaliveCountMax).toBe(10)
+      expect(requests.every((request) => request.includes('keepalive@openssh.com'))).toBe(true)
+      expect(connections).toHaveLength(1)
+      expect(exits).toHaveLength(0)
+      expect(input).toBe('')
+      expect(output).toBe('idle prompt$ ')
+    } finally {
+      terminal.session?.kill()
+      configureSshTerminalBackendRuntime()
+      for (const connection of connections) connection.end()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
   it('reconnects a dropped SSH socket, restores bash cwd, retains output, and stops on exit', async () => {
     const root = mkdtempSync(join(tmpdir(), 'aiopsterm-ssh-recovery-'))
     const cwd = join(root, "project space's 中文")

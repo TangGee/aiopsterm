@@ -47,6 +47,8 @@ const createFaultProxy = async (host: string, port: number) => {
   return {
     port: (server.address() as { port: number }).port,
     count: () => accepted,
+    pause: () => { for (const socket of sockets) socket.pause() },
+    resume: () => { for (const socket of sockets) socket.resume() },
     cut: () => { for (const socket of sockets) socket.destroy() },
     blackhole: () => {
       for (const socket of sockets) {
@@ -126,6 +128,14 @@ describe.skipIf(!enabled)('public SSH recovery through an isolated fault proxy',
       }
       let previous = await identity('INITIAL')
       expect(previous[1]).toBe(cwd)
+      const beforePauseCount = proxy.count()
+      proxy.pause()
+      await new Promise((resolve) => setTimeout(resolve, 7000))
+      proxy.resume()
+      expect(await identity('SHORT_OUTAGE')).toEqual(previous)
+      expect(proxy.count()).toBe(beforePauseCount)
+      expect(exits).toHaveLength(0)
+      console.info('Live SSH short outage passed: original connection and shell retained.')
       for (const [index, fault] of ['cut', 'cut', 'cut', 'blackhole'].entries()) {
         const priorOutput = output
         const beforeEvents = lifecycles.length

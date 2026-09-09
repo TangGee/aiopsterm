@@ -59,7 +59,10 @@ export const createRecoveringSshTerminalSession = (
           return
         }
         if (event.stage === 'shell-ready') {
-          if (hasConnected) sink.data('\x1b[?1049l\x1b[?1047l\x1b[?1l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[0m\r\n')
+          // DECRST 1049 restores a saved cursor even in the normal buffer.
+          // Save its current position first; in the alternate buffer this only
+          // updates the alternate cursor and preserves the normal saved cursor.
+          if (hasConnected) sink.data('\x1b7\x1b[?1049l\x1b[?1047l\x1b[?1l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[0m\r\n')
           ready = true
           hasConnected = true
           attempt = 0
@@ -78,15 +81,15 @@ export const createRecoveringSshTerminalSession = (
         ready = false
         const ended = terminalEvent || event
         const retry = options.sshAutoReconnect !== false && hasConnected && (ended.reason === 'network' || ended.isNetworkDisconnect === true)
-        if (!retry || attempt >= 8) {
+        if (!retry) {
           finish(ended, code)
           return
         }
         // Invalidate late callbacks immediately, including channel output after close.
         generation++
         active = null
-        const delay = Math.min(30_000, 1000 * 2 ** attempt++)
-        lastEvent = { ...ended, stage: 'connecting', reason: undefined, code: undefined, errorCode: undefined, errorMessage: undefined, cwd, at: Date.now(), message: `SSH reconnecting (attempt ${attempt}/8).` }
+        const delay = Math.min(30_000, 1000 * 2 ** Math.min(attempt++, 5))
+        lastEvent = { ...ended, stage: 'connecting', reason: undefined, code: undefined, errorCode: undefined, errorMessage: undefined, cwd, at: Date.now(), message: `SSH reconnecting (attempt ${attempt}). ${ended.errorMessage || ended.message || ''}`.trim() }
         sink.lifecycle(lastEvent)
         timer = setTimeout(() => {
           timer = undefined

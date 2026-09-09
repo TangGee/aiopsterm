@@ -2,7 +2,7 @@ import { mkdirSync, statSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { jumpPoolKey } from './sshTerminalConnectionPool'
-import { defaultSshKeepaliveCountMax } from './sshDefaults'
+import { defaultSshInteractiveKeepaliveCountMax } from './sshDefaults'
 import { cleanText, getConfiguredSshControlDir, getEnv, getSshKeepaliveIntervalMs } from './sshTerminalRuntimeConfig'
 import type { SshTerminalTarget } from './sshTerminalTypes'
 
@@ -53,7 +53,7 @@ export const sshKeepaliveOptions = () => {
         '-o',
         `ServerAliveInterval=${interval}`,
         '-o',
-        `ServerAliveCountMax=${defaultSshKeepaliveCountMax}`
+        `ServerAliveCountMax=${defaultSshInteractiveKeepaliveCountMax}`
       ]
     : []
 }

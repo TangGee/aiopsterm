@@ -7,7 +7,7 @@ import type {
   TerminalLifecycleEvent
 } from '@shared/contracts/terminalSessions'
 import { applyConfiguredSshAgentAuth } from './sshAgent'
-import { defaultSshKeepaliveCountMax } from './sshDefaults'
+import { defaultSshInteractiveKeepaliveCountMax } from './sshDefaults'
 import { resolveSshProxyConfigForAsset, type SshProxySocket } from './sshProxy'
 import { diagnoseSshConnectionError } from '../terminal/terminal'
 import {
@@ -449,6 +449,9 @@ export const createSshTerminalSession = (
     if (closed) return
     closed = true
     clearShellReadyTimer()
+    // A connecting client is not owned by the pool yet. Retire it before
+    // removing session listeners, including cancellation during the handshake.
+    if (client && !targetClientIsPooled) retireTargetClient(client)
     detachActiveTargetClientEvents?.()
     detachActiveTargetClientEvents = null
     cleanupTransports()
@@ -554,11 +557,6 @@ export const createSshTerminalSession = (
       try {
         if (stream?.close) stream.close()
       } catch {}
-      if (!targetClientIsPooled) {
-        try {
-          client?.end()
-        } catch {}
-      }
     }
   }
 
@@ -631,6 +629,7 @@ export const createSshTerminalSession = (
         authClient,
         disposeProxySocket ? () => disposeProxySocket.destroy() : undefined
       )
+      targetClientIsPooled = true
       if (targetConnectionTransport === 'jump') jumpStream = null
       if (targetConnectionTransport === 'proxy') proxySocket = null
     }
@@ -742,7 +741,7 @@ export const createSshTerminalSession = (
       tryKeyboard: Boolean(sink.keyboardInteractive),
       readyTimeout: getSshReadyTimeoutMs(),
       keepaliveInterval: getSshKeepaliveIntervalMs(),
-      keepaliveCountMax: defaultSshKeepaliveCountMax
+      keepaliveCountMax: defaultSshInteractiveKeepaliveCountMax
     }
     if (authTarget.password) connectConfig.password = authTarget.password
     if (authTarget.privateKey) connectConfig.privateKey = authTarget.privateKey
@@ -1257,7 +1256,7 @@ export const createSshTerminalSession = (
       }
     }
     targetConnectionReuse = 'created'
-    targetClientIsPooled = targetClientPoolable
+    targetClientIsPooled = false
     if (closed) {
       cleanupTransports()
       return
@@ -1350,16 +1349,12 @@ export const createSshTerminalSession = (
     const handleTransportClose = () => {
       if (closed || staleTargetClients.has(authClient) || authClient !== client) return
       retireTargetClient(authClient)
-      if (stream) {
-        finish(null, 'network', {
-          isNetworkDisconnect: true,
-          errorCode: 'SSH_TRANSPORT_CLOSED',
-          errorMessage: 'SSH transport closed.',
-          message: 'SSH transport closed.'
-        })
-        return
-      }
-      finish(null, 'unknown')
+      finish(null, 'network', {
+        isNetworkDisconnect: true,
+        errorCode: 'SSH_TRANSPORT_CLOSED',
+        errorMessage: 'SSH transport closed.',
+        message: 'SSH transport closed.'
+      })
     }
     authClient.on('error', handleError)
     authClient.on('close', handleTransportClose)
