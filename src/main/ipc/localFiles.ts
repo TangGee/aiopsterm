@@ -131,7 +131,7 @@ const e2eOpenDialogFixture = async (input: RegisterLocalFilesIpcInput, options: 
       JSON.stringify([{ username: 'ops', ip: '10.73.0.9', label: 'e2e-imported-json', group_name: 'E2E', port: 2299 }])
     )
   }
-  if (hasOpenProperty(options, 'openFile') && hasFilterNamed(options, 'Key Files')) {
+  if (hasOpenProperty(options, 'openFile') && options?.defaultPath === '~/.ssh') {
     return writeFixture(input, join(input.getUserDataPath(), 'e2e-import-rsa.pem'), '-----BEGIN RSA PRIVATE KEY-----\ne2e import\n-----END RSA PRIVATE KEY-----')
   }
   if (hasOpenProperty(options, 'openFile') && hasFilterNamed(options, 'Images')) {

@@ -169,6 +169,12 @@ describe('local files IPC registrar', () => {
       'utf-8'
     )
 
+    const keyResult = await handlers.get('dialog:open-file')?.({}, {
+      defaultPath: '~/.ssh',
+      properties: ['openFile', 'showHiddenFiles']
+    })
+    expect(keyResult).toEqual({ canceled: false, filePaths: [join(userDataPath, 'e2e-import-rsa.pem')] })
+
     const imageResult = await handlers.get('dialog:open-file')?.({}, {
       properties: ['openFile'],
       filters: [{ name: 'Images', extensions: ['png'] }]

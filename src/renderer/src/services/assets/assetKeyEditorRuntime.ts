@@ -196,13 +196,11 @@ export const createAssetKeyEditorRuntime = ({
       return
     }
     try {
+      // Native dialogs can reorder wildcard filters behind extension filters.
+      // Keys are classified by content, so do not install file type filters.
       const result = await showOpenDialog({
         defaultPath: '~/.ssh',
-        properties: ['openFile', 'showHiddenFiles'],
-        filters: [
-          { name: 'All Files', extensions: ['*'] },
-          { name: 'Key Files', extensions: ['pem', 'key', 'txt', 'pub', 'asc', 'crt', 'cer', 'der', 'p12', 'pfx', 'ssh', 'ppk', 'gpg'] }
-        ]
+        properties: ['openFile', 'showHiddenFiles']
       })
       if (result?.canceled) {
         keyImportNotice.value = '已取消导入密钥。'

@@ -30,7 +30,7 @@ afterEach(() => {
 })
 
 describe('assetKeyEditorRuntime key import', () => {
-  it('defaults the import dialog to All Files so extensionless OpenSSH keys stay selectable', async () => {
+  it('does not send restrictive native filters that hide extensionless private keys', async () => {
     const showOpenDialog = vi.fn(async (_options?: { filters?: Array<{ name: string }> }) => ({ canceled: true }))
     installBridge({ showOpenDialog })
     const runtime = createRuntime()
@@ -38,8 +38,7 @@ describe('assetKeyEditorRuntime key import', () => {
     await runtime.openKeyImportDialog()
 
     const options = showOpenDialog.mock.calls[0]?.[0]
-    expect(options?.filters?.[0]?.name).toBe('All Files')
-    expect(options?.filters?.some((filter) => filter.name === 'Key Files')).toBe(true)
+    expect(options?.filters).toBeUndefined()
   })
 
   it('routes an extensionless OpenSSH private key into the private key field', async () => {
