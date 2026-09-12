@@ -13,6 +13,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
+  maxFailures: process.env.CI && process.platform === 'win32' ? 1 : 0,
   forbidOnly: Boolean(process.env.CI),
   outputDir: `test-results/${reportName}`,
   snapshotPathTemplate: '{testDir}/snapshots/{platform}/{testFilePath}/{arg}{ext}',

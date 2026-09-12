@@ -16,11 +16,14 @@ test('bundled Codex streams, cancels, reports errors and resumes edited context 
     await mkdir(codexHome, { recursive: true })
     await writeFile(join(codexHome, 'config.toml'), '[windows]\nsandbox = "unelevated"\n')
   }
+  const output = () => desktop.page.evaluate(() => (window as any).__regressionCodex.output as string)
   const submitPrompt = async (prompt: string) => {
-    await desktop.page.keyboard.type(prompt)
-    // Codex suppresses Enter briefly after a paste-like input burst. Let its
-    // 120 ms suppression window expire before testing message submission.
-    await desktop.page.waitForTimeout(250)
+    const before = (await output()).length
+    await desktop.page.keyboard.type(prompt, { delay: 30 })
+    // PTY delivery can lag behind keyboard.type on Windows CI. Wait for the
+    // actual TUI echo to settle beyond Codex's 120 ms paste suppression window.
+    await expect.poll(async () => (await output()).length).toBeGreaterThan(before)
+    await expect.poll(() => desktop.page.evaluate(() => Date.now() - (window as any).__regressionCodex.lastOutputAt)).toBeGreaterThanOrEqual(500)
     await desktop.page.keyboard.press('Enter')
   }
   try {
@@ -35,8 +38,8 @@ test('bundled Codex streams, cancels, reports errors and resumes edited context 
     await desktop.page.reload()
     await desktop.localTerminal()
     await desktop.page.evaluate(() => {
-      const state: { output: string; threads: any[]; lifecycle: any[] } = (window as any).__regressionCodex = { output: '', threads: [], lifecycle: [] }
-      ;(window as any).aiops.onCodexSessionData((event: any) => { state.output += event.data })
+      const state: { output: string; lastOutputAt: number; threads: any[]; lifecycle: any[] } = (window as any).__regressionCodex = { output: '', lastOutputAt: 0, threads: [], lifecycle: [] }
+      ;(window as any).aiops.onCodexSessionData((event: any) => { state.output += event.data; state.lastOutputAt = Date.now() })
       ;(window as any).aiops.onCodexSessionThread((event: any) => { state.threads.push(event) })
       ;(window as any).aiops.onCodexSessionLifecycle((event: any) => { state.lifecycle.push(event) })
     })
@@ -45,7 +48,6 @@ test('bundled Codex streams, cancels, reports errors and resumes edited context 
     await desktop.page.getByTestId('ai-codex-bind-open').click()
     await desktop.page.getByTestId('ai-codex-bind-current').click()
     const terminal = desktop.page.getByTestId('ai-codex-xterm').filter({ visible: true })
-    const output = () => desktop.page.evaluate(() => (window as any).__regressionCodex.output as string)
     await expect.poll(output).toContain('Press enter to continue')
     await terminal.click()
     await desktop.page.keyboard.press('Enter')
