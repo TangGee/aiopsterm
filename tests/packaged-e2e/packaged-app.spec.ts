@@ -101,6 +101,17 @@ test('packaged app starts, opens interactive local and Codex terminals, browses 
         return listed.data?.terminals?.find((terminal: Record<string, unknown>) => terminal.panelId === panelId)?.connected === true
       })
       .toBe(true)
+    if (process.platform === 'win32') {
+      // PTY creation precedes PowerShell/PSReadLine startup. Do not send the
+      // command while the shell is still changing its console input mode.
+      await expect.poll(async () => {
+        const replay = await socketJsonRequest(socketPath, {
+          id: 'packaged-e2e-shell-ready', method: 'terminal.replay',
+          params: { surface_id: panelId, tail_lines: 30 }
+        })
+        return String(replay.data?.snapshot_text || '')
+      }, { timeout: 60_000 }).toMatch(/PS [\s\S]*>\s*$/)
+    }
     const terminalInput = page.locator('.terminal-pane.active .threaded-terminal-input, .terminal-pane.active .xterm-helper-textarea').first()
     await terminalInput.focus()
     const colorVariables = ['TERM', 'COLORTERM', 'CLICOLOR', 'TERM_PROGRAM']
@@ -124,7 +135,7 @@ test('packaged app starts, opens interactive local and Codex terminals, browses 
           const pattern = new RegExp(String.raw`(?:^|[\r\n])__CE${index}__=([^\r\n]*)(?=[\r\n]|$)`, 'g')
           return [...terminalOutput.matchAll(pattern)].at(-1)?.[1]
         })
-      })
+      }, { timeout: process.platform === 'win32' ? 60_000 : 15_000 })
       // Linux inherits color preferences; only macOS supplies these defaults.
       .toEqual(process.platform === 'darwin'
         ? ['xterm-256color', 'truecolor', '1', 'aiopsterm']
