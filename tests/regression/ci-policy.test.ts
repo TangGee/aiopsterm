@@ -16,7 +16,7 @@ it('runs core desktop checks on every platform and long/fault coverage nightly',
   expect(runner).toContain("'--grep-invert', '@lifecycle'")
   for (const file of ['notifications.spec.ts', 'mcp-business.spec.ts']) expect(readFileSync(resolve('tests/regression', file), 'utf8')).toContain('@core')
   expect(readFileSync(resolve('tests/regression/content-faults.spec.ts'), 'utf8')).toContain('@faults')
-  for (const [file, job] of [['regression-nightly.yml', 'full'], ['regression-packaged.yml', 'packaged'], ['regression-release-signed.yml', 'signed']]) {
+  for (const [file, job] of [['regression-nightly.yml', 'full'], ['regression-packaged.yml', 'packaged'], ['regression-release-signed.yml', 'signed'], ['build-installers.yml', 'installers']]) {
     const commands = workflow(file).jobs[job].steps.map((step: any) => step.run || '').join('\n')
     expect(commands).toContain('@anthropic-ai/claude-code@2.1.220 @moonshot-ai/kimi-code@0.29.1')
     expect(commands).toContain('GITHUB_PATH')

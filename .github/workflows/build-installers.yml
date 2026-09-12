@@ -65,7 +65,7 @@ jobs:
           python-version: '3.12'
       - run: npm ci
         if: steps.selected.outputs.build == 'true'
-      - run: npm install --prefix .cache/regression-clients --no-save @anthropic-ai/claude-code@2.1.220
+      - run: npm install --prefix .cache/regression-clients --no-save @anthropic-ai/claude-code@2.1.220 @moonshot-ai/kimi-code@0.29.1
         if: steps.selected.outputs.build == 'true'
       - run: node -e "require('fs').appendFileSync(process.env.GITHUB_PATH, require('path').resolve('.cache/regression-clients/node_modules/.bin') + require('os').EOL)"
         if: steps.selected.outputs.build == 'true'
