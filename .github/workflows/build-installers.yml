@@ -84,8 +84,23 @@ jobs:
         if: steps.selected.outputs.build == 'true'
       - run: npm run generate:icons
         if: steps.selected.outputs.build == 'true'
+      - run: npm run codex:ensure-source
+        if: steps.selected.outputs.build == 'true'
+      - name: Restore verified Codex package
+        id: codex-cache
+        if: steps.selected.outputs.build == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: codex/codex-rs/target/*/aiopsterm-codex-package
+          key: codex-package-v1-${{ matrix.os }}-${{ runner.arch }}-${{ hashFiles('codex-source.json', 'scripts/build-codex-cli.*', 'scripts/codex-runtime-paths.mjs', 'scripts/audit-codex-runtime.mjs') }}
       - run: npm run build:codex
         if: steps.selected.outputs.build == 'true'
+      - name: Cache audited Codex package
+        if: steps.selected.outputs.build == 'true' && steps.codex-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: codex/codex-rs/target/*/aiopsterm-codex-package
+          key: ${{ steps.codex-cache.outputs.cache-primary-key }}
       - run: npm run build:cline-sidecar
         if: steps.selected.outputs.build == 'true'
       - run: npm run build

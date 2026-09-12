@@ -140,7 +140,7 @@ test('packaged app starts, opens interactive local and Codex terminals, browses 
       }
     })
     expect(embeddedCodex).toEqual(expect.objectContaining({ runtimeKind: 'pty', lifecycleStage: 'ready' }))
-    expect(embeddedCodex.binaryPath).toMatch(/[\\/]resources[\\/]codex[\\/]bin[\\/]codex(?:\.exe)?$/)
+    expect(embeddedCodex.binaryPath).toMatch(/[\\/]resources[\\/]codex[\\/]bin[\\/]codex(?:\.exe)?$/i)
 
     await page.locator('button[data-module-key="files"]').click()
     await expect(page.locator('.files-workspace')).toBeVisible()
