@@ -6,6 +6,7 @@ import { basename, join, relative, resolve } from 'node:path'
 import { codexBinaryName, codexTargetTriple } from './codex-runtime-paths.mjs'
 import { nativeBinarySha256 } from './native-binary-integrity.mjs'
 import { packagedPtyFiles } from './packaged-pty-files.mjs'
+import { incompatibleLinuxRuntimeVersions } from './linux-runtime-baseline.mjs'
 
 const require = createRequire(import.meta.url)
 const { listPackage } = require('@electron/asar')
@@ -52,24 +53,11 @@ const listFiles = (target) => {
 
 const portableRelative = (root, target) => relative(root, target).replaceAll('\\', '/')
 
-const compareVersions = (left, right) => {
-  const leftParts = left.split('.').map(Number)
-  const rightParts = right.split('.').map(Number)
-  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
-    const difference = (leftParts[index] || 0) - (rightParts[index] || 0)
-    if (difference !== 0) return difference
-  }
-  return 0
-}
-
-const requiredGlibcVersions = (target) => {
-  const output = execFileSync('readelf', ['--version-info', target], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    maxBuffer: 32 * 1024 * 1024
+const incompatibleRuntimeVersions = (target) => incompatibleLinuxRuntimeVersions(
+  execFileSync('readelf', ['--version-info', target], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024
   })
-  return [...new Set([...output.matchAll(/\bGLIBC_(\d+(?:\.\d+)+)\b/g)].map((match) => match[1]))]
-}
+)
 
 const readJson = (target, label) => {
   try {
@@ -134,7 +122,6 @@ if (missing.length) {
 }
 
 if (platform === 'linux') {
-  const glibcBaseline = '2.31'
   const nativeBindings = listFiles(join(resourcesDir, 'app.asar.unpacked')).filter((file) => file.endsWith('.node'))
   const electronElfFiles = listFiles(unpackedDir).filter((file) => /\.so(?:\.\d+)*$/.test(basename(file)))
   const compatibilityFiles = [
@@ -147,16 +134,12 @@ if (platform === 'linux') {
     ...electronElfFiles,
     ...nativeBindings
   ].filter((file, index, files) => existsSync(file) && files.indexOf(file) === index)
-  const incompatibleFiles = compatibilityFiles.flatMap((file) => {
-    const versions = requiredGlibcVersions(file)
-    const newest = versions.sort(compareVersions).at(-1)
-    return newest && compareVersions(newest, glibcBaseline) > 0
-      ? [`${portableRelative(unpackedDir, file)} requires GLIBC_${newest}`]
-      : []
-  })
+  const incompatibleFiles = compatibilityFiles.flatMap((file) =>
+    incompatibleRuntimeVersions(file).map((version) => `${portableRelative(unpackedDir, file)} requires ${version}`)
+  )
   if (incompatibleFiles.length) {
     throw new Error(
-      `Packaged Linux ELF files exceed the Ubuntu 20.04 GLIBC_${glibcBaseline} baseline:\n${incompatibleFiles.join('\n')}`
+      `Packaged Linux ELF files exceed the Ubuntu 20.04 C/C++ runtime baseline:\n${incompatibleFiles.join('\n')}`
     )
   }
 }

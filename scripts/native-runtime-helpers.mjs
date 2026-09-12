@@ -44,6 +44,10 @@ export const nativeCompilerEnvironment = ({ platform, env, gcc10Available }) => 
     if (!result.CC) result.CC = 'gcc-10'
     if (!result.CXX) result.CXX = 'g++-10'
   }
+  if (platform === 'linux') {
+    // Keep GCC upgrades on build hosts from raising the runtime C++ ABI baseline.
+    result.LDFLAGS = [env.LDFLAGS, '-static-libstdc++', '-static-libgcc'].filter(Boolean).join(' ')
+  }
   return result
 }
 

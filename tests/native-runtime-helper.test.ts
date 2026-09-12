@@ -86,22 +86,31 @@ describe('native runtime helpers', () => {
       platform: 'linux',
       env: { PATH: '/usr/bin' },
       gcc10Available: true
-    })).toEqual({ PATH: '/usr/bin', CC: 'gcc-10', CXX: 'g++-10' })
+    })).toEqual({ PATH: '/usr/bin', CC: 'gcc-10', CXX: 'g++-10', LDFLAGS: '-static-libstdc++ -static-libgcc' })
     expect(nativeCompilerEnvironment({
       platform: 'linux',
       env: { CC: 'clang', CXX: 'clang++' },
       gcc10Available: true
-    })).toEqual({ CC: 'clang', CXX: 'clang++' })
+    })).toEqual({ CC: 'clang', CXX: 'clang++', LDFLAGS: '-static-libstdc++ -static-libgcc' })
     expect(nativeCompilerEnvironment({
       platform: 'linux',
       env: { CC: 'clang' },
       gcc10Available: true
-    })).toEqual({ CC: 'clang', CXX: 'g++-10' })
+    })).toEqual({ CC: 'clang', CXX: 'g++-10', LDFLAGS: '-static-libstdc++ -static-libgcc' })
     expect(nativeCompilerEnvironment({
       platform: 'darwin',
       env: { PATH: '/usr/bin' },
       gcc10Available: true
     })).toEqual({ PATH: '/usr/bin' })
+  })
+
+  it('preserves linker options while making Linux C++ runtimes self contained', () => {
+    const env = { CC: 'gcc-11', CXX: 'g++-11', LDFLAGS: '-Wl,--as-needed' }
+    expect(nativeCompilerEnvironment({ platform: 'linux', env, gcc10Available: false })).toEqual({
+      ...env, LDFLAGS: '-Wl,--as-needed -static-libstdc++ -static-libgcc'
+    })
+    expect(env.LDFLAGS).toBe('-Wl,--as-needed')
+    expect(nativeCompilerEnvironment({ platform: 'win32', env, gcc10Available: false })).toEqual(env)
   })
 
   it('treats damaged or non-object native manifests as absent', () => {
