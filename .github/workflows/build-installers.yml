@@ -126,6 +126,8 @@ jobs:
         run: npm run audit:linux-deb
       - run: npm run test:regression -- packaged
         if: steps.selected.outputs.build == 'true'
+        env:
+          DEBUG: pw:browser
       - name: Export verified signing input or Linux checksums
         if: steps.selected.outputs.build == 'true'
         run: node scripts/prepare-local-signing.mjs dist
