@@ -31,6 +31,7 @@ jobs:
     timeout-minutes: 180
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
     steps:
       - name: Select platform
         id: selected
@@ -40,7 +41,14 @@ jobs:
         if: steps.selected.outputs.build == 'true' && runner.os == 'Linux'
         run: |
           apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common
+          add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y gcc-11 g++-11
           DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git build-essential python3 pkg-config musl-tools libcap-dev clang libc++-dev libc++abi-dev lld libssl-dev xz-utils dpkg-dev fakeroot xvfb libgtk-3-0 libnss3 libasound2 libgbm1 fonts-noto-cjk unzip zip
+          echo "PYTHON=/usr/bin/python3" >> "$GITHUB_ENV"
+          echo "CC=gcc-11" >> "$GITHUB_ENV"
+          echo "CXX=g++-11" >> "$GITHUB_ENV"
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/regression-rustup.sh
           sh /tmp/regression-rustup.sh -y --profile minimal --default-toolchain none
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
@@ -52,7 +60,7 @@ jobs:
           node-version: 22
           cache: npm
       - uses: actions/setup-python@v5
-        if: steps.selected.outputs.build == 'true'
+        if: steps.selected.outputs.build == 'true' && runner.os != 'Linux'
         with:
           python-version: '3.12'
       - run: npm ci

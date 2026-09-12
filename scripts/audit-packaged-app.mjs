@@ -5,6 +5,7 @@ import { createRequire } from 'node:module'
 import { basename, join, relative, resolve } from 'node:path'
 import { codexBinaryName, codexTargetTriple } from './codex-runtime-paths.mjs'
 import { nativeBinarySha256 } from './native-binary-integrity.mjs'
+import { packagedPtyFiles } from './packaged-pty-files.mjs'
 
 const require = createRequire(import.meta.url)
 const { listPackage } = require('@electron/asar')
@@ -33,10 +34,7 @@ const executableForPlatform = (unpackedDir) => {
 
 const nativeModuleFilesForPlatform = (resourcesDir) => {
   const root = join(resourcesDir, 'app.asar.unpacked', 'node_modules', 'node-pty')
-  if (platform === 'win32') {
-    return [join(root, 'lib', 'index.js'), join(root, 'lib', 'windowsTerminal.js'), join(root, 'build', 'Release', 'pty.node')]
-  }
-  return [join(root, 'lib', 'index.js'), join(root, 'lib', 'unixTerminal.js'), join(root, 'build', 'Release', 'pty.node')]
+  return packagedPtyFiles(root, platform, process.arch)
 }
 
 const sizeOf = (target) => {
