@@ -10,7 +10,7 @@ import { parse } from 'yaml'
 const modulePath = '../../scripts/local-signing-common.mjs'
 const { treeInventory, verifySigningBundle, verifyCompiledPayload, digest } = await import(modulePath)
 const windowsModulePath = '../../scripts/sign-windows-file.mjs'
-const { isWindowsSigningTarget } = await import(windowsModulePath)
+const { isWindowsSigningTarget, retryTimestampSigning } = await import(windowsModulePath)
 const { createPackage } = createRequire(import.meta.url)('@electron/asar')
 const commit = 'a'.repeat(40)
 const fixture = async (run: (root: string, manifest: any, compiled: string, pack: () => Promise<void>) => Promise<void>) => {
@@ -39,6 +39,25 @@ const fixture = async (run: (root: string, manifest: any, compiled: string, pack
 }
 
 describe('CI to local signing provenance', () => {
+  it('retries transient timestamp failures but keeps a bounded failure and rejects certificate errors immediately', async () => {
+    const temporary = Object.assign(new Error('signing failed'), { stderr: 'SignTool Error: The specified timestamp server either could not be reached or returned an invalid response.' })
+    const waits: number[] = []
+    const wait = async (delay: number) => { waits.push(delay) }
+    let attempts = 0
+    expect(await retryTimestampSigning(async () => {
+      if (++attempts < 3) throw temporary
+      return 'signed with timestamp'
+    }, wait)).toBe('signed with timestamp')
+    expect(attempts).toBe(3)
+    expect(waits).toEqual([1000, 2000])
+    attempts = 0
+    await expect(retryTimestampSigning(async () => { attempts++; throw temporary }, wait)).rejects.toBe(temporary)
+    expect(attempts).toBe(3)
+    attempts = 0
+    const invalid = Object.assign(new Error('certificate unavailable'), { stderr: 'No certificates were found that met all the given criteria.' })
+    await expect(retryTimestampSigning(async () => { attempts++; throw invalid }, wait)).rejects.toBe(invalid)
+    expect(attempts).toBe(1)
+  })
   it('signs PE targets, preserves foreign native prebuilds and rejects unknown formats', async () => {
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-signing-format-'))
     try {

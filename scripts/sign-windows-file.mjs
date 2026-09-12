@@ -1,6 +1,21 @@
 import { open, readdir } from 'node:fs/promises'
 import { extname, join } from 'node:path'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { setTimeout } from 'node:timers/promises'
 import { run } from './local-signing-common.mjs'
+
+export const retryTimestampSigning = async (sign, wait = setTimeout) => {
+  for (let attempt = 1; ; attempt++) {
+    try { return await sign() }
+    catch (error) {
+      const diagnostic = `${error.stdout || ''}\n${error.stderr || ''}`
+      if (attempt >= 3 || !/specified timestamp server either could not be reached|timestamp server.*returned an invalid response/i.test(diagnostic)) throw error
+      console.log(`Timestamp service unavailable; retrying signing (${attempt}/2).`)
+      await wait(attempt * 1000)
+    }
+  }
+}
 
 export const isWindowsSigningTarget = async (file) => {
   const handle = await open(file, 'r')
@@ -25,7 +40,9 @@ export const findSignTool = async () => {
 }
 export const signWindowsFile = async (file, { identity, tool, timestamp = 'http://timestamp.digicert.com' }) => {
   if (!/^[a-f0-9]{40}$/i.test(identity || '')) throw new Error('Windows signing requires a certificate SHA-1 thumbprint.')
-  await run(tool, ['sign', '/sha1', identity, '/fd', 'SHA256', '/tr', timestamp, '/td', 'SHA256', file], { timeout: 180_000 })
+  const result = await retryTimestampSigning(() => promisify(execFile)(tool, ['sign', '/sha1', identity, '/fd', 'SHA256', '/tr', timestamp, '/td', 'SHA256', file], { timeout: 180_000, maxBuffer: 4 * 1024 * 1024 }))
+  process.stdout.write(result.stdout)
+  process.stderr.write(result.stderr)
   await verifyWindowsFile(file, { identity, tool })
 }
 export const verifyWindowsFile = async (file, { identity, tool }) => {
