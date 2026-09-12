@@ -54,6 +54,9 @@ jobs:
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v4
         if: steps.selected.outputs.build == 'true'
+      - name: Trust the checked-out workspace inside the Linux container
+        if: steps.selected.outputs.build == 'true' && runner.os == 'Linux'
+        run: git config --system --add safe.directory "$GITHUB_WORKSPACE"
       - uses: actions/setup-node@v4
         if: steps.selected.outputs.build == 'true'
         with:
