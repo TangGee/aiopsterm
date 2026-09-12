@@ -10,6 +10,7 @@ import {
   packagedCodexPackageDir
 } from './codex-runtime-paths.mjs'
 import { nativeBinarySha256 } from './native-binary-integrity.mjs'
+import { preparePackagedPtyHelper } from './packaged-pty-files.mjs'
 
 const removeIfExists = (target) => {
   if (existsSync(target)) {
@@ -214,6 +215,10 @@ export default async function prunePackagedNativeModules(context) {
 
   prunePackagedSqlite(context)
   prunePackagedNativeBuildNoise(context)
+  preparePackagedPtyHelper(
+    join(packagedResourcesDir(context), 'app.asar.unpacked', 'node_modules', 'node-pty'),
+    platform, normalizeNodeArch(context?.arch ?? process.arch)
+  )
 
   signMacAppForLocalUse(context)
 

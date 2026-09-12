@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { chmodSync, existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 export const packagedPtyFiles = (root, platform, arch) => {
@@ -16,5 +16,15 @@ export const packagedPtyFiles = (root, platform, arch) => {
       join(pty, '..', 'winpty.dll'), join(pty, '..', 'winpty-agent.exe')
     ]
   }
-  return [join(root, 'lib', 'index.js'), join(root, 'lib', 'unixTerminal.js'), pty]
+  return [join(root, 'lib', 'index.js'), join(root, 'lib', 'unixTerminal.js'), pty,
+    ...(platform === 'darwin' ? [join(pty, '..', 'spawn-helper')] : [])]
+}
+
+export const preparePackagedPtyHelper = (root, platform, arch) => {
+  if (platform !== 'darwin') return
+  const helper = packagedPtyFiles(root, platform, arch).at(-1)
+  // npm's prebuilt macOS helper is distributed without executable permission.
+  // Repair it before signing so terminals can launch from the installed app.
+  const mode = statSync(helper).mode
+  chmodSync(helper, (mode & 0o777) | 0o111)
 }

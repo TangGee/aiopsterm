@@ -120,6 +120,10 @@ const missing = requiredFiles.filter((file) => !existsSync(file))
 if (missing.length) {
   throw new Error(`Missing required packaged files for ${platform}:\n${missing.join('\n')}`)
 }
+if (platform === 'darwin') {
+  const helper = nativeModuleFilesForPlatform(resourcesDir).find((file) => file.endsWith('/spawn-helper'))
+  if (!helper || (statSync(helper).mode & 0o111) !== 0o111) throw new Error('Packaged macOS PTY spawn-helper must be executable.')
+}
 
 if (platform === 'linux') {
   const nativeBindings = listFiles(join(resourcesDir, 'app.asar.unpacked')).filter((file) => file.endsWith('.node'))
