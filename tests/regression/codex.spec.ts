@@ -1,6 +1,6 @@
 import { test, expect } from './support/desktop'
 import { startResponsesProvider } from './support/responses-provider'
-import { readdir, readFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { isolatedEnvironment } from './support/environment'
@@ -9,6 +9,13 @@ import { existsSync } from 'node:fs'
 test('bundled Codex streams, cancels, reports errors and resumes edited context @codex', async ({ desktop }) => {
   test.setTimeout(180000)
   const provider = await startResponsesProvider()
+  const codexHome = join(desktop.root, 'state', 'codex-agent')
+  if (process.platform === 'win32') {
+    // Keep the real read-only sandbox and approval flow, using the supported
+    // non-admin backend in this disposable home instead of interactive UAC.
+    await mkdir(codexHome, { recursive: true })
+    await writeFile(join(codexHome, 'config.toml'), '[windows]\nsandbox = "unelevated"\n')
+  }
   const submitPrompt = async (prompt: string) => {
     await desktop.page.keyboard.type(prompt)
     // Codex suppresses Enter briefly after a paste-like input burst. Let its
@@ -43,6 +50,11 @@ test('bundled Codex streams, cancels, reports errors and resumes edited context 
     await terminal.click()
     await desktop.page.keyboard.press('Enter')
     await expect.poll(output).toContain('/model')
+    if (process.platform === 'win32') {
+      const configured = await readFile(join(codexHome, 'config.toml'), 'utf8')
+      expect(configured).toContain('sandbox_mode = "read-only"')
+      expect(configured).toContain('approval_policy = "on-request"')
+    }
     await terminal.click()
     await submitPrompt('REGRESSION_REMOVE_ME')
     await expect.poll(() => provider.requests.length).toBeGreaterThan(0)
@@ -87,7 +99,6 @@ test('bundled Codex streams, cancels, reports errors and resumes edited context 
     const threads = await desktop.page.evaluate(() => (window as any).__regressionCodex.threads)
     expect(threads.length).toBeGreaterThan(0)
     const thread = threads.at(-1)
-    const codexHome = join(desktop.root, 'state', 'codex-agent')
     const locate = async (directory: string): Promise<string[]> => {
       const files: string[] = []
       for (const item of await readdir(directory, { withFileTypes: true })) {

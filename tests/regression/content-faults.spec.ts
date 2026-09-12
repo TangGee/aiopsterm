@@ -64,7 +64,7 @@ for (const fault of ['ENOSPC', 'EACCES', 'sqlite-lock', 'crash-before-rename', '
     try {
       if (fault.startsWith('crash-')) {
         await expect.poll(() => existsSync(marker)).toBe(true)
-        desktop.app.process().kill('SIGKILL')
+        await desktop.crash()
         await pending
         await desktop.start()
       } else {

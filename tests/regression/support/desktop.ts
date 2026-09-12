@@ -3,6 +3,8 @@ import { mkdtemp, mkdir, rm, writeFile, chmod } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { isolatedEnvironment } from './environment'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 
 export class Desktop {
   app!: ElectronApplication
@@ -61,6 +63,18 @@ export class Desktop {
     return this.page.evaluate(async ({ method, args }) => (window as any).aiops[method](...args), { method, args })
   }
   async restart(env: NodeJS.ProcessEnv = {}) { await this.app.close(); await this.start(env) }
+  async crash() {
+    const pid = await this.app.evaluate(() => process.pid)
+    const closed = this.app.waitForEvent('close')
+    // Playwright launches Windows Electron through cmd.exe. Killing that
+    // wrapper alone leaves the application holding its single-instance lock.
+    if (process.platform === 'win32') await promisify(execFile)('taskkill.exe', ['/PID', String(pid), '/T', '/F'])
+    else process.kill(pid, 'SIGKILL')
+    await closed
+  }
+  async shellReady() {
+    if (process.platform === 'win32') await expect.poll(() => this.replay(), { timeout: 60_000 }).toMatch(/PS [\s\S]*>\s*$/)
+  }
   async localTerminal() {
     await this.page.locator('[data-module-key="workspace"]').click()
     await this.page.locator('.workspace-search input').fill('127.0.0.1')
@@ -70,10 +84,11 @@ export class Desktop {
       const result = await this.api('invokeControlRequest', 'terminal.list', {})
       return result.data?.terminals?.some((item: any) => item.connected)
     }).toBe(true)
+    await this.shellReady()
     await this.page.locator('.terminal-pane.active .xterm-host').click()
     await this.page.keyboard.type('echo REGRESSION_READY')
     await this.page.keyboard.press('Enter')
-    await expect.poll(() => this.replay()).toMatch(/[\r\n]REGRESSION_READY[\r\n]/)
+    await expect.poll(() => this.replay(), { timeout: process.platform === 'win32' ? 60_000 : 15_000 }).toMatch(/[\r\n]REGRESSION_READY[\r\n]/)
   }
   async replay() {
     const result = await this.api('invokeControlRequest', 'terminal.replay', { tailLines: 100 })
@@ -109,7 +124,7 @@ export const test = base.extend<{ desktop: Desktop }>({
         }
         await desktop.app.close().catch(() => undefined)
       }
-      await rm(root, { recursive: true, force: true })
+      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     }
   }
 })

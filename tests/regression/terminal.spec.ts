@@ -86,11 +86,14 @@ test('delayed clipboard completion does not steal focus from another input @core
   const search = desktop.page.locator('.workspace-search input')
   await search.click()
   await desktop.page.evaluate(() => (window as any).__completeRegressionClipboard())
-  await expect.poll(() => desktop.replay()).toContain('REGRESSION_DELAYED_PASTE')
+  // The unsubmitted command may wrap after a long Windows prompt. Normalize
+  // display row breaks for both clipboard arrival and the focus-leak check.
+  const commandText = async () => (await desktop.replay()).replace(/[\r\n]/g, '')
+  await expect.poll(commandText).toContain('REGRESSION_DELAYED_PASTE')
   await expect(search).toBeFocused()
   await desktop.page.keyboard.type('REGRESSION_SEARCH_OWNS_FOCUS')
   await expect(search).toHaveValue(/REGRESSION_SEARCH_OWNS_FOCUS/)
-  expect(await desktop.replay()).not.toContain('REGRESSION_SEARCH_OWNS_FOCUS')
+  expect(await commandText()).not.toContain('REGRESSION_SEARCH_OWNS_FOCUS')
 })
 
 test('real terminal exit does not return reactive objects across the preload bridge @core', async ({ desktop }) => {

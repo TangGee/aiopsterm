@@ -36,10 +36,22 @@ export async function startSshTarget(root: string, options: { nativePty?: boolea
       const start = (stream: any, command?: string) => {
         if (command) commands.push(command)
         if (hasPty && options.nativePty) {
-          const pty = spawnPty(shell, command ? ['--noprofile', '--norc', '-c', command] : ['--noprofile', '--norc', '-i'], { cwd: root, env, name: 'xterm-256color', cols, rows })
+          // WinPTY emits terminal deltas; ConPTY starts with a full-screen
+          // repaint, which is not representative of a Unix SSH server's PTY.
+          const pty = spawnPty(shell, command ? ['--noprofile', '--norc', '-c', command] : ['--noprofile', '--norc', '-i'], {
+            cwd: root, env, name: 'xterm-256color', cols, rows,
+            ...(process.platform === 'win32' ? { useConpty: false } : {})
+          })
           ptys.add(pty)
           pty.onData((data) => stream.write(data))
-          pty.onExit(({ exitCode }) => { ptys.delete(pty); stream.exit(exitCode); stream.end() })
+          pty.onExit(({ exitCode }) => {
+            ptys.delete(pty)
+            if (stream.destroyed) return
+            // WinPTY can omit the exit code after a forced disconnect. ssh2
+            // otherwise interprets undefined as an invalid exit signal.
+            stream.exit(Number.isInteger(exitCode) ? exitCode : 0)
+            stream.end()
+          })
           stream.on('data', (data: Buffer) => { commands.push(data.toString()); pty.write(data.toString()) })
           stream.on('close', () => { try { pty.kill() } catch {} })
           session.on('window-change', (_accept, _reject, info) => pty.resize(info.cols, info.rows))

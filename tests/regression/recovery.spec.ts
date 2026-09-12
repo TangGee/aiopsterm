@@ -52,6 +52,7 @@ test('native terminal history and process ownership survive reload and restart o
   await expect.poll(async () => (await connected()).length).toBe(1)
   expect((await connected())[0].processId).not.toBe(initial.processId)
   await expect.poll(() => desktop.replay()).toContain('REGRESSION_READY')
+  await desktop.shellReady()
   await desktop.page.locator('.terminal-pane.active .xterm-host').click()
   await desktop.page.keyboard.type('echo REGRESSION_RESTORED_INPUT')
   await desktop.page.keyboard.press('Enter')
