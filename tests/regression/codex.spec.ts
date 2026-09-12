@@ -9,6 +9,13 @@ import { existsSync } from 'node:fs'
 test('bundled Codex streams, cancels, reports errors and resumes edited context @codex', async ({ desktop }) => {
   test.setTimeout(180000)
   const provider = await startResponsesProvider()
+  const submitPrompt = async (prompt: string) => {
+    await desktop.page.keyboard.type(prompt)
+    // Codex suppresses Enter briefly after a paste-like input burst. Let its
+    // 120 ms suppression window expire before testing message submission.
+    await desktop.page.waitForTimeout(250)
+    await desktop.page.keyboard.press('Enter')
+  }
   try {
     const config = await desktop.api('getConfig')
     await desktop.api('saveConfig', {
@@ -37,13 +44,11 @@ test('bundled Codex streams, cancels, reports errors and resumes edited context 
     await desktop.page.keyboard.press('Enter')
     await expect.poll(output).toContain('/model')
     await terminal.click()
-    await desktop.page.keyboard.type('REGRESSION_REMOVE_ME', { delay: 40 })
-    await desktop.page.keyboard.press('Enter')
+    await submitPrompt('REGRESSION_REMOVE_ME')
     await expect.poll(() => provider.requests.length).toBeGreaterThan(0)
     await expect.poll(output).toContain('REGRESSION_CODEX_ANSWER')
     provider.respond('REGRESSION_KEEP_ME')
-    await desktop.page.keyboard.type('REGRESSION_KEEP_REQUEST', { delay: 40 })
-    await desktop.page.keyboard.press('Enter')
+    await submitPrompt('REGRESSION_KEEP_REQUEST')
     await expect.poll(output).toContain('REGRESSION_KEEP_ME')
     const commandTool = provider.requests[0].tools.find((tool: any) => tool.name === 'mcp__aiopsterm_remote__run_command')
     expect(commandTool, JSON.stringify(provider.requests[0].tools.map((tool: any) => tool.name))).toBeTruthy()
@@ -54,8 +59,7 @@ test('bundled Codex streams, cancels, reports errors and resumes edited context 
       provider.respond(approved ? 'REGRESSION_APPROVAL_COMPLETE' : 'REGRESSION_REJECTION_COMPLETE')
       provider.tool(commandTool.name, { command, timeoutMs: 10000 })
       const offset = (await output()).length
-      await desktop.page.keyboard.type(approved ? 'REGRESSION_APPROVE_TOOL' : 'REGRESSION_REJECT_TOOL', { delay: 40 })
-      await desktop.page.keyboard.press('Enter')
+      await submitPrompt(approved ? 'REGRESSION_APPROVE_TOOL' : 'REGRESSION_REJECT_TOOL')
       await expect.poll(async () => (await output()).slice(offset)).toContain('enter to submit')
       expect(existsSync(sentinel)).toBe(false)
       await desktop.page.keyboard.press(approved ? 'Enter' : 'Escape')
@@ -69,18 +73,17 @@ test('bundled Codex streams, cancels, reports errors and resumes edited context 
       }
     }
     provider.respond('REGRESSION_CANCEL_STREAM', 'hold')
-    await desktop.page.keyboard.type('REGRESSION_CANCEL_REQUEST', { delay: 40 })
-    await desktop.page.keyboard.press('Enter')
+    await submitPrompt('REGRESSION_CANCEL_REQUEST')
     await expect.poll(output).toContain('REGRESSION_CANCEL_STREAM')
     await desktop.page.keyboard.press('Escape')
     await expect.poll(output).toContain('Conversation interrupted')
     provider.finishHeld()
     provider.respond('', 'error')
-    await desktop.page.keyboard.type('REGRESSION_ERROR_REQUEST', { delay: 40 })
-    await desktop.page.keyboard.press('Enter')
+    await submitPrompt('REGRESSION_ERROR_REQUEST')
     await expect.poll(output).toContain('REGRESSION_RESPONSE_ERROR')
     expect(await output()).not.toContain('REGRESSION_LATE_CANCELLED_OUTPUT')
     provider.respond('REGRESSION_AFTER_ERROR')
+    await expect.poll(async () => desktop.page.evaluate(() => (window as any).__regressionCodex.threads.length)).toBeGreaterThan(0)
     const threads = await desktop.page.evaluate(() => (window as any).__regressionCodex.threads)
     expect(threads.length).toBeGreaterThan(0)
     const thread = threads.at(-1)

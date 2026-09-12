@@ -2,10 +2,17 @@ import { Server, type Connection } from 'ssh2'
 import { generateKeyPairSync } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
 import { isolatedEnvironment } from './environment'
 import { spawn as spawnPty, type IPty } from 'node-pty'
+import { preparePackagedPtyHelper } from '../../../scripts/packaged-pty-files.mjs'
 
 export async function startSshTarget(root: string, options: { nativePty?: boolean } = {}) {
+  if (options.nativePty) {
+    const ptyRoot = dirname(createRequire(join(process.cwd(), 'package.json')).resolve('node-pty/package.json'))
+    preparePackagedPtyHelper(ptyRoot, process.platform, process.arch)
+  }
   const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : '/bin/bash'
   if (!existsSync(shell)) throw new Error(`The isolated SSH target requires Bash: ${shell}`)
   const env = { ...await isolatedEnvironment(root), SHELL: shell, PS1: 'regression-target> ', TERM: 'xterm-256color' }
