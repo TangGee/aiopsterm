@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { verifySigningBundle, verifyCompiledPayload, treeInventory, run, digest, payloadName } from './local-signing-common.mjs'
-import { findSignTool, signWindowsFile, verifyWindowsFile } from './sign-windows-file.mjs'
+import { findSignTool, isWindowsSigningTarget, signWindowsFile, verifyWindowsFile } from './sign-windows-file.mjs'
 
 const { values, positionals } = parseArgs({ allowPositionals: true, options: {
   commit: { type: 'string' }, identity: { type: 'string' }, output: { type: 'string' },
@@ -75,7 +75,11 @@ try {
     await run('spctl', ['--assess', '--type', 'open', '--context', 'context:primary-signature', dmg])
   } else {
     const files = await treeInventory(app)
-    for (const name of Object.keys(files).filter((name) => files[name].sha256 && /\.(exe|dll|node)$/i.test(name))) await signWindowsFile(join(app, name), windows)
+    for (const name of Object.keys(files).filter((name) => files[name].sha256 && /\.(exe|dll|node)$/i.test(name))) {
+      const file = join(app, name)
+      if (await isWindowsSigningTarget(file)) await signWindowsFile(file, windows)
+      else console.log(`Preserving non-Windows native module: ${name}`)
+    }
     await build({ projectDir: work, prepackaged: app, targets: Platform.WINDOWS.createTarget(['nsis'], arch), publish: 'never',
       config: { ...config, forceCodeSigning: true, win: { icon: join(directory, 'content', 'support', 'icon.ico'), artifactName: '${name}-${version}-setup-${arch}.${ext}',
         signtoolOptions: { signingHashAlgorithms: ['sha256'], sign: async (context) => signWindowsFile(context.path, windows) } } } })

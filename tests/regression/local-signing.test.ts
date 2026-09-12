@@ -9,6 +9,8 @@ import { parse } from 'yaml'
 
 const modulePath = '../../scripts/local-signing-common.mjs'
 const { treeInventory, verifySigningBundle, verifyCompiledPayload, digest } = await import(modulePath)
+const windowsModulePath = '../../scripts/sign-windows-file.mjs'
+const { isWindowsSigningTarget } = await import(windowsModulePath)
 const { createPackage } = createRequire(import.meta.url)('@electron/asar')
 const commit = 'a'.repeat(40)
 const fixture = async (run: (root: string, manifest: any, compiled: string, pack: () => Promise<void>) => Promise<void>) => {
@@ -37,6 +39,28 @@ const fixture = async (run: (root: string, manifest: any, compiled: string, pack
 }
 
 describe('CI to local signing provenance', () => {
+  it('signs PE targets, preserves foreign native prebuilds and rejects unknown formats', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-signing-format-'))
+    try {
+      for (const name of ['app.exe', 'runtime.dll', 'pty.node']) {
+        const path = join(root, name)
+        await writeFile(path, Buffer.from('4d5a9000', 'hex'))
+        expect(await isWindowsSigningTarget(path)).toBe(true)
+      }
+      for (const magic of ['7f454c46', 'feedface', 'cefaedfe', 'feedfacf', 'cffaedfe', 'cafebabe', 'bebafeca', 'cafebabf', 'bfbafeca']) {
+        const path = join(root, 'foreign.node')
+        await writeFile(path, Buffer.from(magic, 'hex'))
+        const before = await digest(path)
+        expect(await isWindowsSigningTarget(path)).toBe(false)
+        expect(await digest(path)).toBe(before)
+      }
+      for (const [name, contents] of [['foreign.exe', 'cffaedfe'], ['unknown.node', '00010203'], ['short.node', '7f45']]) {
+        const path = join(root, name)
+        await writeFile(path, Buffer.from(contents, 'hex'))
+        await expect(isWindowsSigningTarget(path)).rejects.toThrow('Unrecognized Windows signing target')
+      }
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
   it('accepts an intact bundle and rejects a different commit or signing platform', async () => fixture(async (root) => {
     expect((await verifySigningBundle(root, commit, 'darwin')).manifest.version).toBe('0.1.0')
     await expect(verifySigningBundle(root, 'b'.repeat(40), 'darwin')).rejects.toThrow('mismatch')

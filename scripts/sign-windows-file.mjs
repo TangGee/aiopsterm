@@ -1,6 +1,20 @@
-import { readdir } from 'node:fs/promises'
-import { join } from 'node:path'
+import { open, readdir } from 'node:fs/promises'
+import { extname, join } from 'node:path'
 import { run } from './local-signing-common.mjs'
+
+export const isWindowsSigningTarget = async (file) => {
+  const handle = await open(file, 'r')
+  try {
+    const header = Buffer.alloc(4)
+    const { bytesRead } = await handle.read(header, 0, header.length, 0)
+    if (bytesRead >= 2 && header.subarray(0, 2).toString('ascii') === 'MZ') return true
+    // Native dependencies may ship other platforms' prebuilds beside PE files.
+    // Preserve those bytes; SignTool only understands Windows executables.
+    const foreign = ['7f454c46', 'feedface', 'cefaedfe', 'feedfacf', 'cffaedfe', 'cafebabe', 'bebafeca', 'cafebabf', 'bfbafeca']
+    if (bytesRead === 4 && extname(file).toLowerCase() === '.node' && foreign.includes(header.toString('hex'))) return false
+    throw new Error(`Unrecognized Windows signing target: ${file}`)
+  } finally { await handle.close() }
+}
 
 export const findSignTool = async () => {
   if (process.env.AIOPSTERM_SIGNTOOL) return process.env.AIOPSTERM_SIGNTOOL
