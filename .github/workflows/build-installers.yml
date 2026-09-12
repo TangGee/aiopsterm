@@ -63,6 +63,19 @@ jobs:
         if: steps.selected.outputs.build == 'true' && runner.os != 'Linux'
         with:
           python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        if: steps.selected.outputs.build == 'true' && runner.os == 'Linux'
+        with:
+          version: '0.8.15'
+          enable-cache: false
+      - name: Install Python compatible with Ubuntu 20.04
+        if: steps.selected.outputs.build == 'true' && runner.os == 'Linux'
+        run: |
+          uv python install 3.12.11
+          uv venv --python 3.12.11 /opt/aiopsterm-python
+          echo "/opt/aiopsterm-python/bin" >> "$GITHUB_PATH"
+          echo "PYTHON=/opt/aiopsterm-python/bin/python3" >> "$GITHUB_ENV"
+          /opt/aiopsterm-python/bin/python3 --version
       - run: npm ci
         if: steps.selected.outputs.build == 'true'
       - run: npm install --prefix .cache/regression-clients --no-save @anthropic-ai/claude-code@2.1.220 @moonshot-ai/kimi-code@0.29.1
