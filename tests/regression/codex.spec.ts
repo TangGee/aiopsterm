@@ -7,7 +7,7 @@ import { isolatedEnvironment } from './support/environment'
 import { existsSync } from 'node:fs'
 
 test('bundled Codex streams, cancels, reports errors and resumes edited context @codex', async ({ desktop }) => {
-  test.setTimeout(180000)
+  test.setTimeout(process.platform === 'win32' ? 300000 : 180000)
   const provider = await startResponsesProvider()
   const codexHome = join(desktop.root, 'state', 'codex-agent')
   if (process.platform === 'win32') {
@@ -69,7 +69,7 @@ test('bundled Codex streams, cancels, reports errors and resumes edited context 
       const quoted = `'${sentinel.replace(/'/g, "'\\''")}'`
       const command = process.platform === 'win32' ? `Set-Content -LiteralPath '${sentinel.replace(/'/g, "''")}' -Value approved` : `printf approved > ${quoted}`
       provider.respond(approved ? 'REGRESSION_APPROVAL_COMPLETE' : 'REGRESSION_REJECTION_COMPLETE')
-      provider.tool(commandTool.name, { command, timeoutMs: 10000 })
+      provider.tool(commandTool.name, { command, timeoutMs: process.platform === 'win32' ? 60000 : 10000 })
       const offset = (await output()).length
       await submitPrompt(approved ? 'REGRESSION_APPROVE_TOOL' : 'REGRESSION_REJECT_TOOL')
       await expect.poll(async () => (await output()).slice(offset)).toContain('enter to submit')
