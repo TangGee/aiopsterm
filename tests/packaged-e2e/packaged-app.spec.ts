@@ -86,7 +86,8 @@ test('packaged app starts, opens interactive local and Codex terminals, browses 
     await expect(page.locator('.terminal-tab').first()).toBeVisible({ timeout: 30_000 })
     const terminalMirror = page.locator('.terminal-output-mirror').first()
     await expect(terminalMirror).toBeVisible()
-    const socketPath = process.env.AIOPSTERM_PACKAGED_CONTROL_SOCKET || (await controlSocketPath(userDataDir, app.process().pid || 0))
+    const mainProcessId = await app.evaluate(() => process.pid)
+    const socketPath = process.env.AIOPSTERM_PACKAGED_CONTROL_SOCKET || (await controlSocketPath(userDataDir, mainProcessId))
     const panelId = await page.locator('.terminal-tab.active').getAttribute('data-panel-id')
     expect(panelId).toBeTruthy()
     await expect

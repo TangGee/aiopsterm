@@ -3,7 +3,12 @@ import { mkdir } from 'node:fs/promises'
 
 export async function isolatedEnvironment(root: string): Promise<NodeJS.ProcessEnv> {
   const home = join(root, 'home')
-  await mkdir(home, { recursive: true })
+  // Electron resolves userData during module initialization on Windows.
+  // Its isolated AppData roots must exist before the process starts.
+  await Promise.all([
+    mkdir(join(home, 'AppData', 'Roaming'), { recursive: true }),
+    mkdir(join(home, 'AppData', 'Local'), { recursive: true })
+  ])
   const clean: NodeJS.ProcessEnv = {}
   for (const key of ['PATH', 'Path', 'SystemRoot', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'TEMP', 'TMP', 'DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS', 'LANG', 'LC_ALL']) {
     if (process.env[key]) clean[key] = process.env[key]

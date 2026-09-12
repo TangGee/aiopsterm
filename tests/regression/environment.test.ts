@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { it, expect, vi } from 'vitest'
@@ -14,6 +14,8 @@ it('does not inherit live agent credentials, user homes or shell startup hooks',
     expect(JSON.stringify(env)).not.toContain('synthetic-live')
     expect(env.HOME).toBe(join(root, 'home'))
     expect(env.USERPROFILE).toBe(env.HOME)
+    expect((await stat(env.APPDATA!)).isDirectory()).toBe(true)
+    expect((await stat(env.LOCALAPPDATA!)).isDirectory()).toBe(true)
     expect(env.CODEX_HOME).toBe(join(root, 'home', '.codex'))
     expect(env.CLAUDE_CONFIG_DIR).toBe(join(root, 'home', '.claude'))
     expect(env.XAUTHORITY).toBe('/synthetic-display-cookie')
