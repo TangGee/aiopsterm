@@ -76,6 +76,7 @@ test('packaged app starts, opens interactive local and Codex terminals, browses 
   try {
     const page = await app.firstWindow({ timeout: 30_000 })
     await page.waitForLoadState('domcontentloaded')
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1024, 768))
     await expect(page.getByText('aiopsterm', { exact: true })).toBeVisible()
     if (process.platform === 'darwin') {
       await expect(page.locator('.top-bar')).toHaveClass(/platform-macos/)
@@ -102,10 +103,12 @@ test('packaged app starts, opens interactive local and Codex terminals, browses 
       .toBe(true)
     const terminalInput = page.locator('.terminal-pane.active .threaded-terminal-input, .terminal-pane.active .xterm-helper-textarea').first()
     await terminalInput.focus()
+    const colorVariables = ['TERM', 'COLORTERM', 'CLICOLOR', 'TERM_PROGRAM']
+    // Keep each result shorter than a narrow terminal row on hosted macOS.
     await page.keyboard.type(
       process.platform === 'win32'
-        ? 'Write-Output ("__AIOPSTERM_COLOR_ENV__={0}|{1}|{2}|{3}" -f $env:TERM, $env:COLORTERM, $env:CLICOLOR, $env:TERM_PROGRAM)'
-        : `printf '__AIOPSTERM_COLOR_ENV__=%s|%s|%s|%s\\n' "$TERM" "$COLORTERM" "$CLICOLOR" "$TERM_PROGRAM"`
+        ? colorVariables.map((name, index) => `Write-Output ("__CE${index}__={0}" -f $env:${name})`).join('; ')
+        : String.raw`printf '\n__CE0__=%s\n__CE1__=%s\n__CE2__=%s\n__CE3__=%s\n' "$TERM" "$COLORTERM" "$CLICOLOR" "$TERM_PROGRAM"`
     )
     await page.keyboard.press('Enter')
     let terminalOutput = ''
@@ -117,14 +120,15 @@ test('packaged app starts, opens interactive local and Codex terminals, browses 
           params: { surface_id: panelId, tail_lines: 30 }
         })
         terminalOutput = String(replay.data?.snapshot_text || '')
-        return terminalOutput
+        return colorVariables.map((_, index) => {
+          const pattern = new RegExp(String.raw`(?:^|[\r\n])__CE${index}__=([^\r\n]*)(?=[\r\n]|$)`, 'g')
+          return [...terminalOutput.matchAll(pattern)].at(-1)?.[1]
+        })
       })
-      .toMatch(/[\r\n]__AIOPSTERM_COLOR_ENV__=[^\r\n]*\|[^\r\n]*\|[^\r\n]*\|[^\r\n]*(?:[\r\n]|$)/)
-    // Linux inherits color preferences; only macOS supplies these defaults.
-    if (process.platform !== 'win32') expect(terminalOutput).toContain('__AIOPSTERM_COLOR_ENV__=xterm-256color|')
-    if (process.platform === 'darwin') {
-      expect(terminalOutput).toContain('__AIOPSTERM_COLOR_ENV__=xterm-256color|truecolor|1|aiopsterm')
-    }
+      // Linux inherits color preferences; only macOS supplies these defaults.
+      .toEqual(process.platform === 'darwin'
+        ? ['xterm-256color', 'truecolor', '1', 'aiopsterm']
+        : [process.platform === 'win32' ? expect.any(String) : 'xterm-256color', expect.any(String), expect.any(String), expect.any(String)])
     const embeddedCodex = await page.evaluate(async () => {
       const api = (window as unknown as {
         aiops: {
