@@ -1,5 +1,6 @@
 import { defineComponent, h } from 'vue'
 import { Monitor, Trash2, Upload } from 'lucide-vue-next'
+import TerminalFontSettings from '@/components/settings/TerminalFontSettings.vue'
 import { settingsBackgroundPresets, settingsLanguageOptions } from '@/config/settings'
 import { backgroundImageCss } from '@/services/app/backgroundRuntime'
 import type { SettingsWorkspacePageContext, SettingsWorkspaceStore, SettingsWorkspaceTranslate } from '@/services/settings/settingsWorkspacePageContext'
@@ -252,7 +253,11 @@ export const createSettingsWorkspaceGeneralTerminalPages = (
           h('p', { class: 'settings-description' }, t('settings.terminal.description')),
           h('div', { class: 'settings-form-card' }, [
             selectRow(t('settings.terminal.terminalType'), workspace.terminalSettings.terminalType, terminalTypes.map((item) => ({ value: item, label: item })), (value) => workspace.updateTerminalSettings({ terminalType: value })),
-            selectRow(t('settings.terminal.font'), workspace.terminalSettings.fontFamily, terminalFonts, (value) => workspace.updateTerminalSettings({ fontFamily: value })),
+            h(TerminalFontSettings, {
+              value: workspace.terminalSettings.fontFamily,
+              fonts: terminalFonts,
+              save: (fontFamily: string) => workspace.updateTerminalSettings({ fontFamily })
+            }),
             numberRow(t('settings.terminal.fontSize'), workspace.terminalSettings.fontSize, 8, 64, (value) => workspace.updateTerminalSettings({ fontSize: value })),
             numberRow(t('settings.terminal.scrollBack'), workspace.terminalSettings.scrollBack, 1, undefined, (value) => workspace.updateTerminalSettings({ scrollBack: value })),
             h('div', { class: 'settings-form-row' }, [

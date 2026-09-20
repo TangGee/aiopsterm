@@ -178,6 +178,9 @@ class FakeTerminal {
   clearSelection = vi.fn()
   scrollToBottom = vi.fn()
   refresh = vi.fn()
+  registerLinkProvider = vi.fn((_provider: {
+    provideLinks: (line: number, callback: (links: unknown) => void) => void
+  }) => ({ dispose: vi.fn() }))
   input = vi.fn()
   customKeyHandler: ((event: KeyboardEvent) => boolean) | null = null
   attachCustomKeyEventHandler = vi.fn((handler: (event: KeyboardEvent) => boolean) => {
@@ -321,6 +324,37 @@ afterEach(() => {
 })
 
 describe('terminalWorkspaceViewRuntime', () => {
+  it('preserves the legacy buffer receiver while inspecting terminal links', async () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const { runtime } = createRuntime(panel)
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(2)
+    const terminal = runtime.terminalViews.get(panel.id)?.terminal as unknown as FakeTerminal
+    Object.assign(terminal.buffer.active, {
+      lines: [{ translateToString: () => 'https://example.com', isWrapped: false }],
+      getLine(this: { lines: Array<{ translateToString: () => string; isWrapped: boolean }> }, index: number) {
+        return this.lines[index]
+      }
+    })
+    const callback = vi.fn()
+    terminal.registerLinkProvider.mock.calls[0][0].provideLinks(1, callback)
+    expect(callback).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ text: 'https://example.com' })]))
+  })
+
+  it('adds bundled symbols to legacy rendering without mutating the saved font preference', async () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const { runtime, workspace } = createRuntime(panel)
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(2)
+    const terminal = runtime.terminalViews.get(panel.id)?.terminal as unknown as FakeTerminal
+    expect(terminal.options.fontFamily).toBe('JetBrains Mono, "AIOpsTerm Symbols", monospace')
+    expect(workspace.terminalSettings.fontFamily).toBe('JetBrains Mono')
+  })
+
   it('maps Ctrl+Backspace to the terminal delete-previous-word control input', async () => {
     const panel = createEmptyTerminalPanel('panel-1', 'Local')
     const { runtime } = createRuntime(panel)

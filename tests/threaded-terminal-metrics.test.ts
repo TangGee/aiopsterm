@@ -23,7 +23,7 @@ describe('threadedTerminalMetrics', () => {
       height: 17,
       baseline: 11.5
     })
-    expect(context.font).toBe('400 13px SFMono-Regular')
+    expect(context.font).toBe('400 13px SFMono-Regular, "AIOpsTerm Symbols", monospace')
   })
 
   it('falls back to single-character measurement for non-scaling canvas implementations', () => {
@@ -42,9 +42,9 @@ describe('threadedTerminalMetrics', () => {
 
   it('emits real normal, bold, and italic canvas font specifications', () => {
     const settings = { fontFamily: 'Consolas', fontSize: 14 }
-    expect(terminalFontSpec(settings)).toBe('400 14px Consolas')
-    expect(terminalFontSpec(settings, true)).toBe('700 14px Consolas')
-    expect(terminalFontSpec(settings, false, true)).toBe('italic 400 14px Consolas')
-    expect(terminalFontSpec(settings, true, true)).toBe('italic 700 14px Consolas')
+    expect(terminalFontSpec(settings)).toBe('400 14px Consolas, "AIOpsTerm Symbols", monospace')
+    expect(terminalFontSpec(settings, true)).toBe('700 14px Consolas, "AIOpsTerm Symbols", monospace')
+    expect(terminalFontSpec(settings, false, true)).toBe('italic 400 14px Consolas, "AIOpsTerm Symbols", monospace')
+    expect(terminalFontSpec(settings, true, true)).toBe('italic 700 14px Consolas, "AIOpsTerm Symbols", monospace')
   })
 })

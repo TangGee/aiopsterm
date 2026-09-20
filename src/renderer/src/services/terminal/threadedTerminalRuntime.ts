@@ -1,5 +1,6 @@
 import CoreWorker from '@/services/terminal/threadedTerminalCoreWorker?worker'
 import RenderWorker from '@/services/terminal/threadedTerminalRenderWorker?worker'
+import { loadTerminalSymbolFont } from '@/services/terminal/terminalFontRuntime'
 import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
 import { copyTextToClipboard, readTextFromClipboard } from '@/services/app/clipboardRuntime'
 import { localFilesClient } from '@/services/app/localFilesClient'
@@ -1120,6 +1121,7 @@ export class ThreadedTerminalHost {
     }
     this.coreHandle = pickCoreWorker(options.terminalId)
     hostMap.set(options.terminalId, this)
+    void loadTerminalSymbolFont()
   }
 
   loadAddon(addon: unknown) {

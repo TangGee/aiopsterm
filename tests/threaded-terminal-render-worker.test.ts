@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const fontLoader = vi.hoisted(() => vi.fn<() => Promise<boolean>>())
+vi.mock('@/services/terminal/terminalFontRuntime', () => ({ loadTerminalSymbolFont: fontLoader }))
 import type {
   ThreadedTerminalGeometry,
   ThreadedTerminalRenderRequest,
@@ -265,6 +268,7 @@ describe('threadedTerminalRenderWorker', () => {
 
   beforeEach(async () => {
     vi.resetModules()
+    fontLoader.mockReset().mockResolvedValue(false)
     vi.useFakeTimers()
     messages = []
     canvas = new FakeOffscreenCanvas()
@@ -307,6 +311,20 @@ describe('threadedTerminalRenderWorker', () => {
   const send = (message: ThreadedTerminalRenderRequest) => {
     scope.onmessage?.({ data: message } as MessageEvent<ThreadedTerminalRenderRequest>)
   }
+
+  it('repaints existing text when the bundled icon font finishes loading', async () => {
+    let finishLoad!: (loaded: boolean) => void
+    fontLoader.mockReturnValueOnce(new Promise((resolve) => { finishLoad = resolve }))
+    send(attachGroupMessage(canvas))
+    send(attachMessage())
+    send({ type: 'screen', snapshot: snapshot() })
+    await vi.advanceTimersByTimeAsync(16)
+    canvas.context.fillText.mockClear()
+    finishLoad(true)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(canvas.context.fillText).toHaveBeenCalled()
+    expect(canvas.context.font).toContain('"AIOpsTerm Symbols"')
+  })
 
   it('paints wide glyphs at their xterm cell columns', async () => {
     send(attachGroupMessage(canvas))

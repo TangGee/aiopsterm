@@ -1,5 +1,5 @@
 import type { ThreadedTerminalCellMetrics } from '@/services/terminal/threadedTerminalProtocol'
-import { DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT, TERMINAL_FONT_FAMILY } from '@shared/terminalTypography'
+import { DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT, resolveTerminalFontFamily } from '@shared/terminalTypography'
 
 type TextMeasureContext = Pick<CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, 'font' | 'measureText'>
 type TerminalFontSettings = {
@@ -20,7 +20,7 @@ export const terminalFontSpec = (
 ) => {
   const weight = bold ? '700' : '400'
   const style = italic ? 'italic ' : ''
-  return `${style}${weight} ${Math.max(8, Number(settings.fontSize || DEFAULT_TERMINAL_FONT_SIZE))}px ${settings.fontFamily || TERMINAL_FONT_FAMILY}`
+  return `${style}${weight} ${Math.max(8, Number(settings.fontSize || DEFAULT_TERMINAL_FONT_SIZE))}px ${resolveTerminalFontFamily(settings.fontFamily)}`
 }
 
 export const fallbackTerminalCellMetrics = (

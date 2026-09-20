@@ -10,6 +10,7 @@ import type {
   ThreadedTerminalScreenSnapshot
 } from '@/services/terminal/threadedTerminalProtocol'
 import { terminalFontSpec } from '@/services/terminal/threadedTerminalMetrics'
+import { loadTerminalSymbolFont } from '@/services/terminal/terminalFontRuntime'
 
 type DedicatedWorkerScopeLike = {
   onmessage: ((event: MessageEvent<ThreadedTerminalRenderRequest>) => void) | null
@@ -1158,6 +1159,11 @@ const handleMessage = (message: ThreadedTerminalRenderRequest) => {
       markSurfaceDirty(surface)
       presentDirtyRenderGroups()
       post({ type: 'attached', terminalId: surface.terminalId })
+      void loadTerminalSymbolFont().then((loaded) => {
+        if (!loaded || surfaces.get(surface.terminalId) !== surface || !surface.visible) return
+        if (!flushPendingPaintAsRepaint(surface, 'settings')) repaintLastSnapshot(surface, 'settings')
+        presentDirtyRenderGroups()
+      })
       return
     }
     const terminalId = terminalIdForMessage(message)

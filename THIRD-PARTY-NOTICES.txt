@@ -1,3 +1,5 @@
 aiopsterm includes third-party software under their original licenses.
 
+Symbols Nerd Font Mono is bundled from Nerd Fonts v3.5.1, commit b894ea7803af6aade63d60a4381e006098ec9c4d (https://github.com/ryanoasis/nerd-fonts). Its license is included in resources/licenses/nerd-fonts/LICENSE and distributed in licenses/nerd-fonts/LICENSE.
+
 License materials are included under resources/licenses/, vendor/xterm/, and the separately maintained codex/ repository. Release builds generate the exact dependency inventory and license evidence; run npm run build:cline-sidecar, npm run audit:cline-sidecar, and npm run audit:package-config.

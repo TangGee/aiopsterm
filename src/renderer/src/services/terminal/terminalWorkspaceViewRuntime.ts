@@ -33,7 +33,8 @@ import type { TerminalPanel, TerminalSettings, useWorkspaceStore } from '@/store
 import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import type { TerminalCommandSuggestion } from '@shared/contracts/terminalTools'
 import { shouldUseTerminalDebugLogs, shouldUseThreadedTerminal } from '@shared/runtimeSwitches'
-import { DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT, TERMINAL_FONT_FAMILY } from '@shared/terminalTypography'
+import { DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT, TERMINAL_FONT_FAMILY, resolveTerminalFontFamily } from '@shared/terminalTypography'
+import { loadTerminalSymbolFont } from '@/services/terminal/terminalFontRuntime'
 import { findTerminalHttpLinks, isTerminalLinkActivation, terminalColumnAtTextIndex } from '@/services/terminal/terminalLinkRuntime'
 
 type WorkspaceStore = ReturnType<typeof useWorkspaceStore>
@@ -511,7 +512,8 @@ export const createTerminalWorkspaceViewRuntime = ({
     })
     const linkDisposable = view.terminal.registerLinkProvider?.({
       provideLinks: (lineNumber, callback) => {
-        const getLine = view.terminal.buffer.active.getLine
+        const buffer = view.terminal.buffer.active
+        const getLine = buffer.getLine?.bind(buffer)
         if (!getLine) return callback(undefined)
         let firstLine = lineNumber - 1
         while (firstLine > 0 && getLine(firstLine)?.isWrapped) firstLine -= 1
@@ -1012,7 +1014,9 @@ export const createTerminalWorkspaceViewRuntime = ({
   ) => {
     const preservePaneFontSize = options.preservePaneFontSize ?? true
     setXtermTermName(view.terminal, settings.terminalType)
-    view.terminal.options.fontFamily = settings.fontFamily || TERMINAL_FONT_FAMILY
+    view.terminal.options.fontFamily = isThreadedTerminalHost(view.terminal)
+      ? settings.fontFamily || TERMINAL_FONT_FAMILY
+      : resolveTerminalFontFamily(settings.fontFamily)
     view.terminal.options.fontSize = preservePaneFontSize && paneFontSizes[panelId] ? paneFontSizes[panelId] : settings.fontSize || defaultTerminalFontSize()
     view.terminal.options.lineHeight = settings.lineHeight || DEFAULT_TERMINAL_LINE_HEIGHT
     view.terminal.options.cursorBlink = settings.cursorBlink
@@ -1194,7 +1198,7 @@ export const createTerminalWorkspaceViewRuntime = ({
         cursorBlink: workspace.terminalSettings.cursorBlink,
         convertEol: true,
         cursorStyle: workspace.terminalSettings.cursorStyle,
-        fontFamily: workspace.terminalSettings.fontFamily || TERMINAL_FONT_FAMILY,
+        fontFamily: resolveTerminalFontFamily(workspace.terminalSettings.fontFamily),
         fontSize: terminalFontSizeForPanel(panel.id),
         lineHeight: workspace.terminalSettings.lineHeight || DEFAULT_TERMINAL_LINE_HEIGHT,
         minimumContrastRatio: theme.minimumContrastRatio,
@@ -1233,6 +1237,13 @@ export const createTerminalWorkspaceViewRuntime = ({
       view.openedElement = element
     }
     terminalViews.set(panel.id, view)
+    if (!isThreadedTerminalHost(view.terminal)) {
+      const legacyView = view
+      void loadTerminalSymbolFont().then((loaded) => {
+        if (!loaded || terminalViews.get(panel.id) !== legacyView) return
+        legacyView.terminal.refresh(0, Math.max(0, legacyView.terminal.rows - 1))
+      })
+    }
     terminalViewPanels.set(panel.id, panel)
     view.clearPendingOutput = () => clearQueuedTerminalOutput(view)
     attachTerminalKeyboardShortcutHandler(panel, view)
