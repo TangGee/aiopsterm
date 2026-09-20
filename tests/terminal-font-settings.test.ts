@@ -18,43 +18,36 @@ const create = (value = 'monospace') => {
   return { wrapper, save }
 }
 
-describe('terminal custom font settings', () => {
-  it('saves an installed family name without changing the persisted value before confirmation', async () => {
-    const load = vi.fn(async () => undefined)
-    vi.stubGlobal('FontFace', vi.fn(() => ({ load })))
+describe('terminal font settings', () => {
+  it('offers presets and file import without a manual font name entry', async () => {
     const { wrapper, save } = create()
-    await wrapper.get('select').setValue('__custom__')
-    await wrapper.get('#terminal-font-name').setValue('JetBrainsMono Nerd Font Mono')
-    await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(save).toHaveBeenCalledWith('"JetBrainsMono Nerd Font Mono"')
-    expect(wrapper.props('value')).toBe('monospace')
-    await wrapper.setProps({ value: '"JetBrainsMono Nerd Font Mono"' })
-    expect((wrapper.get('#terminal-font-name').element as HTMLInputElement).value).toBe('JetBrainsMono Nerd Font Mono')
-    wrapper.unmount()
-  })
-
-  it('rejects unavailable local fonts instead of saving a silent fallback', async () => {
-    vi.stubGlobal('FontFace', vi.fn(() => ({ load: async () => { throw new Error('Missing') } })))
-    const { wrapper, save } = create()
-    await wrapper.get('select').setValue('__custom__')
-    await wrapper.get('#terminal-font-name').setValue('Missing Font')
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
+    expect(wrapper.find('option[value="__custom__"]').exists()).toBe(false)
+    expect(wrapper.find('input[type="text"], #terminal-font-name, form').exists()).toBe(false)
+    expect(wrapper.get('#terminal-font-file').attributes('accept')).toBe('.ttf,.otf,.woff,.woff2')
     expect(save).not.toHaveBeenCalled()
-    expect(wrapper.get('[role="alert"]').text()).toBe('settings.terminal.fontMissing')
     wrapper.unmount()
   })
 
-  it('restores custom values on mount and keeps them selected if a preset save fails', async () => {
+  it('switches an existing saved font to a preset without changing the value before saving', async () => {
     const { wrapper, save } = create('"My Font"')
-    expect((wrapper.get('#terminal-font-name').element as HTMLInputElement).value).toBe('My Font')
+    await wrapper.get('select').setValue('monospace')
+    await flushPromises()
+    expect(save).toHaveBeenCalledWith('monospace')
+    expect(wrapper.props('value')).toBe('"My Font"')
+    await wrapper.setProps({ value: 'monospace' })
+    expect((wrapper.get('select').element as HTMLSelectElement).value).toBe('monospace')
+    wrapper.unmount()
+  })
+
+  it('keeps the existing saved font selected when a preset save fails', async () => {
+    const { wrapper, save } = create('"My Font"')
     save.mockResolvedValueOnce(false)
     await wrapper.get('select').setValue('monospace')
     await flushPromises()
     expect(save).toHaveBeenCalledWith('monospace')
-    expect((wrapper.get('select').element as HTMLSelectElement).value).toBe('__custom__')
-    expect(wrapper.find('#terminal-font-name').exists()).toBe(true)
+    expect((wrapper.get('select').element as HTMLSelectElement).value).toBe('"My Font"')
+    expect(wrapper.find('#terminal-font-name').exists()).toBe(false)
     wrapper.unmount()
   })
 })

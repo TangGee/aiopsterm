@@ -66,40 +66,6 @@ test('bundled icons load in the document and terminal render worker with unchang
   expect(normalText.fallback).toEqual(normalText.original)
 })
 
-test('custom local fonts validate, persist and restore through the settings UI', async ({ desktop }, info) => {
-  const font = await desktop.page.evaluate(async () => {
-    for (const family of ['Consolas', 'Menlo', 'DejaVu Sans Mono', 'Liberation Mono', 'Courier New']) {
-      try {
-        await new FontFace('Probe', `local("${family}")`).load()
-        return family
-      } catch { /* Try the next platform font. */ }
-    }
-    throw new Error('No supported system monospace font is installed.')
-  })
-  const openSettings = async () => {
-    await desktop.page.locator('[data-module-key="settings"]').click()
-    await desktop.page.locator('.settings-nav-item').filter({ hasText: '\u7ec8\u7aef' }).click()
-  }
-  await openSettings()
-  await desktop.page.locator('#terminal-font-select').selectOption('__custom__')
-  await desktop.page.locator('#terminal-font-name').fill('AIOpsTerm Missing Font 123456789')
-  await desktop.page.locator('.terminal-font-settings button[type="submit"]').click()
-  await expect(desktop.page.locator('#terminal-font-error')).toBeVisible()
-  expect((await desktop.api('getConfig')).terminal.fontFamily).toBe(TERMINAL_FONT_FAMILY)
-  await desktop.page.locator('#terminal-font-name').fill(font)
-  await desktop.page.locator('.terminal-font-settings button[type="submit"]').click()
-  await expect.poll(async () => (await desktop.api('getConfig')).terminal.fontFamily).toBe(JSON.stringify(font))
-  await expect(desktop.page.locator('#terminal-font-error')).toHaveCount(0)
-  await info.attach('custom-font-settings', { body: await desktop.page.locator('.terminal-font-settings').screenshot(), contentType: 'image/png' })
-  await desktop.restart()
-  await openSettings()
-  await expect(desktop.page.locator('#terminal-font-select')).toHaveValue('__custom__')
-  await expect(desktop.page.locator('#terminal-font-name')).toHaveValue(font)
-  await desktop.page.locator('#terminal-font-select').selectOption(TERMINAL_FONT_FAMILY)
-  await expect.poll(async () => (await desktop.api('getConfig')).terminal.fontFamily).toBe(TERMINAL_FONT_FAMILY)
-  await expect(desktop.page.locator('#terminal-font-name')).toHaveCount(0)
-})
-
 for (const backend of ['worker', 'legacy']) {
   test(`imported fonts load in the ${backend} terminal and survive removal of the source and restart`, async ({ desktop }, info) => {
     const source = join(desktop.root, 'Imported Font.ttf')
@@ -118,6 +84,8 @@ for (const backend of ['worker', 'legacy']) {
       await desktop.page.locator('.settings-nav-item').filter({ hasText: '\u7ec8\u7aef' }).click()
     }
     await openSettings()
+    await expect(desktop.page.locator('#terminal-font-select option[value="__custom__"]')).toHaveCount(0)
+    await expect(desktop.page.locator('#terminal-font-name')).toHaveCount(0)
     const invalid = join(desktop.root, 'Invalid.ttf')
     await writeFile(invalid, 'not a valid font')
     await desktop.page.locator('#terminal-font-file').setInputFiles(invalid)
@@ -148,5 +116,9 @@ for (const backend of ['worker', 'legacy']) {
     await assertLoaded()
     await openSettings()
     await expect(desktop.page.locator('#terminal-font-select option:checked')).toHaveText('Imported Font.ttf')
+    await desktop.page.locator('#terminal-font-select').selectOption(TERMINAL_FONT_FAMILY)
+    await expect.poll(async () => (await desktop.api('getConfig')).terminal.fontFamily).toBe(TERMINAL_FONT_FAMILY)
+    await desktop.page.locator('#terminal-font-select').selectOption(familyValue)
+    await expect.poll(async () => (await desktop.api('getConfig')).terminal.fontFamily).toBe(familyValue)
   })
 }

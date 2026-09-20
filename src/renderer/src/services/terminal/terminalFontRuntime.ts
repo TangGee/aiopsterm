@@ -30,25 +30,6 @@ export const loadTerminalFonts = async (family = ''): Promise<boolean> => {
   return loaded
 }
 
-export const isLocalTerminalFontAvailable = async (family: string): Promise<boolean> => {
-  try {
-    await new FontFace('AIOpsTerm Font Probe', `local(${JSON.stringify(family)})`).load()
-    return true
-  } catch {
-    // local() matches full or PostScript names, which can differ from family
-    // names on macOS and Windows. Check the actual CSS family as well.
-    const context = typeof document !== 'undefined' ? document.createElement('canvas').getContext('2d') : null
-    if (!context) return false
-    const sample = 'Wim0123456789@#MWil'
-    return ['monospace', 'serif', 'sans-serif'].some((fallback) => {
-      context.font = `72px ${fallback}`
-      const baseline = context.measureText(sample).width
-      context.font = `72px ${JSON.stringify(family)}, ${fallback}`
-      return baseline > 0 && Math.abs(context.measureText(sample).width - baseline) > 0.01
-    })
-  }
-}
-
 // Each document and render worker owns its own FontFaceSet.
 export const loadTerminalSymbolFont = (): Promise<boolean> => {
   if (symbolFontLoad) return symbolFontLoad

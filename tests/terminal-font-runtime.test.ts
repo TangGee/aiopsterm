@@ -18,18 +18,6 @@ describe('terminal font fallback', () => {
     expect(add.mock.calls.filter(([face]) => face.family.startsWith('AIOpsTerm Imported'))).toHaveLength(1)
   })
 
-  it('accepts installed CSS family names even when the platform uses another full font name', async () => {
-    vi.stubGlobal('FontFace', vi.fn(() => ({ load: async () => { throw new Error('No matching full name') } })))
-    const context = {
-      font: '',
-      measureText() { return { width: this.font.includes('"Installed Family"') ? 120 : 90 } }
-    }
-    vi.stubGlobal('document', { createElement: () => ({ getContext: () => context }) })
-    const { isLocalTerminalFontAvailable } = await import('../src/renderer/src/services/terminal/terminalFontRuntime')
-    expect(await isLocalTerminalFontAvailable('Installed Family')).toBe(true)
-    expect(await isLocalTerminalFontAvailable('Missing Family')).toBe(false)
-  })
-
   it('preserves the user font and inserts symbols before the final generic fallback', () => {
     expect(resolveTerminalFontFamily('"My Font", monospace')).toBe('"My Font", "AIOpsTerm Symbols", monospace')
     expect(resolveTerminalFontFamily('monospace')).toBe('"AIOpsTerm Symbols", monospace')
