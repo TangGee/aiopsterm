@@ -7,6 +7,8 @@ type LocalFilesBridge = Pick<
   | 'showOpenDialog'
   | 'showSaveDialog'
   | 'saveCustomBackground'
+  | 'importTerminalFont'
+  | 'listTerminalFonts'
   | 'saveCustomNotificationSound'
   | 'readLocalFile'
   | 'writeLocalFile'
@@ -30,6 +32,8 @@ export const localFilesClient = {
   showOpenDialog: () => bridgeMethod('showOpenDialog'),
   showSaveDialog: () => bridgeMethod('showSaveDialog'),
   saveCustomBackground: () => bridgeMethod('saveCustomBackground'),
+  importTerminalFont: () => bridgeMethod('importTerminalFont'),
+  listTerminalFonts: () => bridgeMethod('listTerminalFonts'),
   saveCustomNotificationSound: () => bridgeMethod('saveCustomNotificationSound'),
   readLocalFile: () => bridgeMethod('readLocalFile'),
   writeLocalFile: () => bridgeMethod('writeLocalFile'),

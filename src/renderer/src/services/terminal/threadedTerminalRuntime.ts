@@ -1,6 +1,7 @@
 import CoreWorker from '@/services/terminal/threadedTerminalCoreWorker?worker'
 import RenderWorker from '@/services/terminal/threadedTerminalRenderWorker?worker'
-import { loadTerminalSymbolFont } from '@/services/terminal/terminalFontRuntime'
+import { loadTerminalFonts } from '@/services/terminal/terminalFontRuntime'
+import { importedTerminalFontId } from '@shared/terminalFonts'
 import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
 import { copyTextToClipboard, readTextFromClipboard } from '@/services/app/clipboardRuntime'
 import { localFilesClient } from '@/services/app/localFilesClient'
@@ -1121,7 +1122,15 @@ export class ThreadedTerminalHost {
     }
     this.coreHandle = pickCoreWorker(options.terminalId)
     hostMap.set(options.terminalId, this)
-    void loadTerminalSymbolFont()
+    this.loadFont()
+  }
+
+  private loadFont() {
+    const family = this.options.fontFamily
+    void loadTerminalFonts(family).then((loaded) => {
+      if (!loaded || !importedTerminalFontId(family) || this.disposed || this.options.fontFamily !== family) return
+      this.fit({ allowUnstable: true, forceMetrics: true })
+    })
   }
 
   loadAddon(addon: unknown) {
@@ -1651,6 +1660,7 @@ export class ThreadedTerminalHost {
     this.options.scrollBack = normalized.scrollBack
     this.options.scrollback = normalized.scrollBack
     this.options.termName = normalized.terminalType
+    this.loadFont()
     this.fit({ allowUnstable: true, forceMetrics: true })
     if (this.visible && !this.surfaceAttached && this.host) this.ensureSurfaceAttached({ forceGeometry: true })
     if (!this.coreCreated) return

@@ -1,5 +1,7 @@
 import { test, expect } from './support/desktop'
 import { TERMINAL_FONT_FAMILY, resolveTerminalFontFamily } from '../../src/shared/terminalTypography'
+import { copyFile, rm, writeFile } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
 
 test('legacy terminal fallback loads bundled symbols without worker support', async ({ desktop }) => {
   await desktop.page.evaluate(() => {
@@ -97,3 +99,54 @@ test('custom local fonts validate, persist and restore through the settings UI',
   await expect.poll(async () => (await desktop.api('getConfig')).terminal.fontFamily).toBe(TERMINAL_FONT_FAMILY)
   await expect(desktop.page.locator('#terminal-font-name')).toHaveCount(0)
 })
+
+for (const backend of ['worker', 'legacy']) {
+  test(`imported fonts load in the ${backend} terminal and survive removal of the source and restart`, async ({ desktop }, info) => {
+    const source = join(desktop.root, 'Imported Font.ttf')
+    await copyFile(process.env.AIOPSTERM_REGRESSION_FONT || resolve('src/renderer/src/assets/fonts/SymbolsNerdFontMono-Regular.ttf'), source)
+    const configureBackend = async () => {
+      if (backend === 'legacy') {
+        await desktop.page.addInitScript(() => { Reflect.deleteProperty(HTMLCanvasElement.prototype, 'transferControlToOffscreen') })
+        await desktop.page.reload()
+        await expect(desktop.page.locator('.app-shell')).toBeVisible()
+      }
+    }
+    await configureBackend()
+    await desktop.localTerminal()
+    const openSettings = async () => {
+      await desktop.page.locator('[data-module-key="settings"]').click()
+      await desktop.page.locator('.settings-nav-item').filter({ hasText: '\u7ec8\u7aef' }).click()
+    }
+    await openSettings()
+    const invalid = join(desktop.root, 'Invalid.ttf')
+    await writeFile(invalid, 'not a valid font')
+    await desktop.page.locator('#terminal-font-file').setInputFiles(invalid)
+    await expect(desktop.page.locator('#terminal-font-import-error')).toBeVisible()
+    expect((await desktop.api('getConfig')).terminal.fontFamily).toBe(TERMINAL_FONT_FAMILY)
+    await desktop.page.locator('#terminal-font-file').setInputFiles(source)
+    await expect.poll(async () => (await desktop.api('getConfig')).terminal.fontFamily).toMatch(/^"AIOpsTerm Imported [a-f0-9]{64}"$/)
+    await expect(desktop.page.locator('#terminal-font-import-error')).toHaveCount(0)
+    const familyValue = (await desktop.api('getConfig')).terminal.fontFamily
+    const family = JSON.parse(familyValue) as string
+    await expect(desktop.page.locator('#terminal-font-select option:checked')).toHaveText('Imported Font.ttf')
+    await info.attach('imported-font', { body: await desktop.page.locator('.terminal-font-settings').screenshot(), contentType: 'image/png' })
+    const assertLoaded = async () => {
+      await expect.poll(() => desktop.page.evaluate((name) => Array.from(document.fonts).some((face) => face.family === name && face.status === 'loaded'), family)).toBe(true)
+      if (backend === 'worker') {
+        await expect.poll(() => desktop.page.workers().some((worker) => worker.url().includes('threadedTerminalRenderWorker'))).toBe(true)
+        const worker = desktop.page.workers().find((item) => item.url().includes('threadedTerminalRenderWorker'))!
+        await expect.poll(() => worker.evaluate((name) => Array.from((self as unknown as { fonts: FontFaceSet }).fonts).some((face) => face.family === name && face.status === 'loaded'), family)).toBe(true)
+      } else await expect(desktop.page.locator('.terminal-pane.active .xterm')).toBeVisible()
+    }
+    await desktop.page.locator('[data-module-key="workspace"]').click()
+    await assertLoaded()
+    await rm(source)
+    await desktop.restart()
+    expect((await desktop.api('getConfig')).terminal.fontFamily).toBe(familyValue)
+    await configureBackend()
+    await desktop.localTerminal()
+    await assertLoaded()
+    await openSettings()
+    await expect(desktop.page.locator('#terminal-font-select option:checked')).toHaveText('Imported Font.ttf')
+  })
+}

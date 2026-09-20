@@ -130,6 +130,8 @@ describe('local files IPC registrar', () => {
     registerLocalFilesIpc(ipcMain, createRegistrationInput())
 
     expect([...handlers.keys()]).toEqual([
+      'settings:import-terminal-font',
+      'settings:list-terminal-fonts',
       'dialog:open-file',
       'dialog:save-file',
       'settings:save-custom-background',

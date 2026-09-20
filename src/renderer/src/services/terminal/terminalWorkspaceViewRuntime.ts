@@ -34,7 +34,8 @@ import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRunti
 import type { TerminalCommandSuggestion } from '@shared/contracts/terminalTools'
 import { shouldUseTerminalDebugLogs, shouldUseThreadedTerminal } from '@shared/runtimeSwitches'
 import { DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT, TERMINAL_FONT_FAMILY, resolveTerminalFontFamily } from '@shared/terminalTypography'
-import { loadTerminalSymbolFont } from '@/services/terminal/terminalFontRuntime'
+import { loadTerminalFonts, loadTerminalSymbolFont } from '@/services/terminal/terminalFontRuntime'
+import { importedTerminalFontId } from '@shared/terminalFonts'
 import { findTerminalHttpLinks, isTerminalLinkActivation, terminalColumnAtTextIndex } from '@/services/terminal/terminalLinkRuntime'
 
 type WorkspaceStore = ReturnType<typeof useWorkspaceStore>
@@ -1033,6 +1034,13 @@ export const createTerminalWorkspaceViewRuntime = ({
         },
         theme
       )
+    } else if (importedTerminalFontId(settings.fontFamily)) {
+      const family = settings.fontFamily
+      void loadTerminalFonts(family).then((loaded) => {
+        if (!loaded || terminalViews.get(panelId) !== view || view.terminal.options.fontFamily !== resolveTerminalFontFamily(family)) return
+        scheduleTerminalFit(panelId, { frames: 2, forceGeometry: true })
+        view.terminal.refresh(0, Math.max(0, view.terminal.rows - 1))
+      })
     }
     if (options.refit !== false) {
       scheduleTerminalFit(panelId, { scrollToBottom: true, frames: 3, forceGeometry: true })

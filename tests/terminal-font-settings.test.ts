@@ -5,7 +5,7 @@ import TerminalFontSettings from '../src/renderer/src/components/settings/Termin
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/services/terminal/terminalFontRuntime', async (importOriginal) => ({
   ...await importOriginal<typeof import('../src/renderer/src/services/terminal/terminalFontRuntime')>(),
-  loadTerminalSymbolFont: async () => true
+  loadTerminalFonts: async () => true
 }))
 
 afterEach(() => { vi.unstubAllGlobals() })
@@ -24,13 +24,13 @@ describe('terminal custom font settings', () => {
     vi.stubGlobal('FontFace', vi.fn(() => ({ load })))
     const { wrapper, save } = create()
     await wrapper.get('select').setValue('__custom__')
-    await wrapper.get('input').setValue('JetBrainsMono Nerd Font Mono')
+    await wrapper.get('#terminal-font-name').setValue('JetBrainsMono Nerd Font Mono')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(save).toHaveBeenCalledWith('"JetBrainsMono Nerd Font Mono"')
     expect(wrapper.props('value')).toBe('monospace')
     await wrapper.setProps({ value: '"JetBrainsMono Nerd Font Mono"' })
-    expect((wrapper.get('input').element as HTMLInputElement).value).toBe('JetBrainsMono Nerd Font Mono')
+    expect((wrapper.get('#terminal-font-name').element as HTMLInputElement).value).toBe('JetBrainsMono Nerd Font Mono')
     wrapper.unmount()
   })
 
@@ -38,7 +38,7 @@ describe('terminal custom font settings', () => {
     vi.stubGlobal('FontFace', vi.fn(() => ({ load: async () => { throw new Error('Missing') } })))
     const { wrapper, save } = create()
     await wrapper.get('select').setValue('__custom__')
-    await wrapper.get('input').setValue('Missing Font')
+    await wrapper.get('#terminal-font-name').setValue('Missing Font')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(save).not.toHaveBeenCalled()
@@ -48,12 +48,13 @@ describe('terminal custom font settings', () => {
 
   it('restores custom values on mount and keeps them selected if a preset save fails', async () => {
     const { wrapper, save } = create('"My Font"')
-    expect((wrapper.get('input').element as HTMLInputElement).value).toBe('My Font')
+    expect((wrapper.get('#terminal-font-name').element as HTMLInputElement).value).toBe('My Font')
     save.mockResolvedValueOnce(false)
     await wrapper.get('select').setValue('monospace')
     await flushPromises()
+    expect(save).toHaveBeenCalledWith('monospace')
     expect((wrapper.get('select').element as HTMLSelectElement).value).toBe('__custom__')
-    expect(wrapper.find('input').exists()).toBe(true)
+    expect(wrapper.find('#terminal-font-name').exists()).toBe(true)
     wrapper.unmount()
   })
 })

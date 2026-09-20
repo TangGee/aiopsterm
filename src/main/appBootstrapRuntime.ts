@@ -11,6 +11,8 @@ import {
 } from '@shared/deepLink'
 import { normalizeExternalHttpUrl } from '@shared/externalUrl'
 import { sendWindowEvent } from '@shared/windowEvents'
+import { TERMINAL_FONT_PROTOCOL } from '@shared/terminalFonts'
+import { resolveTerminalFontAsset, terminalFontsDirectory } from './backend/files/terminalFonts'
 
 type AppBootstrapRuntimeInput = {
   getMainWindow: () => BrowserWindow | null
@@ -26,6 +28,10 @@ const userAvatarProtocolScheme = 'aiopsterm-user-avatar'
 const backgroundProtocolScheme = 'aiopsterm-background'
 
 protocol.registerSchemesAsPrivileged([
+  {
+    scheme: TERMINAL_FONT_PROTOCOL,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
+  },
   {
     scheme: userAvatarProtocolScheme,
     privileges: {
@@ -216,6 +222,17 @@ export const createAppBootstrapRuntime = (input: AppBootstrapRuntimeInput) => {
   }
 
   const registerAssetProtocols = () => {
+    protocol.handle(TERMINAL_FONT_PROTOCOL, async (request) => {
+      const asset = resolveTerminalFontAsset(terminalFontsDirectory(app.getPath('userData')), request.url)
+      if (!asset) return new Response('Font not found', { status: 404 })
+      try {
+        const response = await net.fetch(pathToFileURL(asset).href)
+        return new Response(response.body, {
+          status: response.status,
+          headers: { 'Content-Type': 'application/octet-stream', 'Access-Control-Allow-Origin': '*' }
+        })
+      } catch { return new Response('Font not found', { status: 404 }) }
+    })
     registerUserAvatarProtocol()
     registerCustomBackgroundProtocol()
   }

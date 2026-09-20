@@ -11,6 +11,7 @@ import {
   validateChatImageAttachment
 } from '../backend/chat/chatImageAttachment'
 import { saveCustomBackgroundFile, saveCustomNotificationSoundFile, writeLocalTextFile } from '../backend/files/localFileWrites'
+import { importTerminalFont, listTerminalFonts, terminalFontsDirectory } from '../backend/files/terminalFonts'
 import {
   configureLocalEditorFilesRuntime,
   readLocalEditorFile,
@@ -169,6 +170,8 @@ const e2eOpenDialogFixture = async (input: RegisterLocalFilesIpcInput, options: 
 }
 
 export const registerLocalFilesIpc = (ipcMain: IpcMain, input: RegisterLocalFilesIpcInput) => {
+  ipcMain.handle('settings:import-terminal-font', (_event, source: string) => importTerminalFont(terminalFontsDirectory(input.getUserDataPath()), source))
+  ipcMain.handle('settings:list-terminal-fonts', () => listTerminalFonts(terminalFontsDirectory(input.getUserDataPath())))
   configureLocalEditorFilesRuntime({
     emitWatchEvent: (event) => broadcastWindowEvent(BrowserWindow.getAllWindows(), 'local-editor-files:watch-event', event)
   })

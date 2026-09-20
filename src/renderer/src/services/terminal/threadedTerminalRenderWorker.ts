@@ -10,7 +10,7 @@ import type {
   ThreadedTerminalScreenSnapshot
 } from '@/services/terminal/threadedTerminalProtocol'
 import { terminalFontSpec } from '@/services/terminal/threadedTerminalMetrics'
-import { loadTerminalSymbolFont } from '@/services/terminal/terminalFontRuntime'
+import { loadTerminalFonts } from '@/services/terminal/terminalFontRuntime'
 
 type DedicatedWorkerScopeLike = {
   onmessage: ((event: MessageEvent<ThreadedTerminalRenderRequest>) => void) | null
@@ -1159,7 +1159,7 @@ const handleMessage = (message: ThreadedTerminalRenderRequest) => {
       markSurfaceDirty(surface)
       presentDirtyRenderGroups()
       post({ type: 'attached', terminalId: surface.terminalId })
-      void loadTerminalSymbolFont().then((loaded) => {
+      void loadTerminalFonts(surface.settings.fontFamily).then((loaded) => {
         if (!loaded || surfaces.get(surface.terminalId) !== surface || !surface.visible) return
         if (!flushPendingPaintAsRepaint(surface, 'settings')) repaintLastSnapshot(surface, 'settings')
         presentDirtyRenderGroups()
@@ -1189,6 +1189,12 @@ const handleMessage = (message: ThreadedTerminalRenderRequest) => {
     }
     if (message.type === 'settings') {
       surface.settings = message.settings
+      const family = surface.settings.fontFamily
+      void loadTerminalFonts(family).then((loaded) => {
+        if (!loaded || surfaces.get(surface.terminalId) !== surface || !surface.visible || surface.settings.fontFamily !== family) return
+        if (!flushPendingPaintAsRepaint(surface, 'settings')) repaintLastSnapshot(surface, 'settings')
+        presentDirtyRenderGroups()
+      })
       resizeSurface(surface, message.geometry, surface.rect)
       if (flushPendingPaintAsRepaint(surface, 'settings')) return
       else repaintLastSnapshot(surface, 'settings')

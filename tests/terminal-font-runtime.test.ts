@@ -4,6 +4,20 @@ import { resolveTerminalFontFamily, TERMINAL_FONT_FAMILY } from '../src/shared/t
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.resetModules() })
 
 describe('terminal font fallback', () => {
+  it.each(['document', 'worker'])('loads imported font files once into the %s font set', async (scope) => {
+    const add = vi.fn()
+    const constructor = vi.fn((family: string) => ({ family, load: async () => undefined }))
+    vi.stubGlobal('FontFace', constructor)
+    vi.stubGlobal('document', scope === 'document' ? { fonts: { add } } : undefined)
+    if (scope === 'worker') vi.stubGlobal('fonts', { add })
+    const id = 'a'.repeat(64)
+    const family = `"AIOpsTerm Imported ${id}"`
+    const { loadTerminalFonts } = await import('../src/renderer/src/services/terminal/terminalFontRuntime')
+    expect(await Promise.all([loadTerminalFonts(family), loadTerminalFonts(family)])).toEqual([true, true])
+    expect(constructor).toHaveBeenCalledWith(`AIOpsTerm Imported ${id}`, `url("aiopsterm-font://local/${id}")`)
+    expect(add.mock.calls.filter(([face]) => face.family.startsWith('AIOpsTerm Imported'))).toHaveLength(1)
+  })
+
   it('accepts installed CSS family names even when the platform uses another full font name', async () => {
     vi.stubGlobal('FontFace', vi.fn(() => ({ load: async () => { throw new Error('No matching full name') } })))
     const context = {

@@ -1,4 +1,5 @@
 import type { TerminalRecoverySnapshot, TerminalRecoveryLoadResult } from './terminalRecovery'
+import type { ImportedTerminalFont } from '../terminalFonts'
 import type { AiopstermDeepLinkPayload } from '../deepLink'
 import type { AiopsMutationResult } from './common'
 import type {
@@ -569,6 +570,8 @@ export type AiopsPreloadApi = {
   showOpenDialog: (options: OpenDialogOptions) => Promise<OpenDialogResult | undefined>
   showSaveDialog: (options: SaveDialogOptions) => Promise<SaveDialogResult | undefined>
   saveCustomBackground: (srcAbsPath: string) => Promise<CustomBackgroundSaveResult>
+  importTerminalFont: (srcAbsPath: string) => Promise<ImportedTerminalFont>
+  listTerminalFonts: () => Promise<ImportedTerminalFont[]>
   saveCustomNotificationSound: (srcAbsPath: string) => Promise<CustomNotificationSoundSaveResult>
   readLocalFile: (filePath: string) => Promise<LocalFileReadResult>
   writeLocalFile: (filePath: string, content: string) => Promise<LocalFileWriteResult>

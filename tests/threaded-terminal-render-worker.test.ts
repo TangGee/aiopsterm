@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const fontLoader = vi.hoisted(() => vi.fn<() => Promise<boolean>>())
-vi.mock('@/services/terminal/terminalFontRuntime', () => ({ loadTerminalSymbolFont: fontLoader }))
+vi.mock('@/services/terminal/terminalFontRuntime', () => ({ loadTerminalFonts: fontLoader }))
 import type {
   ThreadedTerminalGeometry,
   ThreadedTerminalRenderRequest,
