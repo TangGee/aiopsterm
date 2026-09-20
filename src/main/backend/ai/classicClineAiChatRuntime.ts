@@ -267,8 +267,7 @@ export const generateClassicClineResponse = async (input: {
         conversationId,
         requestId: identity.taskId,
         assistantMessageId: identity.turnId
-      },
-      maxIterations: 8
+      }
     })
   } catch (error) {
     return {

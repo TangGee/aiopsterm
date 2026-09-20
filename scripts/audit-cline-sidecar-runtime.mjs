@@ -319,6 +319,8 @@ const smokeSidecar = async () => {
     let stderr = ''
     let requestSequence = 0
     let providerFetchCount = 0
+    let unlimitedFetchCount = 0
+    const unlimitedToolRounds = 25
     let callbackFailure = null
     const callbackOrder = []
     const lifecycleOrder = []
@@ -333,6 +335,31 @@ const smokeSidecar = async () => {
     const pending = new Map()
     const handleCallback = (frame) => {
       const payload = frame.payload || {}
+      if (payload.sessionId === 'audit-unlimited-loop') {
+        if (frame.callback === 'provider.fetch') {
+          const iteration = ++unlimitedFetchCount
+          if (iteration === unlimitedToolRounds + 1) return finalTextSse()
+          if (iteration > unlimitedToolRounds) throw new Error('Unlimited loop failed to complete.')
+          return sseResponse([
+            {
+              id: `chatcmpl-unlimited-${iteration}`,
+              object: 'chat.completion.chunk',
+              created: iteration,
+              model: 'audit-model',
+              choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{
+                index: 0,
+                id: `call-unlimited-${iteration}`,
+                type: 'function',
+                function: { name: 'audit_step', arguments: JSON.stringify({ step: iteration }) }
+              }] }, finish_reason: null }]
+            },
+            { choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
+            '[DONE]'
+          ])
+        }
+        if (frame.callback === 'tool.execute') return { step: payload.input?.step, completed: true }
+        throw new Error(`Unexpected unlimited-loop callback: ${frame.callback}`)
+      }
       const callbackLabel =
         frame.callback === 'approval.request' || frame.callback === 'tool.execute'
           ? `${frame.callback}:${payload.toolCallId}`
@@ -583,6 +610,32 @@ const smokeSidecar = async () => {
       throw new Error(`Deterministic Agent loop lifecycle order mismatch: ${JSON.stringify(lifecycleOrder)}`)
     }
     await request('session.stop', { sessionId: 'audit-agent-loop' })
+    await request('session.start', {
+      sessionId: 'audit-unlimited-loop',
+      profile: 'classic-agent',
+      systemPrompt: 'Complete all requested audit steps.',
+      provider: loopProvider,
+      tools: [{
+        name: 'audit_step',
+        description: 'Complete a deterministic audit step.',
+        inputSchema: { type: 'object', properties: { step: { type: 'number' } }, required: ['step'] },
+        autoApprove: true
+      }]
+    })
+    const unlimitedResult = await request('session.send', {
+      sessionId: 'audit-unlimited-loop',
+      taskId: 'audit-unlimited-task',
+      turnId: 'audit-unlimited-turn',
+      prompt: 'Complete all twenty-five steps and then report completion.'
+    })
+    if (callbackFailure) throw callbackFailure
+    if (
+      unlimitedResult?.finishReason !== 'completed' ||
+      unlimitedResult?.iterations !== unlimitedToolRounds + 1 ||
+      unlimitedResult?.toolCalls?.length !== unlimitedToolRounds ||
+      unlimitedFetchCount !== unlimitedToolRounds + 1
+    ) throw new Error(`Unlimited Agent loop failed: ${JSON.stringify(unlimitedResult)}`)
+    await request('session.stop', { sessionId: 'audit-unlimited-loop' })
     const shutdown = await request('runtime.shutdown')
     if (shutdown?.stopped !== true) throw new Error('Cline sidecar shutdown failed.')
     const exitCode = await exited
@@ -601,6 +654,7 @@ console.log(JSON.stringify({
   audit: 'cline-sidecar-runtime',
   nodeVersion: NODE_VERSION,
   bundledComponents: packageCoordinates.size,
+  unlimitedLoopIterations: 26,
   providers: providerConfigs.map((config) => config.name),
   agentLoop: 'provider.fetch -> approval(A) -> tool(A) -> rejected-result(B) -> approval(C) -> tool(C) -> provider.fetch -> final'
 }))

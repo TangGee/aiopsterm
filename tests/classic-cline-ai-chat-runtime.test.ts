@@ -101,9 +101,9 @@ describe('Classic Cline AI chat adapter', () => {
         { role: 'user', content: '之前的问题' },
         { role: 'assistant', content: '之前的回答' }
       ],
-      maxIterations: 8,
       systemPrompt: expect.stringContaining('使用简体中文回答')
     }))
+    expect(runTurn.mock.calls[0][0].maxIterations).toBeUndefined()
   })
 
   it('passes validated provider images to the official Cline turn', async () => {

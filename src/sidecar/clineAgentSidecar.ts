@@ -32,7 +32,6 @@ import {
 
 const MAX_PENDING_CALLBACKS = 128
 const DEFAULT_CALLBACK_TIMEOUT_MS = 10 * 60_000
-const DEFAULT_MAX_ITERATIONS = 8
 
 type ActiveTurn = {
   taskId: string
@@ -504,7 +503,7 @@ export const createClineAgentSidecarRuntime = () => {
       workspaceRoot,
       systemPrompt: input.systemPrompt,
       mode: 'act',
-      maxIterations: Math.max(1, Math.min(20, Math.round(input.maxIterations || DEFAULT_MAX_ITERATIONS))),
+      maxIterations: input.maxIterations,
       maxParallelToolCalls: 1,
       enableTools: false,
       enableSpawnAgent: false,

@@ -116,6 +116,33 @@ describe('Cline Agent sidecar runtime', () => {
     expect(CLINE_AGENT_PROVIDER_FETCH_MAX_RESPONSE_BODY_BYTES).toBe(2 * 1024 * 1024)
   })
 
+  it('starts Classic sessions without an iteration limit and keeps automatic compaction enabled', async () => {
+    await runtime.handleMessage(startRequest(
+      'start-unlimited',
+      { providerId: 'openai-compatible', modelId: 'ops-model', apiKey: 'test-key' },
+      'task-1',
+      'turn-1'
+    ))
+
+    const { config } = sdkMocks.manager.start.mock.calls[0][0] as { config: Record<string, unknown> }
+    expect(config.maxIterations).toBeUndefined()
+    expect(config.compaction).toEqual({ enabled: true, strategy: 'basic' })
+  })
+
+  it('passes explicit iteration limits through without a hidden twenty-iteration cap', async () => {
+    const request = startRequest(
+      'start-explicit-limit',
+      { providerId: 'openai-compatible', modelId: 'ops-model', apiKey: 'test-key' },
+      'task-1',
+      'turn-1'
+    )
+    if (request.kind !== 'request') throw new Error('Expected a session start request')
+    await runtime.handleMessage({ ...request, payload: { ...(request.payload as ClineAgentSessionStartInput), maxIterations: 40 } })
+
+    const { config } = sdkMocks.manager.start.mock.calls[0][0] as { config: Record<string, unknown> }
+    expect(config.maxIterations).toBe(40)
+  })
+
   it('updates an active session connection inside the current provider fetch context', async () => {
     const requestBody = 'r'.repeat(CLINE_AGENT_PROVIDER_FETCH_MAX_RESPONSE_BODY_BYTES + 1)
     sdkMocks.state.updateConnectionFetchInit = { method: 'POST', body: requestBody }
