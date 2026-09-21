@@ -554,7 +554,12 @@ describe('control socket backend', () => {
           })
         })
       )
-      expect(await readFile(join(root, '.codex/hooks.json'), 'utf-8')).toContain('aiopsterm-agent-hook-v1')
+      const hookConfig = JSON.parse(await readFile(join(root, '.codex/hooks.json'), 'utf-8'))
+      const hookCommand = hookConfig.hooks.Stop[0].hooks[0].command as string
+      const decodedCommand = process.platform === 'win32'
+        ? Buffer.from(hookCommand.split(' ').at(-1)!, 'base64').toString('utf16le')
+        : hookCommand
+      expect(decodedCommand).toContain('aiopsterm-agent-hook-v1')
 
       await expect(backend.__testing.handleControlRequest({ method: 'agent.hooks.uninstall', params: { source: 'codex' } })).resolves.toEqual(
         expect.objectContaining({
@@ -2732,7 +2737,7 @@ describe('control socket backend', () => {
       )
     } finally {
       backend.closeControlSocketServer()
-      await rm(root, { recursive: true, force: true })
+      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     }
   })
 

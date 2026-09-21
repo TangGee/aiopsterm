@@ -2,7 +2,7 @@ import { createServer, type Server } from 'net'
 import { execFile } from 'child_process'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { promisify } from 'util'
 import { afterEach, describe, expect, it } from 'vitest'
 import { testSocketPath } from './helpers/testSocketPath'
@@ -203,7 +203,7 @@ describe('aio CLI', () => {
     const absolutePath = join(dir, 'absolute.txt')
     await writeFile(relativePath, 'relative\n', 'utf8')
     await writeFile(absolutePath, 'absolute\n', 'utf8')
-    const canonicalDir = await realpath(dir)
+    const canonicalDir = (await execFileAsync(process.execPath, ['-p', 'process.cwd()'], { cwd: dir })).stdout.trim()
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
       seen.push(request)

@@ -323,6 +323,10 @@ describe('local terminal backend runtime', () => {
 
     const env = backend.managedLocalTerminalEnvironment('local-managed-2', { panelId: 'panel-2', workspaceId: 'workspace' }, { PATH: '/usr/bin' })
     const controlBinDir = String(env.PATH || '').split(delimiter)[0]
+    const expectExecutable = (path: string) => {
+      // Windows filesystems do not expose POSIX executable permission bits.
+      if (process.platform !== 'win32') expect(statSync(path).mode & 0o111).not.toBe(0)
+    }
 
     expect(env.AIOPSTERM_CONTROL_COMMAND).toBe('aio')
     expect(env.PATH).toBe(`${controlBinDir}${delimiter}/usr/bin`)
@@ -331,23 +335,23 @@ describe('local terminal backend runtime', () => {
     for (const commandName of ['aio', 'aictl', 'aiopsterm-control']) {
       const commandPath = join(controlBinDir, commandName)
       expect(readFileSync(commandPath, 'utf8')).toContain('ELECTRON_RUN_AS_NODE=1 exec "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_CONTROL_HELPER_PATH" "$@"')
-      expect(statSync(commandPath).mode & 0o111).not.toBe(0)
+      expectExecutable(commandPath)
     }
     const aiopenPath = join(controlBinDir, 'aiopen')
     expect(readFileSync(aiopenPath, 'utf8')).toContain('ELECTRON_RUN_AS_NODE=1 exec "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_CONTROL_HELPER_PATH" \'aiopen\' "$@"')
-    expect(statSync(aiopenPath).mode & 0o111).not.toBe(0)
+    expectExecutable(aiopenPath)
     const aiosshPath = join(controlBinDir, 'aiossh')
     expect(readFileSync(aiosshPath, 'utf8')).toContain('ELECTRON_RUN_AS_NODE=1 exec "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_CONTROL_HELPER_PATH" \'ssh\' "$@"')
-    expect(statSync(aiosshPath).mode & 0o111).not.toBe(0)
+    expectExecutable(aiosshPath)
     const aiswitchPath = join(controlBinDir, 'aiswitch')
     expect(readFileSync(aiswitchPath, 'utf8')).toContain('ELECTRON_RUN_AS_NODE=1 exec "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_CONTROL_HELPER_PATH" \'host\' \'switch\' "$@"')
-    expect(statSync(aiswitchPath).mode & 0o111).not.toBe(0)
+    expectExecutable(aiswitchPath)
     const aioicPath = join(controlBinDir, 'aioic')
     expect(readFileSync(aioicPath, 'utf8')).toContain('ELECTRON_RUN_AS_NODE=1 exec "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_CONTROL_HELPER_PATH" \'workspace\' \'close-idle\' "$@"')
-    expect(statSync(aioicPath).mode & 0o111).not.toBe(0)
+    expectExecutable(aioicPath)
     const aiobcPath = join(controlBinDir, 'aiobc')
     expect(readFileSync(aiobcPath, 'utf8')).toContain('ELECTRON_RUN_AS_NODE=1 exec "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_CONTROL_HELPER_PATH" \'workspace\' \'action\' \'close_others\' "$@"')
-    expect(statSync(aiobcPath).mode & 0o111).not.toBe(0)
+    expectExecutable(aiobcPath)
 
     const completionPath = String(env.AIOPSTERM_CONTROL_COMPLETION_BASH || '')
     expect(completionPath).toBe(join(controlBinDir, 'aiopsterm-control-completion.bash'))

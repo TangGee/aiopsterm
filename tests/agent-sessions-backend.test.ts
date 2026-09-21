@@ -181,7 +181,7 @@ describe('agent session backend', () => {
         panelId: 'panel-1',
         terminalSessionId: 'terminal-1',
         cwd: '/work/project',
-        canonicalCwd: resolve('/work/project'),
+        canonicalCwd: '/work/project',
         summary: 'Approve shell command',
         requestKind: 'permission',
         decisionMode: 'local',
