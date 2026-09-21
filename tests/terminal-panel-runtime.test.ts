@@ -313,8 +313,14 @@ describe('terminalPanelRuntime', () => {
     closeOtherTerminalPanelsInCollection(panels, 'plain')
     expect(panels).toEqual([expect.objectContaining({ id: 'plain', split: undefined, splitGroupId: undefined })])
 
+    const beforeReset = Date.now()
     expect(resetTerminalPanelCollectionToDefault(panels)).toBe('panel-main')
-    expect(panels).toEqual([createEmptyTerminalPanel('panel-main', defaultTerminalPanelTitle)])
+    expect(panels).toEqual([{
+      ...createEmptyTerminalPanel('panel-main', defaultTerminalPanelTitle),
+      lastActivityAt: expect.any(Number)
+    }])
+    expect(panels[0].lastActivityAt).toBeGreaterThanOrEqual(beforeReset)
+    expect(panels[0].lastActivityAt).toBeLessThanOrEqual(Date.now())
   })
 
   it('updates terminal panel collection titles, fork state, and active writable resolution', () => {
