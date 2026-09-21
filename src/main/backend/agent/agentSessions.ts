@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import { createServer, type Server, type Socket } from 'net'
-import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync, rmSync } from 'fs'
 import { dirname, join } from 'path'
 import { mkdir, stat } from 'fs/promises'
 import { platformSocketPath } from '../app/platformRuntime'
@@ -308,16 +308,7 @@ const persistSnapshotOnExit = () => {
   if (!persistDirty || !storeUserDataPath) return
   persistDirty = false
   try {
-    const storePath = storePathFor(storeUserDataPath)
-    const payload = {
-      version: storeVersion,
-      agentHibernation: agentHibernationConfig,
-      ...snapshot()
-    }
-    mkdirSync(dirname(storePath), { recursive: true })
-    const tempPath = `${storePath}.${process.pid}.exit.tmp`
-    writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf-8')
-    renameSync(tempPath, storePath)
+    storeRuntime.persistSnapshotSync()
   } catch {
     /* 退出兜底写盘失败时已无恢复手段，保持静默。 */
   }

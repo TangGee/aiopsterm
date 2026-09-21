@@ -17,6 +17,7 @@ type AgentSessionStoreRuntime = {
   configure: (userDataPath: string) => Promise<void>
   loadStoreIfNeeded: () => Promise<void>
   persistSnapshot: () => void
+  persistSnapshotSync: () => void
   flush: () => Promise<void>
   storePathFor: (userDataPath: string) => string
 }
@@ -141,5 +142,25 @@ describe('agentSessionStoreRuntime', () => {
     const loadedAfterConfigure = applyLoadedStore.mock.calls.at(-1)![0] as LoadedAgentSessionStore
     expect(loadedAfterConfigure.agentHibernationConfig).toEqual(defaultHibernationConfig)
     expect([...loadedAfterConfigure.sessions.values()]).toEqual([])
+  })
+
+  it('writes the latest session synchronously when the process cannot await queued persistence', async () => {
+    const { createAgentSessionStoreRuntime } = await loadRuntime()
+    let snapshot: ManagedAiSessionSnapshot = { sessions: [sessionRecord({ id: 'before-exit' })] }
+    const runtime = createAgentSessionStoreRuntime({
+      storeVersion: 7,
+      getSnapshot: () => snapshot,
+      getAgentHibernationConfig: () => defaultHibernationConfig,
+      applyLoadedStore: () => undefined
+    })
+    const userDataPath = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-store-exit-'))
+    await runtime.configure(userDataPath)
+    runtime.persistSnapshot()
+    await runtime.flush()
+    snapshot = { sessions: [sessionRecord({ id: 'latest-at-exit' })] }
+    runtime.persistSnapshotSync()
+    const persisted = JSON.parse(await readFile(runtime.storePathFor(userDataPath), 'utf-8'))
+    expect(persisted.sessions).toEqual([expect.objectContaining({ id: 'latest-at-exit' })])
+    expect(persisted).toMatchObject({ version: 7, agentHibernation: defaultHibernationConfig })
   })
 })

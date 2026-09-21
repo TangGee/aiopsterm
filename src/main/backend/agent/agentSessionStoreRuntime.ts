@@ -1,4 +1,4 @@
-import { existsSync } from 'fs'
+import { existsSync, mkdirSync, renameSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { mkdir, readFile, writeFile } from 'fs/promises'
 import {
@@ -34,6 +34,7 @@ export type AgentSessionStoreRuntime = {
   configure: (userDataPath: string) => Promise<void>
   loadStoreIfNeeded: () => Promise<void>
   persistSnapshot: () => void
+  persistSnapshotSync: () => void
   flush: () => Promise<void>
   storePathFor: (userDataPath: string) => string
 }
@@ -54,6 +55,11 @@ export const createAgentSessionStoreRuntime = ({
   let writeQueue: Promise<void> = Promise.resolve()
 
   const storePathFor = (userDataPath: string) => join(userDataPath, 'agent-sessions', 'managed-ai-sessions.json')
+  const snapshotPayload = (): PersistedManagedAiSessionSnapshot => ({
+    version: storeVersion,
+    agentHibernation: getAgentHibernationConfig(),
+    ...getSnapshot()
+  })
 
   const loadStoreIfNeeded = async () => {
     if (loadedStore || !storePath) return
@@ -88,17 +94,20 @@ export const createAgentSessionStoreRuntime = ({
     persistSnapshot: () => {
       if (!storePath) return
       const targetStorePath = storePath
-      const payload: PersistedManagedAiSessionSnapshot = {
-        version: storeVersion,
-        agentHibernation: getAgentHibernationConfig(),
-        ...getSnapshot()
-      }
+      const payload = snapshotPayload()
       writeQueue = writeQueue
         .catch(() => undefined)
         .then(async () => {
           await mkdir(dirname(targetStorePath), { recursive: true })
           await writeFile(targetStorePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf-8')
         })
+    },
+    persistSnapshotSync: () => {
+      if (!storePath) return
+      mkdirSync(dirname(storePath), { recursive: true })
+      const tempPath = `${storePath}.${process.pid}.exit.tmp`
+      writeFileSync(tempPath, `${JSON.stringify(snapshotPayload(), null, 2)}\n`, 'utf-8')
+      renameSync(tempPath, storePath)
     },
     flush: async () => {
       await writeQueue
