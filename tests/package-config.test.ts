@@ -5,6 +5,7 @@ import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
 
 const execFileAsync = promisify(execFile)
+const shellEntrypointTimeout = process.platform === 'win32' ? 60_000 : 15_000
 
 const evalBuildCodexCliModule = async (source: string) => {
   const result = await execFileAsync(process.execPath, ['--input-type=module', '-e', source], { cwd: process.cwd() })
@@ -225,7 +226,7 @@ describe('package configuration audit', () => {
     expect(script).toContain('run_npm run build:linux')
     expect(script).toContain('package:verify -- linux-appimage')
     expect(script).toContain('package:verify -- linux-deb')
-  })
+  }, shellEntrypointTimeout)
 
   it('keeps the local macOS one-click build entrypoint available', async () => {
     const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts?: Record<string, string> }
@@ -268,7 +269,7 @@ describe('package configuration audit', () => {
     expect(script).toContain('xcrun stapler validate')
     expect(script).toContain('run_npm run package:build -- macos')
     expect(script).toContain('run_npm run package:verify -- macos')
-  })
+  }, shellEntrypointTimeout)
 
   it('loads the native runtime entrypoint before validating its target', async () => {
     await expect(execFileAsync(process.execPath, ['scripts/ensure-native-runtime.mjs', 'invalid'], {
