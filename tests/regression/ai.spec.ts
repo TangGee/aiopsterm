@@ -47,7 +47,9 @@ for (const scenario of ['answer', 'error', 'cancel', 'tool', 'tool-reject'] as c
         } else {
           await desktop.page.getByTestId('ai-message-command-run').click()
           await expect.poll(() => desktop.replay()).toContain('REGRESSION_TOOL_OK')
-          await expect(desktop.page.getByTestId('ai-message-command-status')).toHaveClass(/succeeded/)
+          await expect(desktop.page.getByTestId('ai-message-command-status')).toHaveClass(/succeeded/, {
+            timeout: process.platform === 'win32' ? 120_000 : 15_000
+          })
         }
       } else {
         await expect(desktop.page.locator('.ai-panel')).toContainText('REGRESSION_ANSWER_COMPLETE')

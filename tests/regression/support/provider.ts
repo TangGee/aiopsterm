@@ -57,7 +57,11 @@ export async function startRegressionProvider() {
         const targetId = prompt.match(/"targetId"\s*:\s*"([^"]+)"/)?.[1]
         if (!targetId) { response.end(); return }
         write({ tool_calls: [{ index: 0, id: 'regression-call-1', type: 'function', function: { name: nativeTool.function.name, arguments: '' } }] })
-        const args = JSON.stringify({ targetId, command: 'echo REGRESSION_TOOL_OK', requiresApproval: true })
+        const args = JSON.stringify({
+          targetId, command: 'echo REGRESSION_TOOL_OK', requiresApproval: true,
+          // Fresh Windows runners can spend over 30 seconds starting the nested shell.
+          ...(process.platform === 'win32' ? { timeoutMs: 90_000 } : {})
+        })
         for (const fragment of args.match(/.{1,11}/g) || []) {
           write({ tool_calls: [{ index: 0, function: { arguments: fragment } }] })
         }

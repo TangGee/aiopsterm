@@ -608,9 +608,11 @@ const waitForDatabaseDbAiDone = async () => {
   await flushPromises()
 }
 
-const waitForDatabaseDbAiPaneDone = async () => {
-  await new Promise((resolve) => window.setTimeout(resolve, 760))
-  await flushPromises()
+const waitForDatabaseDbAiPaneDone = async (wrapper: VueWrapper<any>) => {
+  await vi.waitFor(async () => {
+    await flushPromises()
+    expect(wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!.find('.db-ai-pane-message-status').text()).toContain('Done')
+  }, { timeout: 5000, interval: 50 })
 }
 
 const createTestDataTransfer = () => {
@@ -15176,7 +15178,7 @@ describe('AppShell', () => {
     expect(wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!.find('.db-ai-pane-message-status').text()).toContain('Cancelled')
 
     await wrapper.find('button[title="AI Explain SQL"]').trigger('click')
-    await waitForDatabaseDbAiPaneDone()
+    await waitForDatabaseDbAiPaneDone(wrapper)
     const explainAssistant = wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!
     expect(explainAssistant.find('.db-ai-pane-message-status').text()).toContain('Done')
     expect(explainAssistant.find('.db-ai-pane-message-content').text()).toContain('Schema summary')
@@ -15187,7 +15189,7 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-ai-pane-composer textarea').attributes('placeholder')).toBe('Describe the data you want to query')
     await wrapper.find('.db-ai-pane-composer textarea').setValue('show open orders by update time')
     await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
-    await waitForDatabaseDbAiPaneDone()
+    await waitForDatabaseDbAiPaneDone(wrapper)
     expect(wrapper.findAll('.db-ai-pane-message.user').at(-1)!.text()).toContain('Natural language to SQL')
     expect(wrapper.findAll('.db-ai-pane-message.user').at(-1)!.find('.db-ai-pane-action-prompt').text()).toBe('show open orders by update time')
     expect(wrapper.findAll('.db-ai-pane-sql-result').at(-1)!.find('pre').text()).toContain('SELECT *')

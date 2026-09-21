@@ -29,6 +29,7 @@ import {
   shouldRecoverLock
 } from './native-runtime-helpers.mjs'
 import { nativeBinarySha256 } from './native-binary-integrity.mjs'
+import { packagedPtyFiles, preparePackagedPtyHelper } from './packaged-pty-files.mjs'
 
 const require = createRequire(import.meta.url)
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -44,6 +45,7 @@ if (!supportedTargets.has(target) || (checkOnly && force)) {
 
 const sqlitePackagePath = require.resolve('better-sqlite3/package.json')
 const sqliteRoot = dirname(sqlitePackagePath)
+const ptyRoot = dirname(require.resolve('node-pty/package.json'))
 const sqlitePackage = JSON.parse(readFileSync(sqlitePackagePath, 'utf8'))
 const bindingRoot = resolve(sqliteRoot, 'lib', 'binding')
 const manifestPath = resolve(bindingRoot, 'aiopsterm-native-manifest.json')
@@ -402,6 +404,10 @@ const writeManifest = (currentManifest) => {
 }
 
 const verifyRuntime = (runtime, manifest = readManifest()) => {
+  if (process.platform === 'darwin') {
+    const helper = packagedPtyFiles(ptyRoot, process.platform, process.arch).at(-1)
+    if ((statSync(helper).mode & 0o111) !== 0o111) throw new Error('macOS PTY spawn-helper must be executable; run native:ensure:electron.')
+  }
   if (!cachedBindingValid(runtime, manifest)) {
     throw new Error(`The ABI-keyed better-sqlite3 binding is missing or invalid for ${runtime}.`)
   }
@@ -437,6 +443,8 @@ const prepareRuntimes = () => {
       throw new Error(`${runtime} native module probe failed after preparation:\n${probeFailure(result)}`)
     }
   }
+
+  preparePackagedPtyHelper(ptyRoot, process.platform, process.arch)
 
   for (const runtime of runtimeNames) {
     if (!cachedBindingValid(runtime, nextManifest)) {
