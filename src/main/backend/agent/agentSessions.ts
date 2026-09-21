@@ -1777,6 +1777,12 @@ export const closeAiAgentSessionServer = () => {
   codexTranscriptMonitorRuntime.reset()
 }
 
+export const flushManagedAiSessionWrites = async () => {
+  flushPersistSnapshotNow()
+  await storeRuntime.flush()
+  await auditRuntime.flush()
+}
+
 export const __testing = {
   sourceLabel,
   storePathFor,
@@ -1789,11 +1795,7 @@ export const __testing = {
   streamWaiterCount: agentSessionEventStreamRuntime.streamWaiterCount,
   flushManagedAiSessionImports: () => flushScheduledImportScan(),
   flushManagedAiSessionGitRefresh: () => flushScheduledGitRefresh(),
-  flushManagedAiSessionWrites: async () => {
-    flushPersistSnapshotNow()
-    await storeRuntime.flush()
-    await auditRuntime.flush()
-  },
+  flushManagedAiSessionWrites,
   flushCodexTranscriptMonitors: () => codexTranscriptMonitorRuntime.flush(),
   activeCodexTranscriptMonitorCount: () => codexTranscriptMonitorRuntime.activeCount()
 }

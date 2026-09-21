@@ -52,7 +52,7 @@ test('every event-backed builtin preserves imported events @core', async ({ desk
   await desktop.restart()
   for (const parser of builtinAgentSessionParserDefinitions.filter((item) => item.storage.kind === 'events')) {
     const restored = await desktop.api('listManagedAiSessionContent', { source: parser.source, sessionId: `regression-${parser.source}` })
-    expect(restored.ok, parser.source).toBe(true)
+    expect(restored.ok, `${parser.source}: ${JSON.stringify(restored)}`).toBe(true)
     expect(JSON.stringify(restored.data.records), parser.source).toContain(`REGRESSION_${parser.source}`)
   }
 })

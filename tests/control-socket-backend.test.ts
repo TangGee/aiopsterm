@@ -6,6 +6,9 @@ import { join } from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ControlRequest, ControlResponse } from '@shared/contracts/control'
 
+// Socket close callbacks can briefly retain files on Windows.
+const removeTestDirectory = (root: string) => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+
 type ControlSocketBackend = {
   configureControlSocketRuntime: (config?: {
     userDataPath?: string
@@ -509,7 +512,7 @@ describe('control socket backend', () => {
       )
     } finally {
       backend.closeControlSocketServer()
-      await rm(root, { recursive: true, force: true })
+      await removeTestDirectory(root)
     }
   })
 
@@ -575,7 +578,7 @@ describe('control socket backend', () => {
     } finally {
       installer.configureAgentHookInstallerRuntime()
       backend.closeControlSocketServer()
-      await rm(root, { recursive: true, force: true })
+      await removeTestDirectory(root)
     }
   })
 
@@ -2182,7 +2185,7 @@ describe('control socket backend', () => {
       await waitForEventSubscriptionsToDrain(backend)
     } finally {
       backend.closeControlSocketServer()
-      await rm(root, { recursive: true, force: true })
+      await removeTestDirectory(root)
     }
   })
 
@@ -2289,7 +2292,7 @@ describe('control socket backend', () => {
       backend.closeControlSocketServer()
       const { flushControlSocketDurableEventLog } = await loadControlSocketStateRuntime()
       await flushControlSocketDurableEventLog()
-      await rm(root, { recursive: true, force: true })
+      await removeTestDirectory(root)
     }
   })
 
@@ -2385,7 +2388,7 @@ describe('control socket backend', () => {
       expect(Number(backend.__testing.listEvents().at(-1)?.seq)).toBe(previousLatestSeq + 1)
     } finally {
       backend.closeControlSocketServer()
-      await rm(root, { recursive: true, force: true })
+      await removeTestDirectory(root)
     }
   })
 
@@ -2547,7 +2550,7 @@ describe('control socket backend', () => {
       expect(storeFile).toContain('"id": "my-agent"')
     } finally {
       backend.closeControlSocketServer()
-      await rm(root, { recursive: true, force: true })
+      await removeTestDirectory(root)
     }
   })
 
@@ -2637,7 +2640,7 @@ describe('control socket backend', () => {
     } finally {
       if (child && !child.killed) child.kill('SIGTERM')
       backend.closeControlSocketServer()
-      await rm(root, { recursive: true, force: true })
+      await removeTestDirectory(root)
     }
   })
 
@@ -2737,7 +2740,7 @@ describe('control socket backend', () => {
       )
     } finally {
       backend.closeControlSocketServer()
-      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+      await removeTestDirectory(root)
     }
   })
 
@@ -2837,7 +2840,7 @@ describe('control socket backend', () => {
     } finally {
       await agentSessions.__testing.flushManagedAiSessionWrites()
       backend.closeControlSocketServer()
-      await rm(root, { recursive: true, force: true })
+      await removeTestDirectory(root)
     }
   })
 
@@ -2905,7 +2908,7 @@ describe('control socket backend', () => {
     } finally {
       await agentSessions.__testing.flushManagedAiSessionWrites()
       backend.closeControlSocketServer()
-      await rm(root, { recursive: true, force: true })
+      await removeTestDirectory(root)
     }
   })
 
@@ -3060,7 +3063,7 @@ describe('control socket backend', () => {
     } finally {
       await agentSessions.__testing.flushManagedAiSessionWrites()
       backend.closeControlSocketServer()
-      await rm(root, { recursive: true, force: true })
+      await removeTestDirectory(root)
     }
   })
 
@@ -3170,7 +3173,7 @@ describe('control socket backend', () => {
       const { flushControlSocketDurableEventLog } = await loadControlSocketStateRuntime()
       await flushControlSocketDurableEventLog()
       backend.closeControlSocketServer()
-      await rm(root, { recursive: true, force: true })
+      await removeTestDirectory(root)
     }
   })
 
@@ -3209,7 +3212,7 @@ describe('control socket backend', () => {
       expect((result.data?.ticket as Record<string, unknown>).auth_token).not.toHaveLength(0)
     } finally {
       backend.closeControlSocketServer()
-      await rm(root, { recursive: true, force: true })
+      await removeTestDirectory(root)
     }
   })
 
@@ -3227,7 +3230,7 @@ describe('control socket backend', () => {
       )
     } finally {
       backend.closeControlSocketServer()
-      await rm(root, { recursive: true, force: true })
+      await removeTestDirectory(root)
     }
   })
 })

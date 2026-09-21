@@ -9,6 +9,7 @@ import { closeExternalCodexMcpBridgeServer } from './backend/codex/externalCodex
 import {
   closeAiAgentSessionServer,
   ensureAiAgentSessionServer,
+  flushManagedAiSessionWrites,
 } from './backend/agent/agentSessions'
 import { closeClineAgentRuntime } from './backend/agent/clineAgentRuntime'
 import { closeProjectFilesRuntime } from './backend/files/projectFiles'
@@ -368,21 +369,27 @@ const runtimeConfiguration = configureMainBackendRuntimes({
   broadcastManagedAiSessionEvent
 })
 
-let clineAgentShutdownComplete = false
-let clineAgentShutdownPromise: Promise<void> | null = null
+let backendShutdownComplete = false
+let backendShutdownPromise: Promise<void> | null = null
 
-const shutdownClineAgentRuntime = () => {
-  if (clineAgentShutdownPromise) return clineAgentShutdownPromise
-  clineAgentShutdownPromise = closeClineAgentRuntime()
+const shutdownBackendRuntimes = () => {
+  if (backendShutdownPromise) return backendShutdownPromise
+  backendShutdownPromise = closeClineAgentRuntime()
     .catch((error) => {
       logRuntimeEvent('error', 'cline-agent.shutdown-failed', {
         errorMessage: error instanceof Error ? error.message : String(error)
       })
     })
-    .finally(() => {
-      clineAgentShutdownComplete = true
+    .then(() => flushManagedAiSessionWrites())
+    .catch((error) => {
+      logRuntimeEvent('error', 'managed-ai-sessions.shutdown-failed', {
+        errorMessage: error instanceof Error ? error.message : String(error)
+      })
     })
-  return clineAgentShutdownPromise
+    .finally(() => {
+      backendShutdownComplete = true
+    })
+  return backendShutdownPromise
 }
 
 app.whenReady().then(async () => {
@@ -472,8 +479,8 @@ app.on('before-quit', (event) => {
   settingsConfigRuntime.stopConfigWatchers()
   skillsRuntime.stopSkillsWatcher()
   productSessionRegistry.close()
-  if (!clineAgentShutdownComplete) {
+  if (!backendShutdownComplete) {
     event.preventDefault()
-    void shutdownClineAgentRuntime().finally(() => app.quit())
+    void shutdownBackendRuntimes().finally(() => app.quit())
   }
 })
