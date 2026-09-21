@@ -952,7 +952,7 @@ describe('database backend boundary', () => {
       process.env.AIOPSTERM_DB_AI_BACKEND_DOUBLE = originalDbAiBackendDouble
     }
     vi.restoreAllMocks()
-    await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })))
+    await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })))
     tempDirs = []
   })
 

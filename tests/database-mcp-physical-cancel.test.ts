@@ -26,7 +26,7 @@ describe('DB AI MCP production SQLite cancellation', () => {
 
   afterEach(async () => {
     resetDatabaseBackendSeed()
-    await Promise.all(tempDirs.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
+    await Promise.all(tempDirs.splice(0).map((directory) => rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })))
   })
 
   it('physically cancels every bound SQLite read adapter without exhausting the read channel', async () => {
