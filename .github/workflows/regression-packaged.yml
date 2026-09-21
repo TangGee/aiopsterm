@@ -15,7 +15,9 @@ jobs:
       matrix:
         include:
           - os: ubuntu-22.04
-            container: ubuntu:20.04
+            container:
+              image: ubuntu:20.04
+              options: --init --shm-size=1g
           - os: windows-latest
           - os: macos-latest
     runs-on: ${{ matrix.os }}

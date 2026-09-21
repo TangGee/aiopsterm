@@ -21,7 +21,9 @@ jobs:
         include:
           - platform: linux
             os: ubuntu-22.04
-            container: ubuntu:20.04
+            container:
+              image: ubuntu:20.04
+              options: --init --shm-size=1g
           - platform: windows
             os: windows-latest
           - platform: macos
