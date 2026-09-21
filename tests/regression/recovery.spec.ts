@@ -48,6 +48,17 @@ test('native terminal history and process ownership survive reload and restart o
   await desktop.page.reload()
   await expect.poll(async () => (await connected())[0]?.sessionId).toBe(initial.sessionId)
   expect((await connected())[0].processId).toBe(initial.processId)
+  await desktop.app.evaluate(({ app }) => {
+    let ready = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    // Keep the renderer alive during asynchronous shutdown so recovery saves
+    // cannot accidentally interpret process cleanup as a user closing the tab.
+    app.on('before-quit', (event) => {
+      if (ready) return
+      event.preventDefault()
+      timer ||= setTimeout(() => { ready = true; app.quit() }, 2000)
+    })
+  })
   await desktop.restart()
   await expect.poll(async () => (await connected()).length).toBe(1)
   expect((await connected())[0].processId).not.toBe(initial.processId)

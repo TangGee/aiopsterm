@@ -44,6 +44,7 @@ type TerminalRuntimeInput = {
 
 export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
   const sessions = new Map<string, TerminalSession>()
+  const shutdownSessionIds = new Set<string>()
   const terminalDebugLogs = shouldUseTerminalDebugLogs()
   const terminalDataSummary = createTerminalDataLogSummary(
     terminalDebugLogs
@@ -154,6 +155,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
   }
 
   const sendTerminalExit = (owner: BrowserWindow, lifecycle: TerminalLifecycleEvent, code = lifecycle.code ?? null) => {
+    if (shutdownSessionIds.delete(lifecycle.id)) return
     sendWindowEvent(owner, 'terminal:exit', {
       id: lifecycle.id,
       code,
@@ -550,7 +552,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
           endpointConfidence: event.endpointConfidence,
           proxyName: event.proxyName
         })
-        sendWindowEvent(owner, 'terminal:lifecycle', event)
+        if (!shutdownSessionIds.has(event.id)) sendWindowEvent(owner, 'terminal:lifecycle', event)
       },
       exit: (event, code) => {
         flushTerminalDataForSession(event.id, 'terminal-exit')
@@ -593,7 +595,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
           errorCode: event.errorCode,
           errorMessage: event.errorMessage
         })
-        sendWindowEvent(owner, 'terminal:lifecycle', event)
+        if (!shutdownSessionIds.has(event.id)) sendWindowEvent(owner, 'terminal:lifecycle', event)
       },
       exit: (event, code) => {
         flushTerminalDataForSession(event.id, 'terminal-exit')
@@ -619,6 +621,8 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
     })
 
   const killAllSessions = () => {
+    // Application cleanup must not turn recoverable tabs into user-closed tabs.
+    sessions.forEach((session) => shutdownSessionIds.add(session.id))
     sessions.forEach((session) => {
       flushTerminalDataForSession(session.id, 'kill-all')
       flushDataSummary(session.id, 'kill-all')
