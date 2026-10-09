@@ -49,6 +49,7 @@ export type SshTerminalTarget = SshTerminalConnectionTarget & {
 
 export type SshTerminalSession = {
   write(data: string | Buffer): void
+  canAcceptInput?(): boolean
   runBackgroundCommand?(options: TerminalBackgroundCommandOptions): Promise<TerminalBackgroundCommandResult>
   resize(cols: number, rows: number): void
   kill(reason?: TerminalDisconnectReason): void

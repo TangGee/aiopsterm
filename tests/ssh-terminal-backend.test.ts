@@ -1365,6 +1365,66 @@ describe('ssh terminal backend runtime', () => {
     expect(result.session).toBeTruthy()
   })
 
+  it.each([
+    { sshAutoReconnect: true },
+    { sshShellIntegration: true },
+    { sshAutoReconnect: true, sshShellIntegration: true }
+  ])('accepts relay and target authentication input before shell readiness with %j', async (options) => {
+    const backend = await loadSshTerminalBackend()
+    const ssh = createSshRuntime({ manualReady: true, failForwardOut: new Error('Forwarding denied') })
+    const pty = createPtyRuntime()
+    const events = createRecorder()
+    const requests: TerminalKeyboardInteractiveRequest[] = []
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: asRuntime(ssh.runtime),
+      loadPty: () => pty.runtime,
+      getAsset: () => ({ id: 'relay', host: 'relay.example', username: 'ops', port: 22 }) as never,
+      getConfig: () => runtimeConfig()
+    })
+    const result = backend.createSshTerminalSession('relay-auth-input', {
+      kind: 'ssh', ...options,
+      ssh: { host: 'target.internal', username: 'root', port: 22, jumpHostId: 'relay' }
+    }, {
+      ...createSink(events),
+      keyboardInteractive: async (request: TerminalKeyboardInteractiveRequest) => { requests.push(request); return ['first-hop-code'] }
+    })
+    try {
+      await waitForMicrotasks(2)
+      expect(() => result.session!.write('early')).toThrow('Input was not sent')
+      expect(await emitKeyboardInteractive(ssh.clients[0])).toEqual(['first-hop-code'])
+      expect(requests[0].authScope).toBe('jump')
+      ssh.clients[0].emit('ready')
+      await waitForMicrotasks(4)
+      const relay = pty.processes[0]
+      relay.emitData('Are you sure you want to continue connecting (yes/no)? ')
+      expect(() => result.session!.write('yes\r')).not.toThrow()
+      relay.emitData("\r\nPlease input user's password: ")
+      result.session!.write('relay-secret\r')
+      expect(relay.writes).toEqual(['yes\r', 'relay-secret\r'])
+      expect(events.lifecycle.some((event) => event.stage === 'shell-ready')).toBe(false)
+      expect(() => result.session!.runBackgroundCommand!({ command: 'uptime', timeoutMs: 100 })).toThrow('Input was not sent')
+
+      relay.emitData('\r\nops@relay.example:~$ ')
+      const nestedCommand = relay.writes[2]
+      expect(nestedCommand).toContain("'root@target.internal'")
+      relay.emitData("\r\nroot@target.internal's password: ")
+      result.session!.write(Buffer.from('target-secret\r'))
+      expect(relay.writes).toEqual(['yes\r', 'relay-secret\r', nestedCommand, 'target-secret\r'])
+      expect(events.lifecycle.some((event) => event.stage === 'shell-ready')).toBe(false)
+
+      relay.emitData('\r\n[root@target.internal ~]# ')
+      expect(events.lifecycle.at(-1)).toMatchObject({ stage: 'shell-ready', remoteHop: 'target' })
+      result.session!.write('uptime\r')
+      expect(relay.writes.at(-1)).toBe('uptime\r')
+      expect(JSON.stringify(events)).not.toContain('relay-secret')
+      expect(JSON.stringify(events)).not.toContain('target-secret')
+      relay.emitExit(0)
+      expect(() => result.session!.write('after-exit')).toThrow('Input was not sent')
+    } finally {
+      result.session?.kill()
+    }
+  })
+
   it('marks a relay target as disconnected when the nested ssh returns to the relay prompt', async () => {
     const backend = await loadSshTerminalBackend()
     const ssh = createSshRuntime({

@@ -521,6 +521,8 @@ export const createSshTerminalSession = (
   }
 
   const session: SshTerminalSession = {
+    // Relay authentication runs inside the PTY before the target shell is ready.
+    canAcceptInput: () => !closed && relayPty !== null,
     write(data: string | Buffer) {
       if (closed) return
       if (stream) {

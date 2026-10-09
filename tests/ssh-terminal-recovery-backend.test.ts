@@ -53,6 +53,41 @@ describe('SSH automatic recovery', () => {
     expect(f.sink.data.mock.calls[0][0]).toBe('history')
     expect(f.sink.data.mock.calls[1][0]).toContain('\x1b[?1049l')
   })
+  it('allows live relay authentication during recovery without replaying offline input', () => {
+    const f = fixture()
+    f.ready()
+    f.attempts[0].process.canAcceptInput = () => true
+    f.end()
+    expect(() => f.result.session!.write('offline-secret\r')).toThrow('not sent')
+    vi.advanceTimersByTime(1000)
+    const retry = f.attempts[1]
+    expect(() => f.result.session!.write('before-pty\r')).toThrow('not sent')
+    retry.process.canAcceptInput = () => true
+    retry.process.runBackgroundCommand = vi.fn()
+    f.result.session!.write('new-code\r')
+    expect(retry.process.write).toHaveBeenCalledTimes(1)
+    expect(retry.process.write).toHaveBeenCalledWith('new-code\r')
+    expect(f.attempts[0].process.write).not.toHaveBeenCalled()
+    expect(() => f.result.session!.runBackgroundCommand!({ command: 'pwd', timeoutMs: 100 })).toThrow('not sent')
+    expect(retry.process.runBackgroundCommand).not.toHaveBeenCalled()
+    retry.process.canAcceptInput = () => false
+    expect(() => f.result.session!.write('closed-pty\r')).toThrow('not sent')
+    retry.process.canAcceptInput = () => true
+    f.result.session!.kill()
+    expect(() => f.result.session!.write('after-cancel\r')).toThrow('not sent')
+    expect(retry.process.write).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+  it('does not retry an initial relay authentication failure as a connected shell', () => {
+    const f = fixture()
+    f.attempts[0].process.canAcceptInput = () => true
+    f.result.session!.write('code\r')
+    f.end()
+    vi.runAllTimers()
+    expect(f.attempts).toHaveLength(1)
+    expect(f.sink.exit).toHaveBeenCalledTimes(1)
+    expect(() => f.result.session!.write('after-exit\r')).toThrow('not sent')
+  })
   it('ignores stale callbacks and carries the last directory, dimensions and pause state', () => {
     const f = fixture()
     f.ready()

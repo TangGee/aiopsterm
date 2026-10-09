@@ -110,14 +110,16 @@ export const createRecoveringSshTerminalSession = (
   }
   const result = start()
   if (!result.session || stopped) return { ...result, session: null }
-  const requireReady = () => {
-    if (!ready || !active || stopped) throw new Error('SSH is reconnecting or unavailable. Input was not sent.')
+  const requireActive = (allowInteractiveInput = false) => {
+    if (!active || stopped || (!ready && !(allowInteractiveInput && active.canAcceptInput?.()))) {
+      throw new Error('SSH is reconnecting or unavailable. Input was not sent.')
+    }
     return active
   }
   return { ...result, session: {
-    write: (data) => requireReady().write(data),
+    write: (data) => requireActive(true).write(data),
     runBackgroundCommand: (command) => {
-      const session = requireReady()
+      const session = requireActive()
       if (!session.runBackgroundCommand) return Promise.reject(new Error('Background commands are unavailable.'))
       return session.runBackgroundCommand(command)
     },
