@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { isolatedEnvironment } from './support/environment'
 import { existsSync } from 'node:fs'
-import { stripVTControlCharacters } from 'node:util'
+import { Terminal } from '@xterm/headless'
 
 test('bundled Codex streams, cancels, reports errors and resumes edited context @codex', async ({ desktop }) => {
   test.setTimeout(process.platform === 'win32' ? 300000 : 180000)
@@ -18,12 +18,20 @@ test('bundled Codex streams, cancels, reports errors and resumes edited context 
     await writeFile(join(codexHome, 'config.toml'), '[windows]\nsandbox = "unelevated"\n')
   }
   const output = () => desktop.page.evaluate(() => (window as any).__regressionCodex.output as string)
+  const screen = new Terminal({ cols: 120, rows: 80, allowProposedApi: true })
+  let screenOffset = 0
+  const screenText = async () => {
+    const data = await output()
+    await new Promise<void>((resolve) => screen.write(data.slice(screenOffset), resolve))
+    screenOffset = data.length
+    return Array.from({ length: screen.buffer.active.length }, (_, row) =>
+      screen.buffer.active.getLine(row)?.translateToString(true) || '').join('\n')
+  }
   const submitPrompt = async (prompt: string) => {
-    const before = (await output()).length
     await desktop.page.keyboard.type(prompt, { delay: 30 })
     // Startup redraws are not input acknowledgments. Wait for this prompt's
     // echo before checking Codex's paste suppression window on Windows PTYs.
-    await expect.poll(async () => stripVTControlCharacters((await output()).slice(before))).toContain(prompt)
+    await expect.poll(screenText).toContain(prompt)
     await expect.poll(() => desktop.page.evaluate(() => Date.now() - (window as any).__regressionCodex.lastOutputAt)).toBeGreaterThanOrEqual(500)
     await desktop.page.keyboard.press('Enter')
   }
@@ -144,5 +152,5 @@ test('bundled Codex streams, cancels, reports errors and resumes edited context 
       await expect.poll(() => resumedOutput).toContain('REGRESSION_AFTER_ERROR')
       expect(await exited).toBe(0)
     } finally { resumed.kill(); await exited.catch(() => undefined) }
-  } finally { await provider.close() }
+  } finally { screen.dispose(); await provider.close() }
 })
