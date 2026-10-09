@@ -570,7 +570,9 @@ const waitForSessionLifecycle = async (sessionId: string, register: () => void) 
     if (!stopped) throw new Error('The Cline Agent session could not be stopped before restart.')
   }
   const active = activeTurnsBySession.get(sessionId)
-  if (active) await waitForAbortingTurn(sessionId, active)
+  // Terminal events can reach the renderer before session.send finishes cleanup.
+  if (active?.terminalEventType && !active.abortReason) await waitForTurnGrace(active.settled)
+  else if (active) await waitForAbortingTurn(sessionId, active)
   if (activeTurnsBySession.has(sessionId)) throw new Error('This Cline Agent conversation already has an active turn.')
   register()
 }

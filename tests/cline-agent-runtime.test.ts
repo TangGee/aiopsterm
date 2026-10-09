@@ -646,6 +646,58 @@ describe('Cline Agent Electron runtime boundary', () => {
     expect(terminalEvents).toEqual([expect.objectContaining({ type: 'done', finishReason: 'stop' })])
   })
 
+  it.each(['done', 'error', 'cancelled'] as const)('waits for a %s turn to settle before accepting an immediate retry', async (type) => {
+    const { configureClineAgentRuntime, runClineAgentTurn } = await loadRuntime()
+    let supervisorOptions: any
+    let finishTurn!: (result: ClineAgentTurnResult) => void
+    let failTurn!: (error: Error) => void
+    let sendPayload: Record<string, unknown> = {}
+    const supervisor = {
+      request: vi.fn(async (method: string, payload: Record<string, unknown>) => {
+        if (method !== 'session.send') return {}
+        if (payload.taskId !== 'task-1') return turnResult(payload)
+        sendPayload = payload
+        return new Promise<ClineAgentTurnResult>((resolve, reject) => {
+          finishTurn = resolve
+          failTurn = reject
+        })
+      }),
+      shutdown: vi.fn(async () => undefined)
+    }
+    configureClineAgentRuntime({
+      appPath: '/app', resourcesPath: '/resources', userDataPath: '/user-data', isPackaged: false,
+      getConfig: () => ({} as any), getWindows: () => [],
+      createSupervisor: (options: any) => { supervisorOptions = options; return supervisor as any }
+    })
+    const first = runClineAgentTurn(runInput()).catch((error: Error) => error)
+    await vi.waitFor(() => expect(finishTurn).toBeTypeOf('function'))
+    await expect(runClineAgentTurn(runInput({ taskId: 'premature', turnId: 'premature' })))
+      .rejects.toThrow('already has an active turn')
+    supervisorOptions.onEvent({
+      version: CLINE_AGENT_PROTOCOL_VERSION, kind: 'event', event: 'agent.task',
+      payload: {
+        protocolVersion: CLINE_AGENT_PROTOCOL_VERSION, sessionId: sendPayload.sessionId,
+        taskId: 'task-1', turnId: 'turn-1', seq: 1, at: '2026-10-09T00:00:00.000Z', type,
+        text: 'done', finishReason: 'stop', iterations: 1,
+        errorCode: 'CLINE_AGENT_TURN_FAILED', errorMessage: 'provider failed', recoverable: false,
+        reason: 'cancelled'
+      }
+    })
+    let retryState = 'pending'
+    const retry = runClineAgentTurn(runInput({ taskId: 'task-2', turnId: 'turn-2' })).then(
+      (result: unknown) => { retryState = 'resolved'; return result },
+      (error: Error) => { retryState = 'rejected'; return error }
+    )
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(retryState).toBe('pending')
+    expect(supervisor.request.mock.calls.filter(([method]) => method === 'session.send')).toHaveLength(1)
+    if (type === 'error') failTurn(new Error('provider failed'))
+    else finishTurn({ ...turnResult(sendPayload), finishReason: type === 'cancelled' ? 'aborted' : 'stop' })
+    await first
+    await expect(retry).resolves.toMatchObject({ status: 'done', result: { taskId: 'task-2' } })
+    expect(supervisor.request.mock.calls.filter(([method]) => method === 'session.send')).toHaveLength(2)
+  })
+
   it('emits an error terminal and aborts the sidecar when a turn request fails without a sidecar terminal event', async () => {
     const { configureClineAgentRuntime, runClineAgentTurn } = await loadRuntime()
     const { withClineAgentRendererOwner } = await loadOwnerRuntime()

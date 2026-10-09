@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { isolatedEnvironment } from './support/environment'
 import { existsSync } from 'node:fs'
+import { stripVTControlCharacters } from 'node:util'
 
 test('bundled Codex streams, cancels, reports errors and resumes edited context @codex', async ({ desktop }) => {
   test.setTimeout(process.platform === 'win32' ? 300000 : 180000)
@@ -20,9 +21,9 @@ test('bundled Codex streams, cancels, reports errors and resumes edited context 
   const submitPrompt = async (prompt: string) => {
     const before = (await output()).length
     await desktop.page.keyboard.type(prompt, { delay: 30 })
-    // PTY delivery can lag behind keyboard.type on Windows CI. Wait for the
-    // actual TUI echo to settle beyond Codex's 120 ms paste suppression window.
-    await expect.poll(async () => (await output()).length).toBeGreaterThan(before)
+    // Startup redraws are not input acknowledgments. Wait for this prompt's
+    // echo before checking Codex's paste suppression window on Windows PTYs.
+    await expect.poll(async () => stripVTControlCharacters((await output()).slice(before))).toContain(prompt)
     await expect.poll(() => desktop.page.evaluate(() => Date.now() - (window as any).__regressionCodex.lastOutputAt)).toBeGreaterThanOrEqual(500)
     await desktop.page.keyboard.press('Enter')
   }
