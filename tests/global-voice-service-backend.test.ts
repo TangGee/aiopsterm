@@ -33,7 +33,7 @@ describe('independent speech service', () => {
   })
 
 
-  it.skipIf(process.platform === 'win32')('runs SenseVoice with paired tokens, parses only JSON text and removes temporary audio', async () => {
+  it.skipIf(process.platform === 'win32').each(['stdout', 'stderr', 'stderr-crlf'])('runs SenseVoice with paired tokens and parses JSON from %s without diagnostics', async (channel) => {
     const directory = await mkdtemp(join(tmpdir(), 'sensevoice-test-'))
     const executablePath = join(directory, 'sherpa engine')
     const modelPath = join(directory, 'model.int8.onnx')
@@ -42,7 +42,8 @@ describe('independent speech service', () => {
     await writeFile(modelPath, 'model'); await writeFile(tokensPath, 'tokens')
     await writeFile(executablePath, '#!' + process.execPath + '\n' +
       'const fs = require("node:fs"); fs.writeFileSync(' + JSON.stringify(trace) + ', JSON.stringify(process.argv.slice(2)));' +
-      'process.stderr.write("diagnostic text"); process.stdout.write(JSON.stringify({text:"<|zh|><|NEUTRAL|>检查 nginx status。"}));', { mode: 0o700 })
+      'const result = {text: "<|zh|><|NEUTRAL|>检查 nginx status。"}; process.stderr.write("diagnostic text\\n");' +
+      (channel === 'stdout' ? 'process.stdout.write(JSON.stringify(result));' : 'process.stderr.write((process.argv.at(-1) + "\\n" + JSON.stringify(result, null, 2) + "\\n----\\nElapsed seconds: 0.2\\n").replace(/\\n/g, ' + JSON.stringify(channel === 'stderr-crlf' ? '\r\n' : '\n') + '));'), { mode: 0o700 })
     const config = { ...preferences, mode: 'local' as const, localEngine: 'sensevoice' as const, executablePath, modelPath, tokensPath }
     try {
       const result = await transcribeGlobalVoice({ audioBytes: audio }, config, new AbortController().signal)

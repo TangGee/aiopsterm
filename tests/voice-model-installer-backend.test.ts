@@ -77,3 +77,11 @@ describe('voice model installation', () => {
     expect(await readdir(directory)).toEqual([])
   })
 })
+
+it('automatically retries transient connection failures before downloading', async () => {
+  const path = await target(); const data = Buffer.from('retry success')
+  const fetcher = vi.fn().mockRejectedValueOnce(new Error('connection timeout')).mockResolvedValueOnce(new Response(data))
+  await downloadVoiceArchive('https://example.test/archive', path, hash(data), new AbortController().signal, vi.fn(), fetcher as typeof fetch)
+  expect(fetcher).toHaveBeenCalledTimes(2)
+  expect(hash(await readFile(path))).toBe(hash(data))
+})

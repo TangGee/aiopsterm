@@ -47,15 +47,25 @@ export const transcribeGlobalVoice = async (
       const args = sensevoice
         ? [`--sense-voice-model=${preferences.modelPath}`, `--tokens=${preferences.tokensPath}`, '--sense-voice-language=auto', '--sense-voice-use-itn=1', '--num-threads=2', audioPath]
         : ['-m', preferences.modelPath, '-f', audioPath, '-l', 'auto', '-otxt', '-of', outputPath, '-np']
-      const stdout = await new Promise<string>((resolve, reject) => {
+      const output = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
         execFile(preferences.executablePath, args, {
           signal, timeout: 120_000, maxBuffer: 1024 * 1024, windowsHide: true
-        }, (error, output) => error ? reject(new Error(error.name === 'AbortError' ? 'Recognition cancelled.' : 'Local recognition failed. Check the executable and model.')) : resolve(output))
+        }, (error, stdout, stderr) => error ? reject(new Error(error.name === 'AbortError' ? 'Recognition cancelled.' : 'Local recognition failed. Check the executable and model.')) : resolve({ stdout, stderr }))
       })
       signal.throwIfAborted()
       let text: string
       if (sensevoice) {
-        const result = JSON.parse(stdout) as { text?: unknown }
+        // The official CLI writes the filename and JSON result to stderr, alongside diagnostics.
+        // Some wrappers emit only JSON on stdout; accept both without inserting log text.
+        let result: { text?: unknown }
+        try { result = JSON.parse(output.stdout.trim()) as { text?: unknown } } catch {
+          const stderr = output.stderr.replace(/\r\n/g, '\n')
+          const marker = `${audioPath}\n`
+          const start = stderr.lastIndexOf(marker)
+          const end = stderr.indexOf('\n----', start + marker.length)
+          if (start < 0 || end < 0) return failure('The local engine did not return a recognition result.')
+          result = JSON.parse(stderr.slice(start + marker.length, end).trim()) as { text?: unknown }
+        }
         text = typeof result.text === 'string' ? result.text.replace(/<\|[^|]*\|>/g, '').trim() : ''
       } else text = (await readFile(`${outputPath}.txt`, 'utf8')).trim()
       return text ? { ok: true, data: { text, provider: 'aiopsterm-local', model: preferences.modelPath } } : failure('No speech was recognized.')

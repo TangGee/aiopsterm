@@ -1,21 +1,22 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
+import { setTimeout as delay } from 'node:timers/promises'
 import type { VoiceInputPreferences, VoiceInstallProgress } from '../../../shared/contracts/voice'
 import { validateVoicePreferences } from './voiceInputService'
 
 const version = '1.12.14'
 const modelName = 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17'
-const engines: Record<string, { name: string; sha256: string }> = {
-  'linux-x64': { name: `sherpa-onnx-v${version}-linux-x64-shared-no-tts`, sha256: '47be6c12c030a45a5e4518980916a3da32148ace883f05f34f02042caaf2635b' },
-  'linux-arm64': { name: `sherpa-onnx-v${version}-linux-aarch64-shared-cpu`, sha256: 'ad3e41f19899754735a074938db955a6818153b305fd2959bffc33405976e180' },
-  'darwin-x64': { name: `sherpa-onnx-v${version}-osx-universal2-shared-no-tts`, sha256: '60fe212f37171107d4d8939cdfc4614e4591572d2c0b6e55e30edef5e9ed0c7f' },
-  'darwin-arm64': { name: `sherpa-onnx-v${version}-osx-universal2-shared-no-tts`, sha256: '60fe212f37171107d4d8939cdfc4614e4591572d2c0b6e55e30edef5e9ed0c7f' },
-  'win32-x64': { name: `sherpa-onnx-v${version}-win-x64-static-no-tts`, sha256: '7e1aa288f79c894025d777a62ac8e28be28112ea17e5fe6907256e076f862f7b' }
+const engines: Record<string, { name: string; sha256: string; assetId: number }> = {
+  'linux-x64': { assetId: 294657771, name: `sherpa-onnx-v${version}-linux-x64-shared-no-tts`, sha256: '47be6c12c030a45a5e4518980916a3da32148ace883f05f34f02042caaf2635b' },
+  'linux-arm64': { assetId: 294564096, name: `sherpa-onnx-v${version}-linux-aarch64-shared-cpu`, sha256: 'ad3e41f19899754735a074938db955a6818153b305fd2959bffc33405976e180' },
+  'darwin-x64': { assetId: 294636922, name: `sherpa-onnx-v${version}-osx-universal2-shared-no-tts`, sha256: '60fe212f37171107d4d8939cdfc4614e4591572d2c0b6e55e30edef5e9ed0c7f' },
+  'darwin-arm64': { assetId: 294636922, name: `sherpa-onnx-v${version}-osx-universal2-shared-no-tts`, sha256: '60fe212f37171107d4d8939cdfc4614e4591572d2c0b6e55e30edef5e9ed0c7f' },
+  'win32-x64': { assetId: 294618490, name: `sherpa-onnx-v${version}-win-x64-static-no-tts`, sha256: '7e1aa288f79c894025d777a62ac8e28be28112ea17e5fe6907256e076f862f7b' }
 }
 export const voiceInstallEnvironment = (platform = process.platform, arch: string = process.arch) => ({
   platform, arch, autoInstallSupported: Boolean(engines[`${platform}-${arch}`])
@@ -25,7 +26,7 @@ export const voiceInstallAssets = (platform = process.platform, arch: string = p
   if (!engine) throw new Error(`Automatic installation is unavailable for ${platform}/${arch}. Use manual setup or an online speech service.`)
   return [
     { kind: 'engine' as const, ...engine, url: `https://github.com/k2-fsa/sherpa-onnx/releases/download/v${version}/${engine.name}.tar.bz2` },
-    { kind: 'model' as const, name: modelName, url: `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${modelName}.tar.bz2`, sha256: '7d1efa2138a65b0b488df37f8b89e3d91a60676e416f515b952358d83dfd347e' }
+    { kind: 'model' as const, assetId: 288366523, name: modelName, url: `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${modelName}.tar.bz2`, sha256: '7d1efa2138a65b0b488df37f8b89e3d91a60676e416f515b952358d83dfd347e' }
   ]
 }
 const digest = async (path: string) => {
@@ -49,6 +50,22 @@ const findFile = async (directory: string, name: string): Promise<string> => {
   }
   return ''
 }
+const fetchVoiceAsset = async (fetcher: typeof fetch, url: string, options: RequestInit & { signal: AbortSignal }): Promise<Response> => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const response = await fetcher(url, { ...options, headers: { ...(url.startsWith('https://api.github.com/') ? { Accept: 'application/octet-stream' } : {}), ...options.headers } })
+      if (response.status === 408 || response.status === 429 || response.status >= 500) {
+        await response.body?.cancel()
+        throw new Error(`HTTP ${response.status}`)
+      }
+      return response
+    } catch (error) {
+      options.signal.throwIfAborted()
+      if (attempt >= 2) throw new Error(`Voice download failed: ${error instanceof Error ? error.message : String(error)}. Check access to GitHub and retry.`)
+      await delay(400 * (attempt + 1), undefined, { signal: options.signal })
+    }
+  }
+}
 export const downloadVoiceArchive = async (
   url: string, destination: string, expectedHash: string, signal: AbortSignal,
   report: (received: number, total: number) => void, fetcher: typeof fetch = fetch
@@ -60,7 +77,7 @@ export const downloadVoiceArchive = async (
   const parts: string[] = []
   let completed = false
   try {
-    const response = await fetcher(url, { signal: controller.signal })
+    const response = await fetchVoiceAsset(fetcher, url, { signal: controller.signal })
     if (!response.ok || !response.body) throw new Error(`Download failed (HTTP ${response.status}). Check network access to GitHub and retry.`)
     const total = Number(response.headers.get('content-length')) || 0
     if (total > 600 * 1024 * 1024) { await response.body.cancel(); throw new Error('Voice download exceeded the expected size.') }
@@ -84,7 +101,7 @@ export const downloadVoiceArchive = async (
             const index = nextPart++
             const start = index * partSize
             const end = Math.min(total - 1, start + partSize - 1)
-            const part = await fetcher(response.url || url, { signal: controller.signal, headers: { Range: `bytes=${start}-${end}` } })
+            const part = await fetchVoiceAsset(fetcher, response.url || url, { signal: controller.signal, headers: { Range: `bytes=${start}-${end}` } })
             if (part.status !== 206 || !part.body || part.headers.get('content-range') !== `bytes ${start}-${end}/${total}`) {
               await part.body?.cancel()
               throw new Error('The download server returned an invalid byte range. Retry the installation.')
@@ -143,7 +160,11 @@ export const installVoiceModel = async (
     signal.throwIfAborted()
     return installed
   } catch { signal.throwIfAborted() }
-  const staging = await mkdtemp(join(root, '.install-'))
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    if (entry.isDirectory() && (entry.name.startsWith('.download-') || entry.name.startsWith('.check-'))) await rm(join(root, entry.name), { recursive: true, force: true })
+  }
+  const staging = await mkdtemp(join(root, '.download-'))
+  let workingDirectory = staging
   let retained = false
   try {
     for (const asset of assets) {
@@ -153,9 +174,13 @@ export const installVoiceModel = async (
       if (!cached) {
         const partial = join(staging, `${asset.kind}.part`)
         report({ phase: 'downloading', asset: asset.kind, received: 0, total: 0 })
-        await downloadVoiceArchive(asset.url, partial, asset.sha256, signal, (received, total) => {
-          report({ phase: 'downloading', asset: asset.kind, received, total })
-        }, fetcher)
+        const progress = (received: number, total: number) => report({ phase: 'downloading', asset: asset.kind, received, total })
+        try {
+          await downloadVoiceArchive(`https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/assets/${asset.assetId}`, partial, asset.sha256, signal, progress, fetcher)
+        } catch {
+          signal.throwIfAborted()
+          await downloadVoiceArchive(asset.url, partial, asset.sha256, signal, progress, fetcher)
+        }
         await rm(archive, { force: true })
         await rename(partial, archive)
       }
@@ -171,11 +196,17 @@ export const installVoiceModel = async (
     const installed: InstalledVoiceModel = { mode: 'local', localEngine: 'sensevoice', executablePath, modelPath, tokensPath }
     await verifyInstalledVoiceModel(installed, root, signal)
     signal.throwIfAborted()
+    const destination = join(root, `sensevoice-${version}-${randomUUID()}`)
+    await rename(staging, destination)
+    workingDirectory = destination
+    installed.executablePath = join(destination, relative(staging, executablePath))
+    installed.modelPath = join(destination, relative(staging, modelPath))
+    installed.tokensPath = join(destination, relative(staging, tokensPath))
     await writeFile(`${manifest}.tmp`, JSON.stringify(installed), { mode: 0o600 })
     await rename(`${manifest}.tmp`, manifest)
     retained = true
     return installed
   } finally {
-    if (!retained) await rm(staging, { recursive: true, force: true })
+    if (!retained) await rm(workingDirectory, { recursive: true, force: true })
   }
 }
