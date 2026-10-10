@@ -26,7 +26,7 @@ const preferences = ref<VoiceInputPreferences>({ mode: 'local', endpoint: '', mo
 const target = shallowRef<VoiceInputTarget | null>(null)
 let lastFocused: Element | null = null
 let captured: VoiceInputTarget | null = null
-let draftTarget: VoiceInputTarget | null = null
+let previousText = ''
 let unsubscribe: (() => void) | undefined
 let interval: ReturnType<typeof setInterval> | undefined
 let unsubscribeStatus: (() => void) | undefined
@@ -39,6 +39,7 @@ let drag: { x: number; y: number; right: number; bottom: number; moved: boolean 
 let suppressClick = false
 
 const recording = createVoiceRecording({
+  streaming: true,
   transcribe: (input) => window.aiops.transcribeVoiceInput(input),
   cancelTranscription: (id) => { void window.aiops.cancelVoiceTranscription?.(id) },
   onStream(stream) {
@@ -55,15 +56,16 @@ const recording = createVoiceRecording({
     } catch { /* Recording remains available without a level meter. */ }
   },
   onText(text) {
+    const separator = /[a-z0-9,.!?;:]$/i.test(previousText) && /^[a-z0-9]/i.test(text) ? ' ' : ''
+    const fragment = separator + text
+    previousText = text
     const destination = target.value
-    if (targetChanged) destination?.dispose?.()
+    const value = destination?.kind === 'terminal' ? fragment.replace(/[\r\n\x00-\x1f\x7f-\x9f]+/g, ' ') : fragment
+    if (!targetChanged && destination?.insert(value)) return
+    destination?.dispose?.()
     target.value = null
-    if (!targetChanged && destination?.kind === 'text' && destination.insert(text)) return
-    if (draftTarget?.insert(text)) { draftTarget = null; target.value = !targetChanged && destination?.kind === 'terminal' ? destination : null; panel.value = true; return }
-    draftTarget = null
-    transcript.value += (transcript.value && !/\s$/.test(transcript.value) ? '\n' : '') + text
-    target.value = !targetChanged && destination?.kind === 'terminal' ? destination : null
-    notice.value = !targetChanged && destination?.kind === 'terminal' ? t('terminal') : destination ? t('invalid') : ''
+    transcript.value += fragment
+    notice.value = destination ? t('invalid') : ''
     panel.value = true
     void nextTick(() => transcriptInput.value?.focus())
   }
@@ -74,7 +76,6 @@ const duration = computed(() => {
   const seconds = Math.max(0, Math.floor((now.value - recording.startedAt.value) / 1000))
   return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
 })
-const terminalTarget = computed(() => panel.value && target.value?.kind === 'terminal')
 const buttonTitle = computed(() => state.value === 'recording' ? t('stop') : state.value === 'idle' ? `${t('start')} (${preferences.value.shortcut})` : t(state.value))
 const errorText = computed(() => /denied|notallowed|permission/i.test(error.value) ? t('permission') : /notfound|requested device/i.test(error.value) ? t('noMicrophone') : error.value)
 
@@ -98,13 +99,11 @@ const toggle = async (destination?: VoiceInputTarget | null, background = false)
   target.value?.dispose?.()
   targetChanged = false
   target.value = background ? null : destination === undefined ? captureVoiceInputTarget(lastFocused) : destination
-  draftTarget?.dispose?.()
-  draftTarget = null
+  previousText = ''
   notice.value = ''
-  if (!target.value || target.value.kind === 'terminal') {
-    panel.value = true
-      notice.value = target.value?.kind === 'terminal' ? t('terminal') : t('fallback')
-  }
+  const editingDraft = document.activeElement === transcriptInput.value
+  panel.value = !target.value || editingDraft
+  if (!target.value) notice.value = t('fallback')
   await recording.start()
 }
 const click = (event: MouseEvent) => {
@@ -142,7 +141,7 @@ const rememberFocus = (event: FocusEvent) => {
 const externalPointer = (event: PointerEvent) => {
   if (event.target instanceof Element && !root.value?.contains(event.target) && !event.target.closest('input, textarea, [contenteditable], .monaco-editor, .xterm')) lastFocused = null
 }
-const cancel = () => { recording.cancel(); target.value?.dispose?.(); target.value = null; draftTarget?.dispose?.(); draftTarget = null; captured?.dispose?.(); captured = null; notice.value = '' }
+const cancel = () => { recording.cancel(); target.value?.dispose?.(); target.value = null; captured?.dispose?.(); captured = null; notice.value = '' }
 const close = () => { cancel(); panel.value = false }
 const onKey = (event: KeyboardEvent) => {
   if (event.key === 'Escape' && (busy.value || panel.value)) { event.preventDefault(); event.stopPropagation(); close() }
@@ -152,22 +151,17 @@ const onTrigger = (event: VoiceInputTrigger) => {
   void toggle(event.background ? null : captureVoiceInputTarget(document.activeElement), event.background)
 }
 const continueDictating = async () => {
-  const input = transcriptInput.value
-  const draft = input ? captureVoiceInputTarget(input) : null
-  const terminal = target.value?.kind === 'terminal' ? target.value : null
-  await toggle(null)
-  if (disposed || state.value !== 'recording') { draft?.dispose?.(); return }
-  target.value = terminal
-  draftTarget = draft
-}
-const insertTerminal = () => {
-  if (targetChanged || !target.value?.insert(transcript.value.replace(/[\r\n\x00-\x1f\x7f-\x9f]+/g, ' '))) { notice.value = t('invalid'); target.value = null; return }
-  close()
+  transcriptInput.value?.focus()
+  await toggle(captureVoiceInputTarget(transcriptInput.value))
 }
 const copy = async () => {
   try { await navigator.clipboard.writeText(transcript.value); notice.value = t('copied') }
   catch { notice.value = t('copiedFailed'); transcriptInput.value?.select() }
 }
+
+watch(state, (value) => {
+  if (value === 'idle') { target.value?.dispose?.(); target.value = null }
+}, { flush: 'sync' })
 
 watch(() => [workspace.activePanelId, workspace.selectedConversationId, workspace.selectedManagedAiSessionKey, workspace.activeModule, workspace.mode], () => {
   if (target.value) { targetChanged = true; target.value.dispose?.() }
@@ -210,21 +204,22 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="root" class="global-voice" data-testid="global-voice" :style="{ right: `${position.right}px`, bottom: `${position.bottom}px` }">
-    <section v-if="panel" class="voice-panel" role="dialog" :aria-label="t('title')">
-      <header><strong>{{ t('title') }}</strong><button :aria-label="t('close')" @click="close"><X :size="18" /></button></header>
+    <div class="voice-overlays">
+      <section v-if="panel" class="voice-panel" role="dialog" :aria-label="t('title')">
+        <header><strong>{{ t('title') }}</strong><button :aria-label="t('close')" @click="close"><X :size="18" /></button></header>
         <p>{{ notice || t('fallback') }}</p>
         <textarea ref="transcriptInput" v-model="transcript" :aria-label="t('text')" rows="7" data-testid="voice-transcript" />
         <div class="voice-actions">
           <button :disabled="busy" @click="continueDictating">{{ t('continue') }}</button>
           <button :disabled="!transcript" @click="copy">{{ t('copy') }}</button>
           <button :disabled="busy || !transcript" @click="transcript = ''">{{ t('clear') }}</button>
-          <button v-if="terminalTarget" :disabled="busy || !transcript" @click="insertTerminal">{{ t('insert') }}</button>
           <button @click="close">{{ t('done') }}</button>
         </div>
-    </section>
-    <div v-if="errorText" class="voice-error" role="alert">{{ t('failed') }}: {{ errorText }}<button @click="error = ''" :aria-label="t('close')"><X :size="14" /></button></div>
-    <div class="voice-controls">
+      </section>
+      <div v-if="errorText" class="voice-error" role="alert"><span>{{ t('failed') }}: {{ errorText }}</span><button @click="error = ''" :aria-label="t('close')"><X :size="14" /></button></div>
       <div v-if="busy" class="voice-status" role="status"><span>{{ t(state) }} {{ state === 'recording' ? duration : '' }}</span><meter v-if="state === 'recording'" min="0" max="1" :value="level" :aria-label="t('recording')" /><button @click="cancel">{{ t('cancel') }}</button></div>
+    </div>
+    <div class="voice-controls">
       <button v-if="!busy" class="voice-secondary" :aria-label="t('openDraft')" :title="t('openDraft')" @click="panel = true"><FileText :size="17" /></button>
       <button v-if="!busy" class="voice-secondary" :aria-label="t('settings')" :title="t('settings')" @click="openSettings"><Settings :size="17" /></button>
       <button class="voice-mic" :class="{ recording: state === 'recording' }" data-testid="global-voice-button" :aria-label="buttonTitle" :title="`${buttonTitle}. ${t('drag')}`" :aria-pressed="state === 'recording'" :aria-busy="state === 'starting' || state === 'transcribing'" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerUp" @pointercancel="drag = null; captured = null" @click="click">
@@ -244,17 +239,21 @@ onBeforeUnmount(() => {
 .global-voice .voice-mic.recording { background: #bd3549; color: white; }
 .voice-secondary { opacity: 0; pointer-events: none; flex-shrink: 0; display: grid; place-items: center; width: 34px; height: 34px; }
 .global-voice:hover .voice-secondary, .global-voice:focus-within .voice-secondary { opacity: 1; pointer-events: auto; }
-.voice-status { position: fixed; right: 24px; bottom: 150px; max-width: calc(100vw - 48px); display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 6px 8px; background: var(--theme-core-surface-muted, #2c2a3c); border: 1px solid var(--theme-core-border, #545268); border-radius: 10px; }
+.voice-status { max-width: 100%; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 6px 8px; background: var(--theme-core-surface-muted, #2c2a3c); border: 1px solid var(--theme-core-border, #545268); border-radius: 10px; }
 .voice-status meter { width: 45px; }
-.voice-panel { position: fixed; right: 24px; bottom: 160px; width: min(420px, calc(100vw - 32px)); max-height: calc(100vh - 182px); overflow-y: auto; border: 1px solid var(--theme-core-border, #545268); border-radius: 12px; padding: 16px; background: var(--theme-core-surface, #242232); box-shadow: 0 8px 32px #0006; }
+.voice-panel { box-sizing: border-box; width: min(420px, calc(100vw - 32px)); border: 1px solid var(--theme-core-border, #545268); border-radius: 12px; padding: 16px; background: var(--theme-core-surface, #242232); box-shadow: 0 8px 32px #0006; }
 .voice-panel header { display: flex; align-items: center; justify-content: space-between; }
 .voice-panel p { line-height: 1.5; opacity: .85; }
 .voice-panel textarea, .voice-panel input:not([type=checkbox]), .voice-panel select { box-sizing: border-box; width: 100%; background: var(--theme-core-surface-muted, #302e40); color: inherit; border: 1px solid var(--theme-core-border, #545268); border-radius: 6px; padding: 9px; margin: 5px 0; }
 .voice-panel textarea { resize: vertical; min-height: 120px; }
 .voice-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.voice-error { max-width: 380px; padding: 10px; margin-bottom: 8px; background: var(--theme-core-surface-muted, #2c2a3c); border: 1px solid #bd3549; border-radius: 8px; overflow-wrap: anywhere; }
-.voice-error button { float: right; }
+.voice-error { display: flex; align-items: center; gap: 10px; max-width: 380px; padding: 10px; background: var(--theme-core-surface-muted, #2c2a3c); border: 1px solid #bd3549; border-radius: 8px; overflow-wrap: anywhere; }
+.voice-error span { flex: 1; min-width: 0; }
+.voice-error button, .voice-panel header button { display: grid; place-items: center; flex-shrink: 0; width: 34px; height: 34px; padding: 0; }
+.voice-overlays { position: fixed; right: 24px; bottom: 160px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: calc(100vw - 32px); max-height: calc(100vh - 182px); overflow-y: auto; }
+.voice-overlays > * { flex-shrink: 0; }
 .voice-spinner { animation: voice-spin 1s linear infinite; }
 @keyframes voice-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .voice-spinner { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .voice-overlays > * { flex-shrink: 0; }
+.voice-spinner { animation: none; } }
 </style>

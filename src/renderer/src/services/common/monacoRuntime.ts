@@ -114,15 +114,22 @@ export const loadMonaco = (): Promise<MonacoModule> => {
       if (!element) return
       const unregister = registerVoiceInputTarget(element, () => {
         const model = editor.getModel()
-        const selection = editor.getSelection()
+        let selection = editor.getSelection()
         if (!model || !selection || editor.getRawOptions().readOnly) return null
-        const version = model.getVersionId()
+        let version = model.getVersionId()
         return {
           kind: 'text',
           insert(text) {
             if (!isVoiceTargetVisible(element) || model.isDisposed() || editor.getModel() !== model || model.getVersionId() !== version || editor.getRawOptions().readOnly) return false
             editor.pushUndoStop()
+            if (!selection) return false
+            const offset = model.getOffsetAt(selection.getStartPosition()) + text.length
             const inserted = editor.executeEdits('voice-input', [{ range: selection, text, forceMoveMarkers: true }])
+            if (inserted) {
+              editor.setPosition(model.getPositionAt(offset))
+              selection = editor.getSelection()
+              version = model.getVersionId()
+            }
             editor.pushUndoStop()
             editor.focus()
             return inserted

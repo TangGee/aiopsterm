@@ -31,9 +31,9 @@ export const captureVoiceInputTarget = (element: Element | null = document.activ
   if (element.closest('.xterm, .threaded-terminal-input, .monaco-editor, [data-voice-ignore]')) return null
   if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
     if (element.disabled || element.readOnly || (element instanceof HTMLInputElement && !['text', 'search', 'url', 'tel', 'email'].includes(element.type))) return null
-    const value = element.value
-    const start = element.selectionStart ?? value.length
-    const end = element.selectionEnd ?? start
+    let value = element.value
+    let start = element.selectionStart ?? value.length
+    let end = element.selectionEnd ?? start
     let changed = false
     const markChanged = () => { changed = true }
     element.addEventListener('input', markChanged, { once: true })
@@ -46,10 +46,15 @@ export const captureVoiceInputTarget = (element: Element | null = document.activ
         element.focus({ preventScroll: true })
         // insertText preserves native undo and emits input for Vue's bindings.
         if (element.selectionStart !== null) element.setSelectionRange(start, end)
-        if (document.execCommand?.('insertText', false, text)) return true
-        element.value = value.slice(0, start) + text + value.slice(end)
-        if (element.selectionStart !== null) element.setSelectionRange(start + text.length, start + text.length)
-        element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }))
+        if (!document.execCommand?.('insertText', false, text)) {
+          element.value = value.slice(0, start) + text + value.slice(end)
+          if (element.selectionStart !== null) element.setSelectionRange(start + text.length, start + text.length)
+          element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }))
+        }
+        value = element.value
+        start = element.selectionStart ?? start + text.length
+        end = element.selectionEnd ?? start
+        element.addEventListener('input', markChanged, { once: true })
         return true
       }
     }
@@ -59,8 +64,8 @@ export const captureVoiceInputTarget = (element: Element | null = document.activ
   if (!editable || editable.closest('[contenteditable="false"]')) return null
   const selection = document.getSelection()
   if (!selection?.rangeCount || !editable.contains(selection.anchorNode) || !editable.contains(selection.focusNode)) return null
-  const range = selection.getRangeAt(0).cloneRange()
-  const html = editable.innerHTML
+  let range = selection.getRangeAt(0).cloneRange()
+  let html = editable.innerHTML
   let changed = false
   const observer = new MutationObserver(() => { changed = true })
   observer.observe(editable, { subtree: true, childList: true, characterData: true, attributes: true })
@@ -75,15 +80,19 @@ export const captureVoiceInputTarget = (element: Element | null = document.activ
       const current = document.getSelection()
       current?.removeAllRanges()
       current?.addRange(range)
-      if (document.execCommand?.('insertText', false, text)) return true
-      range.deleteContents()
-      const node = document.createTextNode(text)
-      range.insertNode(node)
-      range.setStartAfter(node)
-      range.collapse(true)
-      current?.removeAllRanges()
-      current?.addRange(range)
-      editable.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }))
+      if (!document.execCommand?.('insertText', false, text)) {
+        range.deleteContents()
+        const node = document.createTextNode(text)
+        range.insertNode(node)
+        range.setStartAfter(node)
+        range.collapse(true)
+        current?.removeAllRanges()
+        current?.addRange(range)
+        editable.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }))
+      }
+      if (current?.rangeCount) range = current.getRangeAt(0).cloneRange()
+      html = editable.innerHTML
+      observer.observe(editable, { subtree: true, childList: true, characterData: true, attributes: true })
       return true
     }
   }

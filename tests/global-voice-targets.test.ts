@@ -23,6 +23,16 @@ describe('global voice input targets', () => {
     expect(element.selectionStart).toBe(14)
     expect(onInput).toHaveBeenCalledOnce()
   })
+  it('advances the saved caret across fragments and detects subsequent manual edits', () => {
+    const element = input()
+    const target = captureVoiceInputTarget()
+    expect(target?.insert('first ')).toBe(true)
+    expect(target?.insert('second ')).toBe(true)
+    expect(element.value).toBe('before first second after')
+    element.dispatchEvent(new InputEvent('input'))
+    expect(target?.insert('late')).toBe(false)
+    target?.dispose?.()
+  })
   it('replaces the saved selection without replacing the surrounding text', () => {
     const element = input('one two three'); element.setSelectionRange(4, 7)
     expect(captureVoiceInputTarget()?.insert('voice')).toBe(true)
@@ -68,6 +78,9 @@ describe('global voice input targets', () => {
     expect(target?.insert('<script>')).toBe(true)
     expect(element.textContent).toBe('hello <script>')
     expect(element.querySelector('script')).toBeNull()
+    expect(target?.insert(' next')).toBe(true)
+    expect(element.textContent).toBe('hello <script> next')
+    target?.dispose?.()
     const stale = captureVoiceInputTarget(element)
     element.textContent = 'changed'
     expect(stale?.insert('voice')).toBe(false)

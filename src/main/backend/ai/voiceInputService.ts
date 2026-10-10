@@ -8,6 +8,7 @@ import { isAbsolute, join } from 'node:path'
 import type { VoiceInputPreferences, VoiceTranscriptionInput, VoiceTranscriptionResult } from '@shared/contracts/voice'
 
 const failure = (errorMessage: string): VoiceTranscriptionResult => ({ ok: false, errorCode: 'VOICE_INPUT_FAILED', errorMessage })
+const noSpeech = (): VoiceTranscriptionResult => ({ ok: false, errorCode: 'VOICE_NO_SPEECH', errorMessage: 'No speech was recognized.' })
 
 export const validateVoicePreferences = async (preferences: VoiceInputPreferences): Promise<void> => {
   if (preferences.mode === 'local') {
@@ -68,7 +69,7 @@ export const transcribeGlobalVoice = async (
         }
         text = typeof result.text === 'string' ? result.text.replace(/<\|[^|]*\|>/g, '').trim() : ''
       } else text = (await readFile(`${outputPath}.txt`, 'utf8')).trim()
-      return text ? { ok: true, data: { text, provider: 'aiopsterm-local', model: preferences.modelPath } } : failure('No speech was recognized.')
+      return text ? { ok: true, data: { text, provider: 'aiopsterm-local', model: preferences.modelPath } } : noSpeech()
     }
     const endpoint = new URL(preferences.endpoint)
     if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password) return failure('Use an HTTP or HTTPS transcription endpoint without URL credentials.')
@@ -89,11 +90,11 @@ export const transcribeGlobalVoice = async (
       })
       if (!response.ok) return failure(`Doubao speech returned HTTP ${response.status}. Check speech service credentials and quota.`)
       const code = response.headers.get('X-Api-Status-Code')
-      if (code === '20000003') return failure('No speech was recognized.')
+      if (code === '20000003') return noSpeech()
       if (code !== '20000000') return failure(`Doubao speech failed (${code || 'missing status'}). Check credentials and the volc.bigasr.auc_turbo resource in the speech console.`)
       const payload = await response.json() as { result?: { text?: unknown } }
       const text = typeof payload.result?.text === 'string' ? payload.result.text.trim() : ''
-      return text ? { ok: true, data: { text, provider: 'doubao', model: preferences.model } } : failure('No speech was recognized.')
+      return text ? { ok: true, data: { text, provider: 'doubao', model: preferences.model } } : noSpeech()
     }
     const form = new FormData()
     form.append('model', preferences.model.trim())
@@ -109,7 +110,7 @@ export const transcribeGlobalVoice = async (
     if (!response.ok) return failure(`Speech service returned HTTP ${response.status}.`)
     const payload = await response.json() as { text?: unknown }
     const text = typeof payload.text === 'string' ? payload.text.trim() : ''
-    return text ? { ok: true, data: { text, provider: 'openai', model: preferences.model } } : failure('No speech was recognized.')
+    return text ? { ok: true, data: { text, provider: 'openai', model: preferences.model } } : noSpeech()
   } catch (error) {
     return failure(signal.aborted ? 'Recognition cancelled or timed out.' : error instanceof Error ? error.message : String(error))
   } finally {

@@ -86,6 +86,11 @@ describe('independent speech service', () => {
     expect(result.ok).toBe(false)
     expect(fetch).not.toHaveBeenCalled()
   })
+  it('distinguishes an empty recognition result from a service failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ text: '' }))))
+    const result = await transcribeGlobalVoice({ audioBytes: audio }, { ...preferences, endpoint: 'https://speech.test/transcribe' }, new AbortController().signal)
+    expect(result).toMatchObject({ ok: false, errorCode: 'VOICE_NO_SPEECH' })
+  })
   it('rejects oversized, empty and already cancelled requests', async () => {
     const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
     expect((await transcribeGlobalVoice({}, preferences, new AbortController().signal)).ok).toBe(false)
@@ -117,7 +122,9 @@ describe('Doubao speech adapter', () => {
   })
   it.each(['45000001', '20000003', null])('handles business errors including HTTP 200 responses (%s)', async (code) => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ result: { text: 'must not be accepted' } }), { headers: code ? { 'X-Api-Status-Code': code } : {} })))
-    expect((await transcribeGlobalVoice({ audioBytes: audio }, config, new AbortController().signal)).ok).toBe(false)
+    const result = await transcribeGlobalVoice({ audioBytes: audio }, config, new AbortController().signal)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.errorCode).toBe(code === '20000003' ? 'VOICE_NO_SPEECH' : 'VOICE_INPUT_FAILED')
   })
   it('requires speech credentials and prevents sending them to a different endpoint', async () => {
     const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher)

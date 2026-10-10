@@ -110,15 +110,38 @@ describe('global voice controls', () => {
     expect(recording.runtime.start).not.toHaveBeenCalled()
     expect(window.aiops.saveVoiceInputPreferences).toHaveBeenCalledWith({ position: { right: 124, bottom: 196 } })
   })
-  it('requires explicit insertion for terminals and removes control characters', async () => {
+  it('directly streams into terminals without a dialog and removes control characters', async () => {
     await mountInput(); const element = input(); const insert = vi.fn(() => true)
     const remove = registerVoiceInputTarget(element, () => ({ kind: 'terminal', insert }))
-    await clickMic(); await deliver('echo hi\nwhoami\x1b')
-    expect(insert).not.toHaveBeenCalled()
-    const button = wrapper!.findAll('button').find((entry) => entry.text() === '填入原终端')!
-    await button.trigger('click')
-    expect(insert).toHaveBeenCalledWith('echo hi whoami ')
+    await clickMic()
+    expect(wrapper!.find('[role="dialog"]').exists()).toBe(false)
+    recording.options.onText('echo hi\nwhoami\x1b')
+    recording.options.onText('again')
+    await flushPromises()
+    expect(insert).toHaveBeenNthCalledWith(1, 'echo hi whoami ')
+    expect(insert).toHaveBeenNthCalledWith(2, 'again')
+    expect(recording.runtime.state.value).toBe('recording')
+    expect(wrapper!.find('[role="dialog"]').exists()).toBe(false)
     remove()
+  })
+  it('appends multiple Chinese and English fragments before recording stops', async () => {
+    await mountInput(); const element = input(); await clickMic()
+    expect(recording.options.streaming).toBe(true)
+    for (const text of ['你好', '世界', 'hello', 'world']) recording.options.onText(text)
+    await flushPromises()
+    expect(element.value).toBe('hello 你好世界hello worldworld')
+    expect(recording.runtime.state.value).toBe('recording')
+    expect(wrapper!.find('[role="dialog"]').exists()).toBe(false)
+  })
+  it('keeps microphone errors dismissible without opening a dialog for a focused input', async () => {
+    await mountInput(); input(); await clickMic()
+    recording.runtime.error.value = 'Requested device not found'
+    recording.runtime.state.value = 'idle'
+    await flushPromises()
+    expect(wrapper!.get('[role="alert"] span').text()).toContain('未找到可用的麦克风')
+    expect(wrapper!.find('[role="dialog"]').exists()).toBe(false)
+    await wrapper!.get('[role="alert"] button').trigger('click')
+    expect(wrapper!.find('[role="alert"]').exists()).toBe(false)
   })
   it('routes the gear to formal settings and leaves headset detection to that page', async () => {
     await mountInput(); await wrapper!.get('button[aria-label="语音设置"]').trigger('click')
