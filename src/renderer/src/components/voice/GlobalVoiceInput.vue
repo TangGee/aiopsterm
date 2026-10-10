@@ -174,7 +174,7 @@ watch(() => [workspace.activePanelId, workspace.selectedConversationId, workspac
 }, { flush: 'sync' })
 
 onMounted(async () => {
-  unregisterController = registerGlobalVoiceController({ state, toggle: () => { void toggle(captureVoiceInputTarget(lastFocused)) } })
+  unregisterController = registerGlobalVoiceController({ state, toggle: () => { void toggle(captureVoiceInputTarget(document.activeElement)) } })
   document.addEventListener('focusin', rememberFocus)
   document.addEventListener('pointerdown', externalPointer, true)
   window.addEventListener('keydown', onKey, true)

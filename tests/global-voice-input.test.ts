@@ -3,6 +3,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { ref, reactive } from 'vue'
 import GlobalVoiceInput from '@/components/voice/GlobalVoiceInput.vue'
 import { registerVoiceInputTarget } from '@/services/voice/voiceInputTargets'
+import { globalVoiceController } from '@/services/voice/globalVoiceController'
 import type { VoiceInputTrigger } from '@shared/contracts/voice'
 
 const session = vi.hoisted(() => ({ context: null as any }))
@@ -38,6 +39,17 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; window.aiops = original; document.body.innerHTML = ''; vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('global voice controls', () => {
+  it('uses the focused input for composer controls after their pointer event clears focus history', async () => {
+    await mountInput(); const originalInput = input()
+    const composerButton = document.createElement('button')
+    document.body.append(composerButton)
+    composerButton.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    expect(document.activeElement).toBe(originalInput)
+    globalVoiceController()?.toggle()
+    await flushPromises(); await deliver('voice ')
+    expect(originalInput.value).toBe('hello voice world')
+    expect(wrapper!.find('[role="dialog"]').exists()).toBe(false)
+  })
   it('inserts at the original caret even after focus moves to another input', async () => {
     await mountInput(); const originalInput = input(); await clickMic()
     const other = input(); await deliver('voice ')

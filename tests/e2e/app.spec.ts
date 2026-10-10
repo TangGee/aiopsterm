@@ -10,11 +10,11 @@ import { isolatedEnvironment } from '../regression/support/environment'
 
 const e2eUserDataDir = (name: string) => path.join(os.tmpdir(), `aiopsterm-e2e-${name}-${Date.now()}`)
 
-const launchApp = async (name: string, env: NodeJS.ProcessEnv = {}, options: { userDataDir?: string } = {}) => {
+const launchApp = async (name: string, env: NodeJS.ProcessEnv = {}, options: { userDataDir?: string; fakeMicrophone?: boolean } = {}) => {
   const userDataDir = options.userDataDir || e2eUserDataDir(name)
   await mkdir(userDataDir, { recursive: true })
   return electron.launch({
-    args: ['.', '--lang=zh-CN'],
+    args: ['.', '--lang=zh-CN', ...(options.fakeMicrophone ? ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] : [])],
     env: {
       ...await isolatedEnvironment(userDataDir),
       ...env,
@@ -418,7 +418,7 @@ const startVoiceTranscriptionServer = async () => {
         authorization: request.headers.authorization,
         body
       })
-      if (request.method !== 'POST' || request.url !== '/v1/audio/transcriptions' || request.headers.authorization !== 'Bearer e2e-voice-key') {
+      if (request.method !== 'POST' || request.url !== '/v1/audio/transcriptions' || request.headers.authorization) {
         response.writeHead(400, { 'content-type': 'application/json' })
         response.end(JSON.stringify({ error: { message: 'unexpected voice transcription request' } }))
         return
@@ -501,28 +501,8 @@ const startOllamaChatServer = async () => {
 
 const configureVoiceTranscriptionProvider = async (page: Page, baseUrl: string) => {
   await page.evaluate(async (providerBaseUrl) => {
-    const api = (window as unknown as { aiops: { getConfig: () => Promise<any>; saveConfig: (patch: Record<string, unknown>) => Promise<any> } }).aiops
-    const config = await api.getConfig()
-    const modelSettings = config.modelSettings || {}
-    const providers = modelSettings.providers || {}
-    const options = Array.isArray(modelSettings.options) ? modelSettings.options.filter((option: { name?: string }) => option.name !== 'whisper-e2e') : []
-    await api.saveConfig({
-      modelProvider: 'openai-compatible',
-      modelName: 'whisper-e2e',
-      modelSettings: {
-        ...modelSettings,
-        providers: {
-          ...providers,
-          openai: {
-            ...(providers.openai || {}),
-            baseUrl: providerBaseUrl,
-            apiKey: 'e2e-voice-key',
-            modelId: 'whisper-1',
-            apiFormat: 'chat-completions'
-          }
-        },
-        options: [...options, { name: 'whisper-e2e', locked: false, checked: true, type: 'custom', apiProvider: 'openai' }]
-      }
+    await window.aiops.saveVoiceInputPreferences!({
+      mode: 'service', endpoint: `${providerBaseUrl}/v1/audio/transcriptions`, model: 'whisper-e2e', apiKey: ''
     })
   }, baseUrl)
 }
@@ -568,53 +548,6 @@ const configureModelSelectorOptions = async (page: Page, ollamaBaseUrl: string) 
       }
     })
   }, ollamaBaseUrl)
-}
-
-const installVoiceRecorderDouble = async (page: Page) => {
-  await page.evaluate(() => {
-    class MockMediaRecorder {
-      static isTypeSupported() {
-        return true
-      }
-
-      state: 'inactive' | 'recording' = 'inactive'
-      ondataavailable: ((event: { data: Blob }) => void) | null = null
-      onerror: ((event: { error: Error }) => void) | null = null
-      onstop: (() => void) | null = null
-      private readonly mimeType: string
-
-      constructor(_stream: unknown, options: { mimeType?: string } = {}) {
-        this.mimeType = options.mimeType || 'audio/webm'
-      }
-
-      start() {
-        this.state = 'recording'
-      }
-
-      stop() {
-        if (this.state === 'inactive') return
-        this.state = 'inactive'
-        this.ondataavailable?.({
-          data: new Blob([new Uint8Array(4096)], { type: this.mimeType })
-        })
-        this.onstop?.()
-      }
-    }
-
-    Object.defineProperty(window, 'MediaRecorder', {
-      configurable: true,
-      writable: true,
-      value: MockMediaRecorder
-    })
-    Object.defineProperty(navigator, 'mediaDevices', {
-      configurable: true,
-      value: {
-        getUserMedia: async () => ({
-          getTracks: () => [{ stop: () => undefined }]
-        })
-      }
-    })
-  })
 }
 
 const disableE2eMotion = async (page: Page) => {
@@ -1234,7 +1167,7 @@ test('aiopsterm primary desktop flows', async () => {
     AIOPSTERM_KUBECTL_PATH: fakeKubectl.filePath,
     AIOPSTERM_EXTENSION_STORE_DIR: extensionStore.dir
   }
-  let app = await launchApp('primary', primaryEnv, { userDataDir })
+  let app = await launchApp('primary', primaryEnv, { userDataDir, fakeMicrophone: true })
 
   try {
     let page = await app.firstWindow()
@@ -1243,7 +1176,6 @@ test('aiopsterm primary desktop flows', async () => {
     await page.reload()
     await page.waitForLoadState('domcontentloaded')
     await disableE2eMotion(page)
-    await installVoiceRecorderDouble(page)
 
     await expect(page.getByText('aiopsterm', { exact: true })).toBeVisible()
     await expect(page.locator('.terminal-tab').filter({ hasText: '欢迎' })).toHaveCount(0)
@@ -2164,20 +2096,23 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.getByTestId('ai-voice-button')).toBeVisible()
     await expect(page.getByTestId('ai-voice-button')).toHaveAttribute('title', '开始语音输入')
     await configureVoiceTranscriptionProvider(page, voiceServer.baseUrl)
+    await page.locator('.chat-editable').focus()
     await page.getByTestId('ai-voice-button').click()
     await expect(page.getByTestId('ai-voice-button')).toHaveClass(/recording/)
     await expect(page.getByTestId('ai-voice-button')).toHaveAttribute('title', '停止语音录制')
-    await page.waitForTimeout(240)
+    await page.waitForTimeout(600)
     await page.getByTestId('ai-voice-button').click()
-    await expect(page.locator('.input-placeholder-notice')).toContainText('语音转写完成')
+    await expect(page.getByTestId('ai-voice-button')).not.toHaveClass(/recording/)
     await expect(page.locator('.chat-editable')).toContainText('Provider transcript from E2E voice backend')
     expect(voiceServer.requests).toHaveLength(1)
     expect(voiceServer.requests[0]).toMatchObject({
       method: 'POST',
       url: '/v1/audio/transcriptions',
-      authorization: 'Bearer e2e-voice-key'
+      authorization: undefined
     })
     expect(voiceServer.requests[0].body.toString('utf8')).toContain('name="model"')
+    expect(voiceServer.requests[0].body.toString('utf8')).toContain('audio/wav')
+    expect(voiceServer.requests[0].body.toString('utf8')).toContain('RIFF')
     await page.evaluate(async () => {
       const api = (window as unknown as { aiops: { saveConfig: (patch: Record<string, unknown>) => Promise<any> } }).aiops
       await api.saveConfig({ modelName: 'qwen2.5-coder', modelProvider: 'ollama' })
@@ -2285,7 +2220,7 @@ test('aiopsterm primary desktop flows', async () => {
       if (!open?.ok || !closed?.ok) throw new Error(open?.errorMessage || closed?.errorMessage || 'Codex E2E session setup failed')
     })
     await app.close()
-    app = await launchApp('primary', primaryEnv, { userDataDir })
+    app = await launchApp('primary', primaryEnv, { userDataDir, fakeMicrophone: true })
     page = await app.firstWindow()
     await page.waitForLoadState('domcontentloaded')
     await disableE2eMotion(page)
