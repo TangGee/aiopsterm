@@ -2113,6 +2113,7 @@ test('aiopsterm primary desktop flows', async () => {
     expect(voiceServer.requests[0].body.toString('utf8')).toContain('name="model"')
     expect(voiceServer.requests[0].body.toString('utf8')).toContain('audio/wav')
     expect(voiceServer.requests[0].body.toString('utf8')).toContain('RIFF')
+    await configureModelSelectorOptions(page, aiChatServer.baseUrl)
     await page.evaluate(async () => {
       const api = (window as unknown as { aiops: { saveConfig: (patch: Record<string, unknown>) => Promise<any> } }).aiops
       await api.saveConfig({ modelName: 'qwen2.5-coder', modelProvider: 'ollama' })
