@@ -2,8 +2,15 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "composite": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["vite/client", "vitest/globals"]
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "vite/client",
+      "vitest/globals"
+    ]
   },
   "include": [
     "src/shared/**/*.ts",
@@ -19,6 +26,7 @@
     "tests/files-cross-host-transfer-runtime.test.ts",
     "tests/ssh-terminal-recovery-backend.test.ts",
     "tests/ssh-terminal-recovery-integration-backend.test.ts",
-    "tests/terminal-recovery-store-backend.test.ts"
+    "tests/terminal-recovery-store-backend.test.ts",
+    "tests/global-voice-service-backend.test.ts"
   ]
 }

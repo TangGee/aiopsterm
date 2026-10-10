@@ -379,6 +379,14 @@ const api: AiopsPreloadApi = {
     return () => ipcRenderer.off('cline-agent:task-event', wrapped)
   },
   transcribeVoiceInput: (input) => ipcRenderer.invoke('voice:transcribe', input),
+  getVoiceInputStatus: () => ipcRenderer.invoke('voice:status'),
+  saveVoiceInputPreferences: (input) => ipcRenderer.invoke('voice:preferences', input),
+  cancelVoiceTranscription: (requestId) => ipcRenderer.invoke('voice:cancel', requestId),
+  onVoiceInputTrigger: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
+    ipcRenderer.on('voice:trigger', wrapped)
+    return () => ipcRenderer.off('voice:trigger', wrapped)
+  },
   listDatabaseCatalog: () => ipcRenderer.invoke('database:catalog'),
   testDatabaseConnection: (input) => ipcRenderer.invoke('database:test-connection', input),
   saveDatabaseConnection: (input) => ipcRenderer.invoke('database:save-connection', input),

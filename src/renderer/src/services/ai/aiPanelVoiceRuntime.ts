@@ -1,3 +1,4 @@
+import { globalVoiceController } from '@/services/voice/globalVoiceController'
 import { computed, ref } from 'vue'
 import {
   aiPanelVoiceRecordingLimitMs,
@@ -58,6 +59,9 @@ export const createAiPanelVoiceRuntime = (options: AiPanelVoiceRuntimeOptions) =
   const getUserMedia = options.getUserMedia ?? defaultGetUserMedia
 
   const voiceButtonTitle = computed(() => {
+    const globalState = globalVoiceController()?.state.value
+    if (globalState === 'recording') return '停止语音录制'
+    if (globalState === 'starting' || globalState === 'transcribing') return '语音转写中'
     if (voiceRecording.value) return '停止语音录制'
     if (voiceTranscribing.value) return '语音转写中'
     return '开始语音输入'
@@ -223,6 +227,8 @@ export const createAiPanelVoiceRuntime = (options: AiPanelVoiceRuntimeOptions) =
   }
 
   const toggleVoiceInput = () => {
+    const global = globalVoiceController()
+    if (global) { global.toggle(); return }
     if (options.streaming() || voiceTranscribing.value) return
     if (voiceRecording.value) {
       void finishVoiceRecording()
@@ -238,8 +244,8 @@ export const createAiPanelVoiceRuntime = (options: AiPanelVoiceRuntimeOptions) =
   }
 
   return {
-    voiceRecording,
-    voiceTranscribing,
+    voiceRecording: computed(() => globalVoiceController() ? globalVoiceController()?.state.value === 'recording' : voiceRecording.value),
+    voiceTranscribing: computed(() => globalVoiceController() ? ['starting', 'transcribing'].includes(globalVoiceController()?.state.value || '') : voiceTranscribing.value),
     voiceAutoSendAfterInput,
     voiceButtonTitle,
     toggleVoiceInput,

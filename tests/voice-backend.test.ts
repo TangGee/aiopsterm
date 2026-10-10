@@ -113,7 +113,7 @@ describe('voice transcription backend', () => {
     expect(body.get('response_format')).toBe('json')
     const file = body.get('file') as Blob
     expect(file).toBeInstanceOf(Blob)
-    expect(file.type).toBe('audio/ogg')
+    expect(file.type).toBe('audio/webm')
     expect(file.size).toBe(2048)
   })
 

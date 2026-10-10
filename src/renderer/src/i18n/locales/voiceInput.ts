@@ -1,0 +1,42 @@
+export const voiceInputMessages = {
+  en: {
+    title: 'Voice input', start: 'Start voice input', stop: 'Stop and transcribe', cancel: 'Cancel', close: 'Close',
+    idle: 'Ready', starting: 'Requesting microphone', recording: 'Recording', transcribing: 'Transcribing',
+    copy: 'Copy', copied: 'Copied', continue: 'Continue dictating', done: 'Done', settings: 'Voice settings',
+    text: 'Editable transcript', fallback: 'No available input target. Edit or copy the transcript here.',
+    terminal: 'Review before inserting into the terminal. Line breaks will be replaced with spaces.', insert: 'Insert into original terminal',
+    invalid: 'The original input changed or is no longer available. The transcript is kept here.',
+    mode: 'Recognition', local: 'Local whisper.cpp', service: 'Speech service', executable: 'whisper-cli executable',
+    modelFile: 'Local model file', browse: 'Browse', endpoint: 'Full transcription URL', model: 'Speech model',
+    apiKey: 'API key (leave empty to keep saved key)', clearKey: 'Remove saved API key', shortcut: 'Global shortcut',
+    headset: 'Use headset play/pause button', test: 'Detect headset button', waiting: 'Press the headset button within 10 seconds',
+    detected: 'Headset button detected', unavailable: 'No button received. This device may require a vendor adapter.',
+    registered: 'Shortcut registered', conflict: 'Shortcut unavailable or already in use', save: 'Save', saved: 'Saved',
+    setup: 'Configure recognition before recording.', localHelp: 'Select a whisper.cpp executable and a multilingual GGML model for this computer. Audio stays local.',
+    serviceHelp: 'Audio is sent only to the transcription URL you configure. This setting is independent of the chat model.',
+    headsetHelp: 'When enabled, the media play/pause key controls dictation instead of music. Call-only buttons may not be exposed by the device.',
+    headsetFailed: 'The media key could not be registered.', drag: 'Drag to move; click to record', failed: 'Voice input failed',
+    permission: 'Allow microphone access in system settings and try again.', noMicrophone: 'No usable microphone was found.',
+    openDraft: 'Open transcript', clear: 'Clear text', copiedFailed: 'Copy failed. Select the text and copy it manually.'
+  },
+  zh: {
+    title: '语音输入', start: '开始语音输入', stop: '停止并识别', cancel: '取消', close: '关闭',
+    idle: '就绪', starting: '正在请求麦克风', recording: '录音中', transcribing: '识别中',
+    copy: '复制', copied: '已复制', continue: '继续口述', done: '完成', settings: '语音设置',
+    text: '可编辑的识别结果', fallback: '没有可用输入位置，识别后可在此编辑或复制。',
+    terminal: '请确认后再填入终端，换行会替换为空格。', insert: '填入原终端',
+    invalid: '原输入位置已变化或不可用，识别结果已保留在这里。',
+    mode: '识别方式', local: '本地 whisper.cpp', service: '语音识别服务', executable: 'whisper-cli 可执行文件',
+    modelFile: '本地模型文件', browse: '选择', endpoint: '完整的语音转写接口地址', model: '语音识别模型',
+    apiKey: 'API Key（留空保留已保存的密钥）', clearKey: '删除已保存的密钥', shortcut: '全局快捷键',
+    headset: '使用耳机播放或暂停键', test: '检测耳机按键', waiting: '请在 10 秒内按下耳机按钮',
+    detected: '已检测到耳机按键', unavailable: '未收到按键，此设备可能需要厂商适配。',
+    registered: '快捷键已注册', conflict: '快捷键不可用或已被占用', save: '保存', saved: '已保存',
+    setup: '请先配置语音识别，再开始录音。', localHelp: '选择适用于本机的 whisper.cpp 程序和多语言 GGML 模型，音频仅在本地处理。',
+    serviceHelp: '音频只发送到你配置的语音转写地址，此设置独立于聊天模型。',
+    headsetHelp: '启用后，媒体播放或暂停键用于控制口述，会占用音乐播放快捷键。部分耳机不对应用开放通话键。',
+    headsetFailed: '媒体按键注册失败。', drag: '拖动调整位置，点击录音', failed: '语音输入失败',
+    permission: '请在系统设置中允许麦克风访问后重试。', noMicrophone: '未找到可用的麦克风。',
+    openDraft: '打开识别结果', clear: '清空文本', copiedFailed: '复制失败，请选中文本后手动复制。'
+  }
+} as const

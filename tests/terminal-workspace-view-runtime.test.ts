@@ -1,3 +1,4 @@
+import { captureVoiceInputTarget } from '@/services/voice/voiceInputTargets'
 import { computed, ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createTerminalWorkspaceViewRuntime } from '@/services/terminal/terminalWorkspaceViewRuntime'
@@ -310,7 +311,7 @@ const createRuntime = (
     input.searchConstructor = FakeSearch as any
   }
   const runtime = createTerminalWorkspaceViewRuntime(input)
-  return { runtime, workspace, panel }
+  return { runtime, workspace, panel, writeXtermInput: input.writeXtermInput }
 }
 
 afterEach(() => {
@@ -324,6 +325,25 @@ afterEach(() => {
 })
 
 describe('terminalWorkspaceViewRuntime', () => {
+  it.each([false, true])('registers voice targets after opening the terminal and rejects replaced sessions (threaded=%s)', async (threaded) => {
+    threadedTerminalMocks.threadedEnabled = threaded
+    const panel = createEmptyTerminalPanel('voice-terminal', 'Local')
+    panel.sessionId = 'session-one'
+    const { runtime, writeXtermInput } = createRuntime(panel, undefined, { threaded })
+    const host = document.createElement('div')
+    document.body.append(host)
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(3)
+    const target = captureVoiceInputTarget(host)
+    expect(target?.kind).toBe('terminal')
+    expect(target?.insert('hello\nworld')).toBe(true)
+    expect(writeXtermInput).toHaveBeenCalledWith(panel.id, 'hello world')
+    panel.sessionId = 'session-two'
+    expect(target?.insert('stale')).toBe(false)
+    runtime.dispose()
+    expect(captureVoiceInputTarget(host)).toBeNull()
+  })
+
   it('preserves the legacy buffer receiver while inspecting terminal links', async () => {
     const panel = createEmptyTerminalPanel('panel-1', 'Local')
     const { runtime } = createRuntime(panel)

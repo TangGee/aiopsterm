@@ -4,7 +4,10 @@
     "composite": true,
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "types": ["node", "electron-vite/node"]
+    "types": [
+      "node",
+      "electron-vite/node"
+    ]
   },
   "include": [
     "electron.vite.config.ts",
@@ -15,6 +18,7 @@
     "tests/files-cross-host-transfer-runtime.test.ts",
     "tests/ssh-terminal-recovery-backend.test.ts",
     "tests/ssh-terminal-recovery-integration-backend.test.ts",
-    "tests/terminal-recovery-store-backend.test.ts"
+    "tests/terminal-recovery-store-backend.test.ts",
+    "tests/global-voice-service-backend.test.ts"
   ]
 }

@@ -1,6 +1,6 @@
 import type { VoiceTranscriptionInput, VoiceTranscriptionProvider, VoiceTranscriptionResult } from './contracts/voice'
 
-const supportedAudioFormats = new Set(['wav', 'pcm', 'ogg-opus', 'speex', 'silk', 'mp3', 'm4a', 'aac', 'amr'])
+const supportedAudioFormats = new Set(['webm', 'wav', 'pcm', 'ogg-opus', 'speex', 'silk', 'mp3', 'm4a', 'aac', 'amr'])
 const maxAudioBytes = 50 * 1024 * 1024
 const localVoiceModelName = 'aiopsterm-local-agent'
 
@@ -86,7 +86,10 @@ const normalizeAudioPayload = (input: Partial<VoiceTranscriptionInput>) => {
 const normalizeAudioFormat = (value?: string) => {
   const normalized = normalizeText(value).toLowerCase()
   if (!normalized) return 'wav'
-  if (normalized.includes('ogg') || normalized.includes('opus') || normalized.includes('webm')) return 'ogg-opus'
+  if (normalized.includes('webm')) return 'webm'
+  if (normalized.includes('ogg') || normalized.includes('opus')) return 'ogg-opus'
+  if (normalized.includes('wav')) return 'wav'
+  if (normalized.includes('mp4') || normalized.includes('m4a')) return 'm4a'
   if (normalized.includes('mpeg')) return 'mp3'
   return supportedAudioFormats.has(normalized) ? normalized : 'wav'
 }

@@ -1,3 +1,4 @@
+import type { VoiceInputPreferences, VoiceInputStatus, VoiceInputTrigger } from './voice'
 import type { TerminalRecoverySnapshot, TerminalRecoveryLoadResult } from './terminalRecovery'
 import type { ImportedTerminalFont } from '../terminalFonts'
 import type { AiopstermDeepLinkPayload } from '../deepLink'
@@ -733,6 +734,10 @@ export type AiopsPreloadApi = {
   abortClineAgentTask: (input: ClineAgentAbortInput) => Promise<ClineAgentAbortResult>
   onClineAgentTaskEvent: (listener: (event: ClineAgentTaskEvent) => void) => () => void
   transcribeVoiceInput: (input?: VoiceTranscriptionInput) => Promise<VoiceTranscriptionResult>
+  getVoiceInputStatus?: () => Promise<VoiceInputStatus>
+  saveVoiceInputPreferences?: (input: Partial<VoiceInputPreferences>) => Promise<VoiceInputStatus>
+  cancelVoiceTranscription?: (requestId: string) => Promise<void>
+  onVoiceInputTrigger?: (listener: (event: VoiceInputTrigger) => void) => () => void
   testDatabaseConnection: (input: DatabaseConnectionTestInput) => Promise<DatabaseConnectionTestResult>
   saveDatabaseConnection: (input: DatabaseConnectionSaveInput) => Promise<DatabaseConnectionSaveResult>
   createDatabaseGroup: (input: DatabaseGroupCreateInput) => Promise<DatabaseGroupMutationResult>

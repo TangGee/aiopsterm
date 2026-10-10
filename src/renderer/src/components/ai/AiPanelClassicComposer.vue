@@ -398,6 +398,7 @@
           :title="voiceButtonTitle"
           :aria-pressed="voiceRecording ? 'true' : 'false'"
           :disabled="streaming || voiceTranscribing"
+          @mousedown.prevent
           @click.stop="toggleVoiceInput"
         >
           <span

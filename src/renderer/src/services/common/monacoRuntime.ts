@@ -1,3 +1,4 @@
+import { registerVoiceInputTarget, isVoiceTargetVisible } from '@/services/voice/voiceInputTargets'
 import cssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker'
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
 import htmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker'
@@ -108,6 +109,28 @@ export const loadMonaco = (): Promise<MonacoModule> => {
     import('monaco-editor/esm/vs/basic-languages/monaco.contribution')
   ]).then(([monaco]) => {
     configureMonacoLanguageServices(monaco)
+    monaco.editor.onDidCreateEditor((editor) => {
+      const element = editor.getDomNode()
+      if (!element) return
+      const unregister = registerVoiceInputTarget(element, () => {
+        const model = editor.getModel()
+        const selection = editor.getSelection()
+        if (!model || !selection || editor.getRawOptions().readOnly) return null
+        const version = model.getVersionId()
+        return {
+          kind: 'text',
+          insert(text) {
+            if (!isVoiceTargetVisible(element) || model.isDisposed() || editor.getModel() !== model || model.getVersionId() !== version || editor.getRawOptions().readOnly) return false
+            editor.pushUndoStop()
+            const inserted = editor.executeEdits('voice-input', [{ range: selection, text, forceMoveMarkers: true }])
+            editor.pushUndoStop()
+            editor.focus()
+            return inserted
+          }
+        }
+      })
+      editor.onDidDispose(unregister)
+    })
     return monaco
   })
   return monacoPromise

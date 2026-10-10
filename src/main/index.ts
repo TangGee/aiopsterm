@@ -60,6 +60,10 @@ if (process.env.AIOPSTERM_USER_DATA_DIR) {
   app.setPath('userData', process.env.AIOPSTERM_USER_DATA_DIR)
 }
 
+if (process.platform === 'linux' && process.env.XDG_SESSION_TYPE === 'wayland') {
+  app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal')
+}
+
 app.setName('aiopsterm')
 app.setAppUserModelId('app.aiopsterm.desktop')
 

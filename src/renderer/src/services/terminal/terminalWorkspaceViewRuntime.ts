@@ -1,3 +1,4 @@
+import { registerVoiceInputTarget, isVoiceTargetVisible } from '@/services/voice/voiceInputTargets'
 import { nextTick, reactive, type ComponentPublicInstance, type ComputedRef, type Ref } from 'vue'
 import { Terminal as XtermTerminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -109,6 +110,7 @@ export type TerminalView = {
   lastOutput: string
   openedElement?: HTMLElement
   domDisposables?: Array<() => void>
+  voiceInputDispose?: () => void
   outputQueue?: TerminalOutputWriteQueue
   outputPerf?: TerminalOutputPerfSummary
   clearPendingOutput?: () => void
@@ -458,6 +460,24 @@ export const createTerminalWorkspaceViewRuntime = ({
   }
 
   const attachTerminalKeyboardShortcutHandler = (panel: TerminalPanel, view: TerminalView) => {
+    view.voiceInputDispose?.()
+    const openedElement = view.openedElement
+    if (openedElement) {
+      view.voiceInputDispose = registerVoiceInputTarget(openedElement, () => {
+        const sessionId = panel.sessionId
+        if (!sessionId) return null
+        return {
+          kind: 'terminal',
+          insert(text) {
+            if (!isVoiceTargetVisible(openedElement) || terminalViews.get(panel.id) !== view || panel.sessionId !== sessionId || workspace.activePanelId !== panel.id) return false
+            void writeXtermInput(panel.id, text.replace(/[\r\n\x00-\x1f\x7f-\x9f]+/g, ' '))
+            view.terminal.focus()
+            return true
+          }
+        }
+      })
+    }
+
     view.terminal.attachCustomKeyEventHandler?.((event) => {
       if (isTerminalDeletePreviousWordShortcut(event) && view.terminal.input) {
         event.preventDefault()
@@ -634,6 +654,7 @@ export const createTerminalWorkspaceViewRuntime = ({
     clearQueuedTerminalOutput(view, { dispose: true })
     flushTerminalOutputPerf(panelId, view, reason)
     view.resizeObserver?.disconnect()
+    view.voiceInputDispose?.()
     view.domDisposables?.forEach((dispose) => dispose())
     view.terminal.dispose()
     terminalViews.delete(panelId)
@@ -1424,6 +1445,8 @@ export const createTerminalWorkspaceViewRuntime = ({
       clearQueuedTerminalOutput(view, { dispose: true })
       flushTerminalOutputPerf(panelId, view, 'runtime-disposed')
       view.resizeObserver?.disconnect()
+      view.voiceInputDispose?.()
+      view.domDisposables?.forEach((dispose) => dispose())
       view.terminal.dispose()
     })
     terminalViews.clear()
