@@ -70,7 +70,7 @@ describe('voice model installation', () => {
     const path = await target()
     await expect(downloadVoiceArchive('https://example.test/archive', path, '', new AbortController().signal, vi.fn(),
       vi.fn(async () => new Response('unavailable', { status: 503 })) as typeof fetch)).rejects.toThrow('503')
-    const fetcher = vi.fn(async (_url, options) => options?.headers
+    const fetcher = vi.fn(async (_url, options) => options?.headers?.Range
       ? new Response('bad range', { status: 200 })
       : new Response('', { headers: { 'content-length': String(17 * 1024 * 1024), 'accept-ranges': 'bytes' } }))
     await expect(downloadVoiceArchive('https://example.test/archive', path, '', new AbortController().signal, vi.fn(), fetcher as typeof fetch)).rejects.toThrow('range')
