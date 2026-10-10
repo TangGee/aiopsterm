@@ -428,6 +428,7 @@ vi.mock('monaco-editor/esm/vs/editor/editor.api', () => {
   }
   return {
     editor: {
+      onDidCreateEditor: vi.fn(() => ({ dispose: vi.fn() })),
       create: monacoMocks.create,
       createModel: monacoMocks.createModel,
       getModel: monacoMocks.getModel,
