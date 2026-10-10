@@ -410,6 +410,7 @@ export const enUS: LocaleMessages = {
   'database.sql.results.exportCurrentPage': 'Export current SQL result page',
   'database.sql.results.chartCurrentPage': 'Chart current SQL result page',
   'database.sql.results.commentCurrentResult': 'Comment current SQL result',
+  'settings.nav.voice': 'Voice input',
   'settings.nav.general': 'General',
   'settings.nav.terminal': 'Terminal',
   'settings.nav.extensions': 'Extensions',

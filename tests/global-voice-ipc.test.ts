@@ -20,7 +20,7 @@ vi.mock('electron', () => ({
   },
   safeStorage: { isEncryptionAvailable: () => true, encryptString: (text: string) => Buffer.from(`encrypted:${text}`), decryptString: (bytes: Buffer) => bytes.toString().replace('encrypted:', '') }
 }))
-vi.mock('../src/main/backend/ai/voiceInputService', () => ({ transcribeGlobalVoice: fake.transcribe }))
+vi.mock('../src/main/backend/ai/voiceInputService', () => ({ transcribeGlobalVoice: fake.transcribe, validateVoicePreferences: vi.fn(async () => undefined) }))
 const sender = { id: 1, send: vi.fn(), once: vi.fn(), isDestroyed: () => false }
 const invoke = (name: string, ...args: any[]) => fake.handlers.get(`voice:${name}`)!({ sender }, ...args)
 
@@ -55,6 +55,7 @@ describe('global voice IPC', () => {
   it('keeps credentials out of returned preferences and decrypts only for transcription', async () => {
     invoke('status')
     const status = invoke('preferences', { mode: 'service', apiKey: 'private-key', model: 'speech' })
+    expect(sender.send).toHaveBeenCalledWith('voice:status-changed', status)
     expect(status.preferences.apiKey).toBeUndefined()
     expect(fake.stored.get('preferences').apiKey).toBeUndefined()
     expect(fake.stored.get('encryptedKey')).not.toContain('private-key')

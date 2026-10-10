@@ -412,6 +412,7 @@ export const itIT = completeLocaleMessages({
   'database.sql.results.exportCurrentPage': 'Esporta la pagina corrente del risultato SQL',
   'database.sql.results.chartCurrentPage': 'Grafico della pagina corrente del risultato SQL',
   'database.sql.results.commentCurrentResult': 'Commenta il risultato SQL corrente',
+  'settings.nav.voice': 'Input vocale',
   'settings.nav.general': 'Generale',
   'settings.nav.terminal': 'Terminale',
   'settings.nav.extensions': 'Estensioni',

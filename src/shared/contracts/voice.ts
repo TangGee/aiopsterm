@@ -21,6 +21,8 @@ export type VoiceTranscriptionResult = AiopsMutationResult<{
 
 export type VoiceInputPreferences = {
   mode: 'local' | 'service'
+  localEngine?: 'whisper' | 'sensevoice'
+  tokensPath?: string
   endpoint: string
   model: string
   apiKey?: string

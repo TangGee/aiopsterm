@@ -412,6 +412,7 @@ export const ptPT = completeLocaleMessages({
   'database.sql.results.exportCurrentPage': 'Exportar a página atual do resultado SQL',
   'database.sql.results.chartCurrentPage': 'Gráfico da página atual do resultado SQL',
   'database.sql.results.commentCurrentResult': 'Comentar o resultado SQL atual',
+  'settings.nav.voice': 'Entrada de voz',
   'settings.nav.general': 'Geral',
   'settings.nav.terminal': 'Terminal',
   'settings.nav.extensions': 'Extensões',

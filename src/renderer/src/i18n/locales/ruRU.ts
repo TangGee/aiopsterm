@@ -412,6 +412,7 @@ export const ruRU = completeLocaleMessages({
   'database.sql.results.exportCurrentPage': 'Экспортировать текущую страницу результата SQL',
   'database.sql.results.chartCurrentPage': 'График по текущей странице результата SQL',
   'database.sql.results.commentCurrentResult': 'Комментировать текущий результат SQL',
+  'settings.nav.voice': 'Голосовой ввод',
   'settings.nav.general': 'Общие',
   'settings.nav.terminal': 'Терминал',
   'settings.nav.extensions': 'Расширения',

@@ -412,6 +412,7 @@ export const koKR = completeLocaleMessages({
   'database.sql.results.exportCurrentPage': '현재 SQL 결과 페이지 내보내기',
   'database.sql.results.chartCurrentPage': '현재 SQL 결과 페이지 차트화',
   'database.sql.results.commentCurrentResult': '현재 SQL 결과에 주석',
+  'settings.nav.voice': '음성 입력',
   'settings.nav.general': '일반',
   'settings.nav.terminal': '터미널',
   'settings.nav.extensions': '확장',

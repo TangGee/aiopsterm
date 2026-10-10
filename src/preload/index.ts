@@ -379,6 +379,12 @@ const api: AiopsPreloadApi = {
     return () => ipcRenderer.off('cline-agent:task-event', wrapped)
   },
   transcribeVoiceInput: (input) => ipcRenderer.invoke('voice:transcribe', input),
+  validateVoiceInputPreferences: (input) => ipcRenderer.invoke('voice:validate', input),
+  onVoiceInputStatusChanged: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
+    ipcRenderer.on('voice:status-changed', wrapped)
+    return () => ipcRenderer.off('voice:status-changed', wrapped)
+  },
   getVoiceInputStatus: () => ipcRenderer.invoke('voice:status'),
   saveVoiceInputPreferences: (input) => ipcRenderer.invoke('voice:preferences', input),
   cancelVoiceTranscription: (requestId) => ipcRenderer.invoke('voice:cancel', requestId),

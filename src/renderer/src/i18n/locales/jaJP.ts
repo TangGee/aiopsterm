@@ -412,6 +412,7 @@ export const jaJP = completeLocaleMessages({
   'database.sql.results.exportCurrentPage': '現在の SQL 結果ページをエクスポート',
   'database.sql.results.chartCurrentPage': '現在の SQL 結果ページをチャート化',
   'database.sql.results.commentCurrentResult': '現在の SQL 結果にコメント',
+  'settings.nav.voice': '音声入力',
   'settings.nav.general': '一般',
   'settings.nav.terminal': 'ターミナル',
   'settings.nav.extensions': '拡張機能',

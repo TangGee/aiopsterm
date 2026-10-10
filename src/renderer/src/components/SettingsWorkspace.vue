@@ -71,6 +71,10 @@
           <TerminalSettings />
         </section>
 
+        <section v-else-if="workspace.activeSettingsSection === 'voice'" class="settings-content-page">
+          <VoiceInputSettings />
+        </section>
+
         <section
           v-else-if="workspace.activeSettingsSection === 'models'"
           class="settings-content-page"
@@ -174,6 +178,7 @@
 </template>
 
 <script setup lang="ts">
+import VoiceInputSettings from './voice/VoiceInputSettings.vue'
 import { computed } from 'vue'
 import type { I18nKey } from '@/i18n'
 import type { SettingSectionKey } from '@/config/settings'

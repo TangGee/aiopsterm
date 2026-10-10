@@ -412,6 +412,7 @@ export const arAR = completeLocaleMessages({
   'database.sql.results.exportCurrentPage': 'تصدير صفحة نتيجة SQL الحالية',
   'database.sql.results.chartCurrentPage': 'رسم صفحة نتيجة SQL الحالية بيانيًا',
   'database.sql.results.commentCurrentResult': 'التعليق على نتيجة SQL الحالية',
+  'settings.nav.voice': 'الإدخال الصوتي',
   'settings.nav.general': 'عام',
   'settings.nav.terminal': 'الطرفية',
   'settings.nav.extensions': 'الإضافات',

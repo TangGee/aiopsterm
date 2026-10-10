@@ -412,6 +412,7 @@ export const deDE = completeLocaleMessages({
   'database.sql.results.exportCurrentPage': 'Aktuelle SQL-Ergebnisseite exportieren',
   'database.sql.results.chartCurrentPage': 'Aktuelle SQL-Ergebnisseite als Diagramm',
   'database.sql.results.commentCurrentResult': 'Aktuelles SQL-Ergebnis kommentieren',
+  'settings.nav.voice': 'Spracheingabe',
   'settings.nav.general': 'Allgemein',
   'settings.nav.terminal': 'Terminal',
   'settings.nav.extensions': 'Erweiterungen',

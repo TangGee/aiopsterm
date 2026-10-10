@@ -734,6 +734,8 @@ export type AiopsPreloadApi = {
   abortClineAgentTask: (input: ClineAgentAbortInput) => Promise<ClineAgentAbortResult>
   onClineAgentTaskEvent: (listener: (event: ClineAgentTaskEvent) => void) => () => void
   transcribeVoiceInput: (input?: VoiceTranscriptionInput) => Promise<VoiceTranscriptionResult>
+  validateVoiceInputPreferences?: (input: VoiceInputPreferences) => Promise<{ ok: boolean; errorMessage?: string }>
+  onVoiceInputStatusChanged?: (listener: (status: VoiceInputStatus) => void) => () => void
   getVoiceInputStatus?: () => Promise<VoiceInputStatus>
   saveVoiceInputPreferences?: (input: Partial<VoiceInputPreferences>) => Promise<VoiceInputStatus>
   cancelVoiceTranscription?: (requestId: string) => Promise<void>

@@ -1,12 +1,12 @@
 import { app, BrowserWindow, globalShortcut, safeStorage, type IpcMain } from 'electron'
 import Store from 'electron-store'
-import { transcribeGlobalVoice } from '../backend/ai/voiceInputService'
+import { transcribeGlobalVoice, validateVoicePreferences } from '../backend/ai/voiceInputService'
 import type { VoiceInputPreferences, VoiceInputStatus, VoiceTranscriptionInput } from '@shared/contracts/voice'
 
 export const registerVoiceIpc = (ipcMain: IpcMain) => {
   const store = new Store<{ preferences: VoiceInputPreferences; encryptedKey?: string }>({
     name: 'voice-input',
-    defaults: { preferences: { mode: 'local', endpoint: '', model: '', executablePath: '', modelPath: '', shortcut: 'CommandOrControl+Alt+R', headsetEnabled: false } }
+    defaults: { preferences: { mode: 'local', localEngine: 'sensevoice', tokensPath: '', endpoint: '', model: '', executablePath: '', modelPath: '', shortcut: 'CommandOrControl+Alt+R', headsetEnabled: false } }
   })
   const requests = new Map<string, AbortController>()
   let keyboard = ''
@@ -60,12 +60,13 @@ export const registerVoiceIpc = (ipcMain: IpcMain) => {
     if (!input || typeof input !== 'object') throw new Error('Invalid voice preferences.')
     const previous = preferences()
     const next = { ...previous }
-    for (const key of ['endpoint', 'model', 'executablePath', 'modelPath', 'shortcut'] as const) {
+    for (const key of ['endpoint', 'model', 'executablePath', 'modelPath', 'tokensPath', 'shortcut'] as const) {
       if (input[key] !== undefined) {
         if (typeof input[key] !== 'string' || input[key].length > 4096) throw new Error('Invalid voice preference.')
         next[key] = input[key].trim()
       }
     }
+    if (input.localEngine === 'whisper' || input.localEngine === 'sensevoice') next.localEngine = input.localEngine
     if (input.mode === 'local' || input.mode === 'service') next.mode = input.mode
     if (typeof input.headsetEnabled === 'boolean') next.headsetEnabled = input.headsetEnabled
     if (input.position && Number.isFinite(input.position.right) && Number.isFinite(input.position.bottom)) next.position = { right: Math.max(8, input.position.right), bottom: Math.max(8, input.position.bottom) }
@@ -78,7 +79,13 @@ export const registerVoiceIpc = (ipcMain: IpcMain) => {
     }
     store.set('preferences', next)
     if (previous.shortcut !== next.shortcut || previous.headsetEnabled !== next.headsetEnabled) bind()
-    return status()
+    const value = status()
+    if (owner && !owner.isDestroyed()) owner.send('voice:status-changed', value)
+    return value
+  })
+  ipcMain.handle('voice:validate', async (_event, input: VoiceInputPreferences) => {
+    try { await validateVoicePreferences(input); return { ok: true } }
+    catch (error) { return { ok: false, errorMessage: error instanceof Error ? error.message : String(error) } }
   })
   ipcMain.handle('voice:transcribe', async (event, input: VoiceTranscriptionInput = {}) => {
     const id = `${event.sender.id}:${input.requestId || 'classic'}`

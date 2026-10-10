@@ -28,7 +28,7 @@ const input = () => { const element = document.createElement('textarea'); elemen
 const clickMic = async () => { await wrapper!.get('[data-testid="global-voice-button"]').trigger('pointerdown', { button: 0, clientX: 500, clientY: 500 }); await wrapper!.get('[data-testid="global-voice-button"]').trigger('pointerup'); await wrapper!.get('[data-testid="global-voice-button"]').trigger('click'); await flushPromises() }
 
 beforeEach(() => {
-  session.context = reactive({ activePanelId: 'one', selectedConversationId: 'chat-one', selectedManagedAiSessionKey: '', activeModule: 'terminal', mode: 'terminal' })
+  session.context = reactive({ activePanelId: 'one', selectedConversationId: 'chat-one', selectedManagedAiSessionKey: '', activeModule: 'terminal', activeSettingsSection: 'general', setActiveSettingsSection: vi.fn((value) => { session.context.activeSettingsSection = value }), setActiveModule: vi.fn((value) => { session.context.activeModule = value }), mode: 'terminal' })
   window.aiops = { ...original,
     getVoiceInputStatus: vi.fn(async () => ({ preferences: { ...preferences }, shortcutRegistered: true, headsetRegistered: false })),
     saveVoiceInputPreferences: vi.fn(async (patch) => ({ preferences: { ...preferences, ...patch }, shortcutRegistered: true, headsetRegistered: Boolean(patch.headsetEnabled) })),
@@ -108,11 +108,26 @@ describe('global voice controls', () => {
     expect(insert).toHaveBeenCalledWith('echo hi whoami ')
     remove()
   })
-  it('detects headset events without recording and reports registration conflicts', async () => {
+  it('routes the gear to formal settings and leaves headset detection to that page', async () => {
     await mountInput(); await wrapper!.get('button[aria-label="语音设置"]').trigger('click')
-    await wrapper!.findAll('button').find((entry) => entry.text() === '检测耳机按键')!.trigger('click'); await flushPromises()
+    expect(session.context.setActiveSettingsSection).toHaveBeenCalledWith('voice')
+    expect(session.context.setActiveModule).toHaveBeenCalledWith('settings')
     trigger?.({ source: 'headset', background: false }); await flushPromises()
-    expect(wrapper!.text()).toContain('已检测到耳机按键')
     expect(recording.runtime.start).not.toHaveBeenCalled()
+  })
+  it('routes first use to settings without requesting the microphone', async () => {
+    vi.mocked(window.aiops.getVoiceInputStatus!).mockResolvedValue({ preferences: { ...preferences, endpoint: '' }, shortcutRegistered: true, headsetRegistered: false })
+    await mountInput(); input(); await clickMic()
+    expect(session.context.setActiveSettingsSection).toHaveBeenCalledWith('voice')
+    expect(recording.runtime.start).not.toHaveBeenCalled()
+  })
+  it('uses settings changes immediately without restarting the app', async () => {
+    let changed!: (status: any) => void
+    window.aiops.onVoiceInputStatusChanged = vi.fn((listener) => { changed = listener; return vi.fn() })
+    vi.mocked(window.aiops.getVoiceInputStatus!).mockResolvedValue({ preferences: { ...preferences, endpoint: '' }, shortcutRegistered: true, headsetRegistered: false })
+    await mountInput()
+    changed({ preferences, shortcutRegistered: true, headsetRegistered: false })
+    await clickMic()
+    expect(recording.runtime.start).toHaveBeenCalledOnce()
   })
 })

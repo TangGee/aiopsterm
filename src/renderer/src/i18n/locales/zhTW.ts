@@ -25,6 +25,7 @@ export const zhTW = completeLocaleMessages({
   'module.settings': '設定',
   'module.user': '使用者',
   'common.settings': '設定',
+  'settings.nav.voice': '語音輸入',
   'settings.nav.general': '一般',
   'settings.nav.terminal': '終端',
   'settings.nav.extensions': '擴充',

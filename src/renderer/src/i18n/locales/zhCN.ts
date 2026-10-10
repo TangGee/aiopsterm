@@ -408,6 +408,7 @@ export const zhCN = {
   'database.sql.results.exportCurrentPage': '导出当前 SQL 结果页',
   'database.sql.results.chartCurrentPage': '为当前 SQL 结果页绘图',
   'database.sql.results.commentCurrentResult': '评论当前 SQL 结果',
+  'settings.nav.voice': '语音输入',
   'settings.nav.general': '通用',
   'settings.nav.terminal': '终端',
   'settings.nav.extensions': '扩展',

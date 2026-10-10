@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import { Mic, Square, LoaderCircle, Settings, X, FileText } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { registerGlobalVoiceController } from '@/services/voice/globalVoiceController'
+import { isVoiceInputConfigured } from '@shared/voicePresets'
 import { useI18n } from '@/i18n'
 import { voiceInputMessages } from '@/i18n/locales/voiceInput'
 import { captureVoiceInputTarget, type VoiceInputTarget } from '@/services/voice/voiceInputTargets'
@@ -15,7 +16,6 @@ const t = (key: keyof typeof voiceInputMessages.en) => voiceInputMessages[locale
 const root = ref<HTMLElement | null>(null)
 const transcriptInput = ref<HTMLTextAreaElement | null>(null)
 const panel = ref(false)
-const settings = ref(false)
 const transcript = ref('')
 const notice = ref('')
 const position = ref({ right: 24, bottom: 96 })
@@ -23,16 +23,13 @@ const now = ref(Date.now())
 const level = ref(0)
 const status = ref<VoiceInputStatus>()
 const preferences = ref<VoiceInputPreferences>({ mode: 'local', endpoint: '', model: '', executablePath: '', modelPath: '', shortcut: 'CommandOrControl+Alt+R', headsetEnabled: false })
-const apiKey = ref('')
-const clearKey = ref(false)
-const detecting = ref(false)
 const target = shallowRef<VoiceInputTarget | null>(null)
 let lastFocused: Element | null = null
 let captured: VoiceInputTarget | null = null
 let draftTarget: VoiceInputTarget | null = null
 let unsubscribe: (() => void) | undefined
 let interval: ReturnType<typeof setInterval> | undefined
-let detectionTimer: ReturnType<typeof setTimeout> | undefined
+let unsubscribeStatus: (() => void) | undefined
 let context: AudioContext | null = null
 let analyser: AnalyserNode | null = null
 let disposed = false
@@ -89,35 +86,24 @@ const applyStatus = (value: VoiceInputStatus) => {
   preferences.value = { ...value.preferences }
   if (value.preferences.position) { position.value = { ...value.preferences.position }; clampPosition() }
 }
-const save = async () => {
-  try {
-    const savePreferences = window.aiops.saveVoiceInputPreferences
-    if (!savePreferences) throw new Error('Voice settings are unavailable.')
-    const value = await savePreferences({ ...preferences.value, position: position.value, ...(clearKey.value ? { apiKey: '' } : apiKey.value ? { apiKey: apiKey.value } : {}) })
-    if (disposed) return
-    applyStatus(value)
-    apiKey.value = ''
-    clearKey.value = false
-    notice.value = t('saved')
-  } catch (cause) { notice.value = String(cause) }
+const openSettings = () => {
+  panel.value = false
+  workspace.setActiveSettingsSection('voice')
+  workspace.setActiveModule('settings')
 }
 const toggle = async (destination?: VoiceInputTarget | null, background = false) => {
   if (state.value === 'recording') { destination?.dispose?.(); recording.stop(); return }
   if (state.value !== 'idle') { destination?.dispose?.(); return }
-  const config = status.value?.preferences
-  const configured = config && (config.mode === 'local' ? config.executablePath && config.modelPath : config.endpoint && config.model)
-  if (!configured) { destination?.dispose?.(); settings.value = true; panel.value = true; notice.value = t('setup'); return }
+  if (!isVoiceInputConfigured(status.value?.preferences)) { destination?.dispose?.(); openSettings(); return }
   target.value?.dispose?.()
   targetChanged = false
-  settings.value = false
   target.value = background ? null : destination === undefined ? captureVoiceInputTarget(lastFocused) : destination
   draftTarget?.dispose?.()
   draftTarget = null
   notice.value = ''
   if (!target.value || target.value.kind === 'terminal') {
     panel.value = true
-    settings.value = false
-    notice.value = target.value?.kind === 'terminal' ? t('terminal') : t('fallback')
+      notice.value = target.value?.kind === 'terminal' ? t('terminal') : t('fallback')
   }
   await recording.start()
 }
@@ -157,28 +143,13 @@ const externalPointer = (event: PointerEvent) => {
   if (event.target instanceof Element && !root.value?.contains(event.target) && !event.target.closest('input, textarea, [contenteditable], .monaco-editor, .xterm')) lastFocused = null
 }
 const cancel = () => { recording.cancel(); target.value?.dispose?.(); target.value = null; draftTarget?.dispose?.(); draftTarget = null; captured?.dispose?.(); captured = null; notice.value = '' }
-const close = () => { cancel(); panel.value = false; settings.value = false }
+const close = () => { cancel(); panel.value = false }
 const onKey = (event: KeyboardEvent) => {
   if (event.key === 'Escape' && (busy.value || panel.value)) { event.preventDefault(); event.stopPropagation(); close() }
 }
 const onTrigger = (event: VoiceInputTrigger) => {
-  if (event.source === 'headset' && detecting.value) {
-    clearTimeout(detectionTimer)
-    detecting.value = false
-    notice.value = t('detected')
-    return
-  }
-  if (settings.value) return
+  if (event.source === 'headset' && workspace.activeModule === 'settings' && workspace.activeSettingsSection === 'voice' && !busy.value) return
   void toggle(event.background ? null : captureVoiceInputTarget(document.activeElement), event.background)
-}
-const detect = async () => {
-  preferences.value.headsetEnabled = true
-  await save()
-  if (!status.value?.headsetRegistered) { notice.value = t('headsetFailed'); return }
-  detecting.value = true
-  notice.value = t('waiting')
-  clearTimeout(detectionTimer)
-  detectionTimer = setTimeout(() => { detecting.value = false; notice.value = t('unavailable') }, 10_000)
 }
 const continueDictating = async () => {
   const input = transcriptInput.value
@@ -197,10 +168,6 @@ const copy = async () => {
   try { await navigator.clipboard.writeText(transcript.value); notice.value = t('copied') }
   catch { notice.value = t('copiedFailed'); transcriptInput.value?.select() }
 }
-const browse = async (field: 'executablePath' | 'modelPath') => {
-  const result = await window.aiops.showOpenDialog({ properties: ['openFile'] })
-  if (result?.filePaths?.[0]) preferences.value[field] = result.filePaths[0]
-}
 
 watch(() => [workspace.activePanelId, workspace.selectedConversationId, workspace.selectedManagedAiSessionKey, workspace.activeModule, workspace.mode], () => {
   if (target.value) { targetChanged = true; target.value.dispose?.() }
@@ -213,6 +180,7 @@ onMounted(async () => {
   window.addEventListener('keydown', onKey, true)
   window.addEventListener('resize', clampPosition)
   unsubscribe = window.aiops.onVoiceInputTrigger?.(onTrigger)
+  unsubscribeStatus = window.aiops.onVoiceInputStatusChanged?.(applyStatus)
   interval = setInterval(() => {
     now.value = Date.now()
     if (analyser) {
@@ -232,7 +200,7 @@ onBeforeUnmount(() => {
   unsubscribe?.()
   unregisterController?.()
   clearInterval(interval)
-  clearTimeout(detectionTimer)
+  unsubscribeStatus?.()
   document.removeEventListener('focusin', rememberFocus)
   document.removeEventListener('pointerdown', externalPointer, true)
   window.removeEventListener('keydown', onKey, true)
@@ -243,29 +211,7 @@ onBeforeUnmount(() => {
 <template>
   <div ref="root" class="global-voice" data-testid="global-voice" :style="{ right: `${position.right}px`, bottom: `${position.bottom}px` }">
     <section v-if="panel" class="voice-panel" role="dialog" :aria-label="t('title')">
-      <header><strong>{{ settings ? t('settings') : t('title') }}</strong><button :aria-label="t('close')" @click="close"><X :size="18" /></button></header>
-      <div v-if="settings" class="voice-settings">
-        <label>{{ t('mode') }}<select v-model="preferences.mode"><option value="local">{{ t('local') }}</option><option value="service">{{ t('service') }}</option></select></label>
-        <template v-if="preferences.mode === 'local'">
-          <p>{{ t('localHelp') }}</p>
-          <label>{{ t('executable') }}<input v-model="preferences.executablePath" /><button @click="browse('executablePath')">{{ t('browse') }}</button></label>
-          <label>{{ t('modelFile') }}<input v-model="preferences.modelPath" /><button @click="browse('modelPath')">{{ t('browse') }}</button></label>
-        </template>
-        <template v-else>
-          <p>{{ t('serviceHelp') }}</p>
-          <label>{{ t('endpoint') }}<input v-model="preferences.endpoint" placeholder="https://host/v1/audio/transcriptions" /></label>
-          <label>{{ t('model') }}<input v-model="preferences.model" /></label>
-          <label>{{ t('apiKey') }}<input v-model="apiKey" type="password" autocomplete="off" /></label>
-          <label v-if="preferences.hasApiKey"><input v-model="clearKey" type="checkbox" />{{ t('clearKey') }}</label>
-        </template>
-        <label>{{ t('shortcut') }}<input v-model="preferences.shortcut" /></label>
-        <p :class="{ warning: !status?.shortcutRegistered }">{{ status?.shortcutRegistered ? t('registered') : t('conflict') }}</p>
-        <label><input v-model="preferences.headsetEnabled" type="checkbox" />{{ t('headset') }}</label>
-        <p>{{ t('headsetHelp') }}</p>
-        <p v-if="status?.preferences.headsetEnabled && !status.headsetRegistered" role="status">{{ t('headsetFailed') }}</p>
-        <div class="voice-actions"><button :disabled="detecting" @click="detect">{{ t('test') }}</button><button @click="save">{{ t('save') }}</button></div>
-      </div>
-      <template v-else>
+      <header><strong>{{ t('title') }}</strong><button :aria-label="t('close')" @click="close"><X :size="18" /></button></header>
         <p>{{ notice || t('fallback') }}</p>
         <textarea ref="transcriptInput" v-model="transcript" :aria-label="t('text')" rows="7" data-testid="voice-transcript" />
         <div class="voice-actions">
@@ -275,14 +221,12 @@ onBeforeUnmount(() => {
           <button v-if="terminalTarget" :disabled="busy || !transcript" @click="insertTerminal">{{ t('insert') }}</button>
           <button @click="close">{{ t('done') }}</button>
         </div>
-      </template>
-      <p v-if="settings && notice" role="status">{{ notice }}</p>
     </section>
     <div v-if="errorText" class="voice-error" role="alert">{{ t('failed') }}: {{ errorText }}<button @click="error = ''" :aria-label="t('close')"><X :size="14" /></button></div>
     <div class="voice-controls">
       <div v-if="busy" class="voice-status" role="status"><span>{{ t(state) }} {{ state === 'recording' ? duration : '' }}</span><meter v-if="state === 'recording'" min="0" max="1" :value="level" :aria-label="t('recording')" /><button @click="cancel">{{ t('cancel') }}</button></div>
-      <button v-if="!busy" class="voice-secondary" :aria-label="t('openDraft')" :title="t('openDraft')" @click="panel = true; settings = false"><FileText :size="17" /></button>
-      <button v-if="!busy" class="voice-secondary" :aria-label="t('settings')" :title="t('settings')" @click="panel = true; settings = true"><Settings :size="17" /></button>
+      <button v-if="!busy" class="voice-secondary" :aria-label="t('openDraft')" :title="t('openDraft')" @click="panel = true"><FileText :size="17" /></button>
+      <button v-if="!busy" class="voice-secondary" :aria-label="t('settings')" :title="t('settings')" @click="openSettings"><Settings :size="17" /></button>
       <button class="voice-mic" :class="{ recording: state === 'recording' }" data-testid="global-voice-button" :aria-label="buttonTitle" :title="`${buttonTitle}. ${t('drag')}`" :aria-pressed="state === 'recording'" :aria-busy="state === 'starting' || state === 'transcribing'" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerUp" @pointercancel="drag = null; captured = null" @click="click">
         <Square v-if="state === 'recording'" :size="20" /><LoaderCircle v-else-if="busy" class="voice-spinner" :size="23" /><Mic v-else :size="24" />
       </button>
@@ -308,8 +252,6 @@ onBeforeUnmount(() => {
 .voice-panel textarea, .voice-panel input:not([type=checkbox]), .voice-panel select { box-sizing: border-box; width: 100%; background: var(--theme-core-surface-muted, #302e40); color: inherit; border: 1px solid var(--theme-core-border, #545268); border-radius: 6px; padding: 9px; margin: 5px 0; }
 .voice-panel textarea { resize: vertical; min-height: 120px; }
 .voice-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.voice-settings { display: grid; gap: 10px; }
-.voice-settings label { display: block; }
 .voice-error { max-width: 380px; padding: 10px; margin-bottom: 8px; background: var(--theme-core-surface-muted, #2c2a3c); border: 1px solid #bd3549; border-radius: 8px; overflow-wrap: anywhere; }
 .voice-error button { float: right; }
 .voice-spinner { animation: voice-spin 1s linear infinite; }

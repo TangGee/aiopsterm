@@ -1,5 +1,5 @@
 import type { Component } from 'vue'
-import { Bell, BookOpen, Bot, Box, CreditCard, Info, Keyboard, Lock, Server, Settings, Share2, Smartphone, SquareTerminal } from 'lucide-vue-next'
+import { Mic, Bell, BookOpen, Bot, Box, CreditCard, Info, Keyboard, Lock, Server, Settings, Share2, Smartphone, SquareTerminal } from 'lucide-vue-next'
 import { localeDisplayNames, supportedLocales, type I18nKey } from '@/i18n/messages'
 import { themeSelectionOptions } from '@/services/app/themeRuntime'
 import auroraVeilBackground from '@/assets/backgrounds/aurora-veil.webp'
@@ -18,6 +18,7 @@ export type SettingSectionKey =
   | 'general'
   | 'terminal'
   | 'extensions'
+  | 'voice'
   | 'models'
   | 'billing'
   | 'ai'
@@ -45,6 +46,7 @@ export const settingsNavItems: SettingsNavItem[] = [
   { key: 'general', label: '通用', labelKey: 'settings.nav.general', icon: Settings },
   { key: 'terminal', label: '终端', labelKey: 'settings.nav.terminal', icon: SquareTerminal },
   { key: 'extensions', label: '扩展', labelKey: 'settings.nav.extensions', icon: Box },
+  { key: 'voice', label: 'Voice input', labelKey: 'settings.nav.voice', icon: Mic },
   { key: 'models', label: '模型', labelKey: 'settings.nav.models', icon: Bot },
   { key: 'aiNotifications', label: 'AI 通知', labelKey: 'settings.nav.aiNotifications', icon: Bell },
   { key: 'aiRemoteHostManagement', label: '主机Agent', labelKey: 'settings.nav.aiRemoteHostManagement', icon: Server },

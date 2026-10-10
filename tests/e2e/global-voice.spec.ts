@@ -60,3 +60,36 @@ test('global voice records WAV, inserts with undo, and opens a reusable editor @
     await rm(directory, { recursive: true, force: true })
   }
 })
+
+test('first voice use opens the dedicated settings page with model presets and help @quick', async () => {
+  const directory = path.join(os.tmpdir(), `aiopsterm-voice-setup-${Date.now()}`)
+  await mkdir(directory, { recursive: true })
+  const app = await electron.launch({
+    args: ['.', '--lang=zh-CN'],
+    env: { ...await isolatedEnvironment(directory), NODE_ENV: 'test', AIOPSTERM_USER_DATA_DIR: directory, AIOPSTERM_MCP_DISCOVERY_DISABLE: '1', ELECTRON_DISABLE_SECURITY_WARNINGS: '1' }
+  })
+  try {
+    const page = await app.firstWindow()
+    await page.waitForLoadState('domcontentloaded')
+    await page.getByTestId('global-voice-button').click()
+    const settings = page.getByTestId('voice-settings-page')
+    await expect(settings).toBeVisible()
+    await expect(page.locator('[data-settings-key="voice"]')).toBeVisible()
+    await expect(page.getByTestId('voice-preset')).toHaveValue('sensevoice')
+    await expect(page.getByTestId('global-voice-button')).toHaveAttribute('aria-pressed', 'false')
+    await page.getByTestId('voice-executable').fill('/missing/sherpa-onnx-offline')
+    await page.getByTestId('voice-model-file').fill('/missing/model.int8.onnx')
+    await page.getByTestId('voice-tokens').fill('/missing/tokens.txt')
+    await page.getByTestId('voice-save').click()
+    await expect(settings.locator('.voice-notice')).toContainText(/配置检查失败|Configuration check failed/)
+    await page.getByTestId('voice-preset').selectOption('whisper')
+    await expect(page.getByTestId('voice-tokens')).toHaveCount(0)
+    await expect(page.getByTestId('voice-model-file')).toHaveValue('')
+    await page.getByTestId('voice-preset').selectOption('sensevoice')
+    await page.locator('.settings-content-scroll').evaluate((element) => { element.scrollTop = 0 })
+    await page.screenshot({ path: 'test-results/voice-settings-presets.png', fullPage: true })
+  } finally {
+    await app.close()
+    await rm(directory, { recursive: true, force: true })
+  }
+})

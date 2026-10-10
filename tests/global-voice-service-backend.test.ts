@@ -4,7 +4,7 @@ import { mkdtemp, writeFile, readFile, rm, access } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
-import { transcribeGlobalVoice } from '../src/main/backend/ai/voiceInputService'
+import { transcribeGlobalVoice, validateVoicePreferences } from '../src/main/backend/ai/voiceInputService'
 import type { VoiceInputPreferences } from '../src/shared/contracts/voice'
 
 const preferences: VoiceInputPreferences = { mode: 'service', endpoint: '', model: 'speech-model', executablePath: '', modelPath: '', shortcut: '', headsetEnabled: false }
@@ -30,6 +30,37 @@ describe('independent speech service', () => {
       const temporaryAudio = await readFile(trace, 'utf8')
       await expect(access(temporaryAudio)).rejects.toThrow()
     } finally { await rm(directory, { recursive: true, force: true }) }
+  })
+
+
+  it.skipIf(process.platform === 'win32')('runs SenseVoice with paired tokens, parses only JSON text and removes temporary audio', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'sensevoice-test-'))
+    const executablePath = join(directory, 'sherpa engine')
+    const modelPath = join(directory, 'model.int8.onnx')
+    const tokensPath = join(directory, 'tokens.txt')
+    const trace = join(directory, 'trace.json')
+    await writeFile(modelPath, 'model'); await writeFile(tokensPath, 'tokens')
+    await writeFile(executablePath, '#!' + process.execPath + '\n' +
+      'const fs = require("node:fs"); fs.writeFileSync(' + JSON.stringify(trace) + ', JSON.stringify(process.argv.slice(2)));' +
+      'process.stderr.write("diagnostic text"); process.stdout.write(JSON.stringify({text:"<|zh|><|NEUTRAL|>检查 nginx status。"}));', { mode: 0o700 })
+    const config = { ...preferences, mode: 'local' as const, localEngine: 'sensevoice' as const, executablePath, modelPath, tokensPath }
+    try {
+      const result = await transcribeGlobalVoice({ audioBytes: audio }, config, new AbortController().signal)
+      expect(result).toMatchObject({ ok: true, data: { text: '检查 nginx status。', provider: 'aiopsterm-local' } })
+      const args = JSON.parse(await readFile(trace, 'utf8')) as string[]
+      expect(args).toContain(`--tokens=${tokensPath}`)
+      expect(args).toContain(`--sense-voice-model=${modelPath}`)
+      expect(args).toContain('--sense-voice-language=auto')
+      expect(args).toContain('--sense-voice-use-itn=1')
+      await expect(access(args.at(-1)!)).rejects.toThrow()
+      await expect(validateVoicePreferences({ ...config, tokensPath: '' })).rejects.toThrow()
+      await expect(validateVoicePreferences({ ...config, tokensPath: directory })).rejects.toThrow()
+    } finally { await rm(directory, { recursive: true, force: true }) }
+  })
+  it('rejects invalid service configuration before saving or contacting it', async () => {
+    await expect(validateVoicePreferences({ ...preferences, endpoint: 'file:///tmp/audio' })).rejects.toThrow()
+    await expect(validateVoicePreferences({ ...preferences, endpoint: 'https://user:secret@host/transcribe' })).rejects.toThrow()
+    await expect(validateVoicePreferences({ ...preferences, endpoint: 'https://host/transcribe', model: '' })).rejects.toThrow()
   })
 
   it('posts actual WAV audio and the speech model to the configured endpoint', async () => {
