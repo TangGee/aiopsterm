@@ -11,7 +11,7 @@ export type VoiceTranscriptionInput = {
   requestId?: string
 }
 
-export type VoiceTranscriptionProvider = 'aiopsterm-local' | ModelProviderCheckKey
+export type VoiceTranscriptionProvider = 'aiopsterm-local' | 'doubao' | ModelProviderCheckKey
 
 export type VoiceTranscriptionResult = AiopsMutationResult<{
   text: string
@@ -21,6 +21,8 @@ export type VoiceTranscriptionResult = AiopsMutationResult<{
 
 export type VoiceInputPreferences = {
   mode: 'local' | 'service'
+  serviceProvider?: 'compatible' | 'doubao'
+  doubaoAppId?: string
   localEngine?: 'whisper' | 'sensevoice'
   tokensPath?: string
   endpoint: string
@@ -36,8 +38,18 @@ export type VoiceInputPreferences = {
 
 export type VoiceInputStatus = {
   preferences: VoiceInputPreferences
+  installation?: VoiceInstallProgress
+  environment?: { platform: string; arch: string; autoInstallSupported: boolean }
   shortcutRegistered: boolean
   headsetRegistered: boolean
 }
 
 export type VoiceInputTrigger = { source: 'shortcut' | 'headset'; background: boolean }
+
+export type VoiceInstallProgress = {
+  phase: 'idle' | 'downloading' | 'extracting' | 'checking' | 'complete' | 'cancelled' | 'error'
+  asset?: 'engine' | 'model'
+  received: number
+  total: number
+  errorMessage?: string
+}

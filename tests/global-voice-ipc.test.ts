@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 const fake = vi.hoisted(() => ({
+  install: vi.fn<(...args: any[]) => Promise<any>>(),
   stored: new Map<string, any>(), bindings: new Map<string, () => void>(), failKeyboard: false,
   handlers: new Map<string, (...args: any[]) => any>(), focused: true,
   window: { show: vi.fn(), focus: vi.fn() },
@@ -12,7 +13,8 @@ vi.mock('electron-store', () => ({ default: class {
   delete(key: string) { fake.stored.delete(key) }
 } }))
 vi.mock('electron', () => ({
-  app: { once: vi.fn() },
+  app: { once: vi.fn(), getPath: () => '/test-user-data' },
+  net: { fetch: vi.fn() },
   BrowserWindow: { fromWebContents: () => ({ ...fake.window, isFocused: () => fake.focused }) },
   globalShortcut: {
     register: (key: string, callback: () => void) => { if (fake.failKeyboard && key !== 'MediaPlayPause') return false; fake.bindings.set(key, callback); return true },
@@ -20,6 +22,7 @@ vi.mock('electron', () => ({
   },
   safeStorage: { isEncryptionAvailable: () => true, encryptString: (text: string) => Buffer.from(`encrypted:${text}`), decryptString: (bytes: Buffer) => bytes.toString().replace('encrypted:', '') }
 }))
+vi.mock('../src/main/backend/ai/voiceModelInstaller', () => ({ installVoiceModel: fake.install, voiceInstallEnvironment: () => ({ platform: 'linux', arch: 'x64', autoInstallSupported: true }) }))
 vi.mock('../src/main/backend/ai/voiceInputService', () => ({ transcribeGlobalVoice: fake.transcribe, validateVoicePreferences: vi.fn(async () => undefined) }))
 const sender = { id: 1, send: vi.fn(), once: vi.fn(), isDestroyed: () => false }
 const invoke = (name: string, ...args: any[]) => fake.handlers.get(`voice:${name}`)!({ sender }, ...args)
@@ -77,5 +80,49 @@ describe('global voice IPC', () => {
     invoke('cancel', 'job')
     expect(signal.aborted).toBe(true)
     finish(); await request
+  })
+})
+
+
+describe('voice install IPC', () => {
+  it('publishes progress and saves model paths only after successful installation', async () => {
+    let finish!: (value: unknown) => void
+    fake.install.mockImplementationOnce((_root, _signal, report) => {
+      report({ phase: 'downloading', asset: 'model', received: 50, total: 100 })
+      return new Promise((resolve) => { finish = resolve })
+    })
+    invoke('status')
+    expect(invoke('install').installation).toMatchObject({ received: 50, total: 100 })
+    invoke('install')
+    expect(fake.install).toHaveBeenCalledTimes(1)
+    expect(invoke('status').preferences.modelPath).toBe('')
+    invoke('preferences', { shortcut: 'Control+Alt+X' })
+    finish({ mode: 'local', localEngine: 'sensevoice', executablePath: '/engine', modelPath: '/model', tokensPath: '/tokens' })
+    await vi.waitFor(() => expect(invoke('status').installation.phase).toBe('complete'))
+    expect(invoke('status').preferences).toMatchObject({ modelPath: '/model', shortcut: 'Control+Alt+X' })
+    expect(sender.send).toHaveBeenCalledWith('voice:status-changed', expect.objectContaining({ installation: expect.objectContaining({ phase: 'complete' }) }))
+  })
+  it('cancels only the caller installation and preserves previous settings on failure', async () => {
+    fake.install.mockImplementationOnce((_root, signal) => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('cancelled')))))
+    invoke('status'); invoke('preferences', { modelPath: '/previous' }); invoke('install')
+    fake.handlers.get('voice:install-cancel')!({ sender: { id: 2 } })
+    expect(fake.install.mock.calls[0][1].aborted).toBe(false)
+    invoke('install-cancel')
+    await vi.waitFor(() => expect(invoke('status').installation.phase).toBe('cancelled'))
+    expect(invoke('status').preferences.modelPath).toBe('/previous')
+    fake.install.mockRejectedValueOnce(new Error('network unavailable'))
+    invoke('install')
+    await vi.waitFor(() => expect(invoke('status').installation.phase).toBe('error'))
+    expect(invoke('status').installation.errorMessage).toBe('network unavailable')
+    expect(invoke('status').preferences.modelPath).toBe('/previous')
+  })
+  it('does not reuse a saved service key for a different provider or endpoint', () => {
+    invoke('preferences', { serviceProvider: 'doubao', apiKey: 'private-key', endpoint: 'https://speech.test' })
+    expect(invoke('status').preferences.hasApiKey).toBe(true)
+    invoke('preferences', { serviceProvider: 'compatible' })
+    expect(invoke('status').preferences.hasApiKey).toBe(false)
+    invoke('preferences', { apiKey: 'new-key' })
+    invoke('preferences', { endpoint: 'https://other.test' })
+    expect(invoke('status').preferences.hasApiKey).toBe(false)
   })
 })

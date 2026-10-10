@@ -385,6 +385,8 @@ const api: AiopsPreloadApi = {
     ipcRenderer.on('voice:status-changed', wrapped)
     return () => ipcRenderer.off('voice:status-changed', wrapped)
   },
+  installVoiceInputModel: () => ipcRenderer.invoke('voice:install'),
+  cancelVoiceInputInstall: () => ipcRenderer.invoke('voice:install-cancel'),
   getVoiceInputStatus: () => ipcRenderer.invoke('voice:status'),
   saveVoiceInputPreferences: (input) => ipcRenderer.invoke('voice:preferences', input),
   cancelVoiceTranscription: (requestId) => ipcRenderer.invoke('voice:cancel', requestId),

@@ -2,17 +2,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { ref } from 'vue'
 import VoiceInputSettings from '@/components/voice/VoiceInputSettings.vue'
-import type { VoiceInputPreferences, VoiceInputTrigger } from '@shared/contracts/voice'
+import type { VoiceInputPreferences, VoiceInputStatus, VoiceInputTrigger } from '@shared/contracts/voice'
 
 vi.mock('@/i18n', () => ({ useI18n: () => ({ locale: ref('zh-CN') }) }))
 const original = window.aiops
 let wrapper: VueWrapper | undefined
+let changed: ((value: VoiceInputStatus) => void) | undefined
 let trigger: ((event: VoiceInputTrigger) => void) | undefined
 const defaults: VoiceInputPreferences = { mode: 'local', localEngine: 'sensevoice', executablePath: '', modelPath: '', tokensPath: '', endpoint: '', model: '', shortcut: 'CommandOrControl+Alt+R', headsetEnabled: false }
 const status = (preferences = defaults) => ({ preferences: { ...preferences }, shortcutRegistered: true, headsetRegistered: preferences.headsetEnabled })
 const render = async () => { wrapper = mount(VoiceInputSettings); await flushPromises(); return wrapper }
 beforeEach(() => {
   window.aiops = { ...original,
+    onVoiceInputStatusChanged: vi.fn((listener) => { changed = listener; return vi.fn() }),
+    installVoiceInputModel: vi.fn(async () => ({ ...status(), installation: { phase: 'downloading' as const, received: 10, total: 100 } })),
+    cancelVoiceInputInstall: vi.fn(async () => undefined),
     getVoiceInputStatus: vi.fn(async () => status()),
     saveVoiceInputPreferences: vi.fn(async (patch) => status({ ...defaults, ...patch })),
     validateVoiceInputPreferences: vi.fn(async () => ({ ok: true })),
@@ -83,4 +87,50 @@ describe('voice setup and presets', () => {
     await view.get('form').trigger('submit')
     expect(window.aiops.saveVoiceInputPreferences).not.toHaveBeenCalled()
   })
+})
+
+
+describe('one-click and cloud voice setup', () => {
+  it('shows one-click setup first and keeps manual configuration collapsed', async () => {
+    const view = await render()
+    expect(view.get('[data-testid="voice-manual-setup"]').attributes('open')).toBeUndefined()
+    await view.get('[data-testid="voice-auto-install"]').trigger('click'); await flushPromises()
+    expect(window.aiops.installVoiceInputModel).toHaveBeenCalledOnce()
+    expect(view.get('progress').attributes('value')).toBe('10')
+    changed?.({ ...status(), installation: { phase: 'downloading', asset: 'model', received: 50, total: 100 } }); await flushPromises()
+    expect(view.text()).toContain('50%')
+    expect(view.text()).toContain('正在下载语音模型')
+    changed?.({ ...status({ ...defaults, executablePath: '/auto/engine', modelPath: '/auto/model', tokensPath: '/auto/tokens' }), installation: { phase: 'complete', received: 0, total: 0 } }); await flushPromises()
+    expect((view.get('[data-testid="voice-model-file"]').element as HTMLInputElement).value).toBe('/auto/model')
+    expect(view.text()).toContain('安装完成并已启用')
+  })
+  it('restores active progress after reopening and allows cancellation and retry', async () => {
+    vi.mocked(window.aiops.getVoiceInputStatus!).mockResolvedValue({ ...status(), installation: { phase: 'extracting', received: 0, total: 0 } })
+    const view = await render()
+    expect(view.text()).toContain('正在解压文件')
+    await view.get('[data-testid="voice-install-progress"] button').trigger('click')
+    expect(window.aiops.cancelVoiceInputInstall).toHaveBeenCalledOnce()
+    changed?.({ ...status(), installation: { phase: 'cancelled', received: 0, total: 0 } }); await flushPromises()
+    expect(view.get('[data-testid="voice-auto-install"]').attributes('disabled')).toBeUndefined()
+  })
+  it('configures Doubao with the official endpoint, resource and encrypted-key save path', async () => {
+    const view = await render()
+    await view.get('[data-testid="voice-mode"]').setValue('service')
+    await view.get('[data-testid="voice-service-provider"]').setValue('doubao')
+    expect(view.text()).toContain('App ID')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(window.aiops.saveVoiceInputPreferences).not.toHaveBeenCalled()
+    await view.get('[data-testid="voice-api-key"]').setValue('speech-key')
+    await view.get('form').trigger('submit'); await flushPromises()
+    expect(window.aiops.saveVoiceInputPreferences).toHaveBeenCalledWith(expect.objectContaining({ serviceProvider: 'doubao', model: 'volc.bigasr.auc_turbo', apiKey: 'speech-key', endpoint: 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash' }))
+    expect((view.get('[data-testid="voice-api-key"]').element as HTMLInputElement).value).toBe('')
+  })
+})
+
+it('allows removal of a saved Doubao key without requiring a replacement', async () => {
+  vi.mocked(window.aiops.getVoiceInputStatus!).mockResolvedValue(status({ ...defaults, mode: 'service', serviceProvider: 'doubao', endpoint: 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash', model: 'volc.bigasr.auc_turbo', hasApiKey: true }))
+  const view = await render()
+  await view.findAll('label').find((label) => label.text().includes('删除已保存的密钥'))!.get('input').setValue(true)
+  await view.get('form').trigger('submit'); await flushPromises()
+  expect(window.aiops.saveVoiceInputPreferences).toHaveBeenCalledWith(expect.objectContaining({ apiKey: '' }))
 })

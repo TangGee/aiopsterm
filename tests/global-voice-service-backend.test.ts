@@ -93,3 +93,35 @@ describe('independent speech service', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 })
+
+
+describe('Doubao speech adapter', () => {
+  const config: VoiceInputPreferences = { ...preferences, serviceProvider: 'doubao', endpoint: 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash', model: 'volc.bigasr.auc_turbo', apiKey: 'speech-secret' }
+  it.each([undefined, 'legacy-app'])('sends real base64 audio using the selected credential format (%s)', async (doubaoAppId) => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ result: { text: '检查 nginx status' } }), { headers: { 'X-Api-Status-Code': '20000000' } }))
+    vi.stubGlobal('fetch', fetcher)
+    const result = await transcribeGlobalVoice({ audioBytes: audio }, { ...config, doubaoAppId }, new AbortController().signal)
+    expect(result).toMatchObject({ ok: true, data: { text: '检查 nginx status', provider: 'doubao' } })
+    const [, request] = (fetcher.mock.calls as unknown as [URL, RequestInit][])[0]
+    const headers = request.headers as Record<string, string>
+    expect(headers['X-Api-Resource-Id']).toBe('volc.bigasr.auc_turbo')
+    expect(headers['X-Api-Sequence']).toBe('-1')
+    expect(headers.Authorization).toBeUndefined()
+    expect(headers[doubaoAppId ? 'X-Api-Access-Key' : 'X-Api-Key']).toBe('speech-secret')
+    expect(headers['X-Api-App-Key']).toBe(doubaoAppId)
+    const body = JSON.parse(request.body as string)
+    expect(Buffer.from(body.audio.data, 'base64')).toEqual(audio)
+    expect(body.request.model_name).toBe('bigmodel')
+    expect(request.redirect).toBe('error')
+  })
+  it.each(['45000001', '20000003', null])('handles business errors including HTTP 200 responses (%s)', async (code) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ result: { text: 'must not be accepted' } }), { headers: code ? { 'X-Api-Status-Code': code } : {} })))
+    expect((await transcribeGlobalVoice({ audioBytes: audio }, config, new AbortController().signal)).ok).toBe(false)
+  })
+  it('requires speech credentials and prevents sending them to a different endpoint', async () => {
+    const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher)
+    expect((await transcribeGlobalVoice({ audioBytes: audio }, { ...config, apiKey: '' }, new AbortController().signal)).ok).toBe(false)
+    expect((await transcribeGlobalVoice({ audioBytes: audio }, { ...config, endpoint: 'https://unrelated.test' }, new AbortController().signal)).ok).toBe(false)
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+})

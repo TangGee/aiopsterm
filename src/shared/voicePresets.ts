@@ -17,6 +17,9 @@ export const voiceModelPresets = {
   }
 } as const
 
+export const doubaoSpeechEndpoint = 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash'
+export const doubaoSpeechHelpUrl = 'https://www.volcengine.com/docs/6561/1631584'
+
 export const isVoiceInputConfigured = (preferences?: VoiceInputPreferences): boolean => {
   if (!preferences) return false
   if (preferences.mode === 'local') return Boolean(preferences.executablePath.trim() && preferences.modelPath.trim()
@@ -24,5 +27,6 @@ export const isVoiceInputConfigured = (preferences?: VoiceInputPreferences): boo
   try {
     const url = new URL(preferences.endpoint)
     return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password && Boolean(preferences.model.trim())
+      && (preferences.serviceProvider !== 'doubao' || Boolean(preferences.apiKey?.trim() || preferences.hasApiKey))
   } catch { return false }
 }

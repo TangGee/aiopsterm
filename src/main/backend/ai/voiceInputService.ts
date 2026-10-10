@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+import { doubaoSpeechEndpoint } from '../../../shared/voicePresets'
 import { execFile } from 'node:child_process'
 import { constants } from 'node:fs'
 import { access, mkdtemp, readFile, rm, writeFile, stat } from 'node:fs/promises'
@@ -17,6 +19,8 @@ export const validateVoicePreferences = async (preferences: VoiceInputPreference
     }
     if (process.platform !== 'win32') await access(preferences.executablePath, constants.X_OK)
   } else {
+    if (preferences.serviceProvider === 'doubao' && preferences.endpoint !== doubaoSpeechEndpoint) throw new Error('Use the official Doubao speech endpoint.')
+    if (preferences.serviceProvider === 'doubao' && !preferences.apiKey?.trim() && !preferences.hasApiKey) throw new Error('Enter the Doubao speech API Key or Access Token.')
     const url = new URL(preferences.endpoint)
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || !preferences.model.trim()) throw new Error('Set an HTTP or HTTPS transcription URL without embedded credentials and a speech model.')
   }
@@ -59,6 +63,28 @@ export const transcribeGlobalVoice = async (
     const endpoint = new URL(preferences.endpoint)
     if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password) return failure('Use an HTTP or HTTPS transcription endpoint without URL credentials.')
     if (!preferences.model.trim()) return failure('Set a speech recognition model in voice settings.')
+    if (preferences.serviceProvider === 'doubao') {
+      if (!preferences.apiKey?.trim()) return failure('Enter the Doubao speech API Key or Access Token.')
+      const response = await fetch(endpoint, {
+        method: 'POST', signal, redirect: 'error',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Api-Resource-Id': preferences.model,
+          'X-Api-Request-Id': randomUUID(), 'X-Api-Sequence': '-1',
+          ...(preferences.doubaoAppId?.trim()
+            ? { 'X-Api-App-Key': preferences.doubaoAppId.trim(), 'X-Api-Access-Key': preferences.apiKey }
+            : { 'X-Api-Key': preferences.apiKey })
+        },
+        body: JSON.stringify({ user: { uid: 'aiopsterm' }, audio: { data: bytes.toString('base64') }, request: { model_name: 'bigmodel' } })
+      })
+      if (!response.ok) return failure(`Doubao speech returned HTTP ${response.status}. Check speech service credentials and quota.`)
+      const code = response.headers.get('X-Api-Status-Code')
+      if (code === '20000003') return failure('No speech was recognized.')
+      if (code !== '20000000') return failure(`Doubao speech failed (${code || 'missing status'}). Check credentials and the volc.bigasr.auc_turbo resource in the speech console.`)
+      const payload = await response.json() as { result?: { text?: unknown } }
+      const text = typeof payload.result?.text === 'string' ? payload.result.text.trim() : ''
+      return text ? { ok: true, data: { text, provider: 'doubao', model: preferences.model } } : failure('No speech was recognized.')
+    }
     const form = new FormData()
     form.append('model', preferences.model.trim())
     form.append('response_format', 'json')

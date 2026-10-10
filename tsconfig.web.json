@@ -27,6 +27,7 @@
     "tests/ssh-terminal-recovery-backend.test.ts",
     "tests/ssh-terminal-recovery-integration-backend.test.ts",
     "tests/terminal-recovery-store-backend.test.ts",
-    "tests/global-voice-service-backend.test.ts"
+    "tests/global-voice-service-backend.test.ts",
+    "tests/voice-model-installer-backend.test.ts"
   ]
 }

@@ -736,6 +736,8 @@ export type AiopsPreloadApi = {
   transcribeVoiceInput: (input?: VoiceTranscriptionInput) => Promise<VoiceTranscriptionResult>
   validateVoiceInputPreferences?: (input: VoiceInputPreferences) => Promise<{ ok: boolean; errorMessage?: string }>
   onVoiceInputStatusChanged?: (listener: (status: VoiceInputStatus) => void) => () => void
+  installVoiceInputModel?: () => Promise<VoiceInputStatus>
+  cancelVoiceInputInstall?: () => Promise<void>
   getVoiceInputStatus?: () => Promise<VoiceInputStatus>
   saveVoiceInputPreferences?: (input: Partial<VoiceInputPreferences>) => Promise<VoiceInputStatus>
   cancelVoiceTranscription?: (requestId: string) => Promise<void>
