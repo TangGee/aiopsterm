@@ -794,6 +794,7 @@ export type AiopsPreloadApi = {
   deleteFileSession: (id: string) => Promise<FileSessionCatalogResult>
   saveFileSessionFolder: (folder: FileSessionFolderSaveInput) => Promise<FileSessionFolderMutationResult>
   deleteFileSessionFolder: (uuid: string) => Promise<FileSessionFolderDeleteResult>
+  resolveFileHomeDirectory: (options?: FileListOptions) => Promise<string>
   listFiles: (directory: string, options?: FileListOptions) => Promise<FileListEntry[]>
   readFileContent: (filePath: string, options?: FileContentOptions) => Promise<FileReadContentResult>
   writeFileContent: (filePath: string, content: string, options?: FileContentOptions) => Promise<FileWriteContentResult>

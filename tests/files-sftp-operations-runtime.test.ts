@@ -150,6 +150,10 @@ const createMemorySftp = () => {
       nodes.delete(normalized)
       callback(null)
     },
+    close(handle: number, callback: (error?: Error | null) => void) {
+      calls.push({ method: 'close', handle })
+      callback(null)
+    },
     open(_path: string, _flags: string, callback: (error: Error | null, handle?: number) => void) {
       calls.push({ method: 'open', path: _path, flags: _flags })
       setTimeout(() => callback(null, 1), 10)
@@ -206,12 +210,14 @@ describe('filesSftpOperationsRuntime', () => {
 
   it('rejects cancellable operations with the shared file-transfer cancellation marker', async () => {
     const runtime = await loadRuntime()
-    const { sftp } = createMemorySftp()
+    const { sftp, calls } = createMemorySftp()
     const control = createAbortControl()
     const pending = runtime.sftpOpenCancellable(sftp, '/slow.txt', 'r', control)
 
     control.cancel()
 
     await expect(pending).rejects.toMatchObject({ code: 'FILES_TRANSFER_CANCELLED' })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(calls).toContainEqual({ method: 'close', handle: 1 })
   })
 })

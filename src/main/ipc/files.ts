@@ -8,6 +8,7 @@ import {
   listFileSessionCatalog,
   listFileTransferTasks,
   listFiles,
+  resolveFileHomeDirectory,
   mutateFileEntry,
   readFileContent,
   saveFileSession,
@@ -44,6 +45,7 @@ export const registerFilesIpc = (ipcMain: IpcMain) => {
   ipcMain.handle('files:sessions:delete', (_event, id: string) => deleteFileSession(id))
   ipcMain.handle('files:sessions:folder:save', (_event, folder: FileSessionFolderSaveInput) => saveFileSessionFolder(folder))
   ipcMain.handle('files:sessions:folder:delete', (_event, uuid: string) => deleteFileSessionFolder(uuid))
+  ipcMain.handle('files:home-directory', (_event, options?: FileListOptions) => resolveFileHomeDirectory(options))
   ipcMain.handle('files:list', async (_event, directory: string, options?: FileListOptions) => listFiles(directory, options))
   ipcMain.handle('files:read-content', async (_event, filePath: string, options?: FileContentOptions) => readFileContent(filePath, options))
   ipcMain.handle('files:write-content', async (_event, filePath: string, content: string, options?: FileContentOptions) =>

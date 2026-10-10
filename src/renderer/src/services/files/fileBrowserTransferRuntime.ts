@@ -190,7 +190,11 @@ export const createFileBrowserTransferRuntime = (input: {
     const sourceSession = workspace.fileSessions.find((session) => session.id === payload.fromUuid)
     const sourceIsLocal = sourceSession?.kind === 'local'
     const targetIsLocal = getTargetType() === 'local'
-    const targetPath = payload.isDir ? targetDir : pathRuntime.value.join(targetDir, payload.name)
+    const targetPath = pathRuntime.value.join(targetDir, payload.name)
+    if (!sourceSession) {
+      setFileNotice('源文件会话已关闭，请重新选择主机')
+      return
+    }
     loading.value = true
     try {
       const operation = sourceIsLocal
@@ -199,7 +203,7 @@ export const createFileBrowserTransferRuntime = (input: {
           ? payload.isDir
             ? { kind: 'download-directory' as const, remotePath: payload.srcPath, localDirectory: targetDir }
             : { kind: 'download-file' as const, remotePath: payload.srcPath, localPath: targetPath }
-          : { kind: 'copy-remote' as const, remotePath: payload.srcPath, targetPath }
+          : { kind: 'copy-remote' as const, remotePath: payload.srcPath, targetPath, sourceOptions: backend.getSessionListOptions(sourceSession) }
       const transferOptions =
         targetIsLocal && !sourceIsLocal
           ? backend.getSessionListOptions(sourceSession, { fromHost: sourceSession?.host, toHost: props.session.host })

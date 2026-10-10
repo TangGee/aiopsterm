@@ -120,7 +120,7 @@ export type FileTransferOperation =
   | { kind: 'upload-file' | 'upload-directory' | 'upload-path'; localPath: string; remoteDirectory: string }
   | { kind: 'download-file'; remotePath: string; localPath: string }
   | { kind: 'download-directory'; remotePath: string; localDirectory: string }
-  | { kind: 'copy-remote'; remotePath: string; targetPath: string; overwrite?: boolean }
+  | { kind: 'copy-remote'; remotePath: string; targetPath: string; overwrite?: boolean; sourceOptions?: FileListOptions }
 
 export type FileTransferOperationResult = AiopsMutationResult<{
   status: 'success' | 'cancelled' | 'skipped'

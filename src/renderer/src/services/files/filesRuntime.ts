@@ -478,12 +478,18 @@ export const mergeFileTransferTaskSnapshot = (
   options: { replaceCompleted?: boolean } = {}
 ) => {
   if (options.replaceCompleted === true) return snapshot.map((task) => ({ ...task, children: task.children?.map((child) => ({ ...child })) }))
-  const activeIds = new Set(snapshot.map((task) => task.id))
-  const finished = currentTasks.filter((task) => task.status !== 'running' && !activeIds.has(task.id))
-  return [...snapshot, ...finished].map((task) => ({ ...task, children: task.children?.map((child) => ({ ...child })) }))
+  const incoming = new Map(snapshot.map((task) => [task.id, task]))
+  const currentIds = new Set(currentTasks.map((task) => task.id))
+  const retained = currentTasks.flatMap((task) => {
+    const updated = incoming.get(task.id)
+    return updated ? [updated] : task.status !== 'running' ? [task] : []
+  })
+  return [...snapshot.filter((task) => !currentIds.has(task.id)), ...retained]
+    .map((task) => ({ ...task, children: task.children?.map((child) => ({ ...child })) }))
 }
 
-export const upsertFileTransferTask = (tasks: FileTransferTask[], task: FileTransferTask) => [task, ...tasks.filter((item) => item.id !== task.id)]
+export const upsertFileTransferTask = (tasks: FileTransferTask[], task: FileTransferTask) =>
+  tasks.some((item) => item.id === task.id) ? tasks.map((item) => (item.id === task.id ? task : item)) : [task, ...tasks]
 
 export const fileTransferTaskRemovalDelay = (task: FileTransferTask) => {
   if (task.status === 'success') return 2500

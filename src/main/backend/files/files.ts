@@ -1,4 +1,6 @@
 import { dirname as getLocalDirname, join } from 'path'
+import { homedir } from 'os'
+import { resolveRemoteSftpTarget, withRemoteSftp } from './filesSftpConnectionRuntime'
 import { chmod, cp, lstat, mkdir, readFile, readdir, readlink, rename, rm, stat, writeFile } from 'fs/promises'
 import type {
   FileSessionCatalogResult,
@@ -439,12 +441,25 @@ export const mutateFileEntry = async (mutation: FileEntryMutation, options: File
   return task ? { ...result, data: { ...result.data, task } } : result
 }
 
+export const resolveFileHomeDirectory = async (options: FileListOptions = {}): Promise<string> => {
+  if (options.kind !== 'remote') return homedir()
+  const target = resolveRemoteSftpTarget(options)
+  if (!target) throw new Error(sftpUnavailableMessage)
+  return withRemoteSftp(target, (sftp) => new Promise<string>((resolve, reject) => {
+    sftp.realpath('.', (error, path) => {
+      if (error) reject(error)
+      else if (!path || !path.startsWith('/')) reject(new Error('Invalid SFTP home directory'))
+      else resolve(path)
+    })
+  }))
+}
+
 export const transferFileEntry = async (operation: FileTransferOperation, options: FileListOptions = {}): Promise<FileTransferOperationResult> => {
   try {
     if (operation.kind === 'copy-remote') {
       const source = normalizeRemotePath(operation.remotePath)
       const target = normalizeRemotePath(operation.targetPath)
-      const sftpResult = await copyRemoteTransferViaSftp(source, target, operation.overwrite, { ...options, kind: 'remote' })
+      const sftpResult = await copyRemoteTransferViaSftp(source, target, operation.overwrite, { ...options, kind: 'remote' }, operation.sourceOptions)
       if (sftpResult) return sftpResult
       return sftpUnavailableError('FILES_SFTP_UNAVAILABLE')
     }

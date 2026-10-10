@@ -1,4 +1,4 @@
-import { onBeforeUnmount, onMounted } from 'vue'
+import { onActivated, onBeforeUnmount, onDeactivated, onMounted } from 'vue'
 import { filesClient } from '@/services/files/filesClient'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { createFilesWorkspaceConnectionRuntime } from '@/services/files/filesWorkspaceConnectionRuntime'
@@ -21,18 +21,25 @@ export const useFilesWorkspaceRuntime = () => {
     pushFileTransferTask: (task: FileTransferTask) => workspace.pushFileTransferTask(task)
   })
 
-  onMounted(() => {
-    void workspace.refreshFileSessionCatalog()
+  const attachEditorListeners = () => {
     window.addEventListener('mousemove', editorRuntime.handleEditorPointerMove)
     window.addEventListener('mouseup', editorRuntime.stopEditorPointer)
     window.addEventListener('keydown', editorRuntime.handleEditorKeydown)
+  }
+  onMounted(() => {
+    void workspace.refreshFileSessionCatalog()
+    attachEditorListeners()
   })
+  onActivated(attachEditorListeners)
 
-  onBeforeUnmount(() => {
+  const detachEditorListeners = () => {
+    editorRuntime.stopEditorPointer()
     window.removeEventListener('mousemove', editorRuntime.handleEditorPointerMove)
     window.removeEventListener('mouseup', editorRuntime.stopEditorPointer)
     window.removeEventListener('keydown', editorRuntime.handleEditorKeydown)
-  })
+  }
+  onDeactivated(detachEditorListeners)
+  onBeforeUnmount(detachEditorListeners)
 
   return {
     workspace,

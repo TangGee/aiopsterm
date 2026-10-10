@@ -10,6 +10,7 @@ type FilesBridge = Pick<
   | 'updateFileSession'
   | 'saveFileSessionFolder'
   | 'deleteFileSessionFolder'
+  | 'resolveFileHomeDirectory'
   | 'listFiles'
   | 'readFileContent'
   | 'writeFileContent'
@@ -29,6 +30,7 @@ export const filesClient = {
   updateFileSession: () => bridgeMethod('updateFileSession'),
   saveFileSessionFolder: () => bridgeMethod('saveFileSessionFolder'),
   deleteFileSessionFolder: () => bridgeMethod('deleteFileSessionFolder'),
+  resolveFileHomeDirectory: () => bridgeMethod('resolveFileHomeDirectory'),
   listFiles: () => bridgeMethod('listFiles'),
   readFileContent: () => bridgeMethod('readFileContent'),
   writeFileContent: () => bridgeMethod('writeFileContent'),

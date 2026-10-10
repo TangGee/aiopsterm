@@ -2,7 +2,7 @@ import { generateKeyPairSync } from 'crypto'
 import { constants } from 'fs'
 import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'fs/promises'
 import { join } from 'path'
-import { tmpdir } from 'os'
+import { homedir, tmpdir } from 'os'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const ssh2Mock = vi.hoisted(() => {
@@ -93,6 +93,10 @@ const ssh2Mock = vi.hoisted(() => {
   }
 
   const sftp = {
+    realpath(path: string, callback: (error: Error | null, resolved?: string) => void) {
+      calls.push({ method: 'realpath', path })
+      callback(null, '/srv/custom-home')
+    },
     readdir(path: string, callback: (error: Error | null, entries?: Array<Record<string, unknown>>) => void) {
       const normalized = normalize(path)
       calls.push({ method: 'readdir', path: normalized })
@@ -507,6 +511,7 @@ vi.mock('../src/main/backend/ssh/sshProxy', () => ({
 
 let readFileContent: (filePath: string, options?: Record<string, unknown>) => Promise<any>
 let writeFileContent: (filePath: string, content: string, options?: Record<string, unknown>) => Promise<any>
+let resolveFileHomeDirectory: (options?: Record<string, unknown>) => Promise<string>
 let listFiles: (directory: string, options?: Record<string, unknown>) => Promise<any[]>
 let mutateFileEntry: (mutation: Record<string, unknown>, options?: Record<string, unknown>) => Promise<any>
 let transferFileEntry: (operation: Record<string, unknown>, options?: Record<string, unknown>) => Promise<any>
@@ -552,6 +557,7 @@ beforeAll(async () => {
   filesBackendExports = backend as Record<string, unknown>
   readFileContent = backend.readFileContent
   writeFileContent = backend.writeFileContent
+  resolveFileHomeDirectory = backend.resolveFileHomeDirectory
   listFiles = backend.listFiles
   mutateFileEntry = backend.mutateFileEntry
   transferFileEntry = backend.transferFileEntry
@@ -1458,6 +1464,14 @@ describe('files backend content boundary', () => {
     expect(ssh2Mock.calls.filter((call) => call.method === 'readFile' && call.path === '/srv/archive/logs-copy')).toHaveLength(0)
   })
 
+  it('resolves local HOME and the authenticated SFTP home without guessing from username', async () => {
+    const sessionId = saveSftpAsset()
+    expect(await resolveFileHomeDirectory({ kind: 'local' })).toBe(homedir())
+    expect(await resolveFileHomeDirectory({ kind: 'remote', sessionId, rootPath: '/' })).toBe('/srv/custom-home')
+    expect(ssh2Mock.calls).toContainEqual({ method: 'realpath', path: '.' })
+    await expect(resolveFileHomeDirectory({ kind: 'remote', sessionId: 'missing' })).rejects.toThrow('SFTP connection is unavailable')
+  })
+
   it('uploads and downloads asset-backed remote transfer entries through binary-safe SFTP operations', async () => {
     const sessionId = saveSftpAsset()
     const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-sftp-binary-transfer-'))
@@ -1489,7 +1503,6 @@ describe('files backend content boundary', () => {
             target: '/srv/archive/binary.bin',
             fromHost: '127.0.0.1',
             toHost: 'sftp.example.test',
-            stage: 'pending',
             status: 'success'
           })
         })
@@ -1730,8 +1743,7 @@ describe('files backend content boundary', () => {
           toHost: 'sftp.example.test',
           progress: 99,
           speed: '上传中 7 B / 7 B',
-          status: 'running',
-          stage: 'pending'
+          status: 'running'
         })
       ])
 
@@ -1803,7 +1815,6 @@ describe('files backend content boundary', () => {
             name: 'release-dir',
             source: localDirectory,
             target: '/srv/archive/release-dir',
-            stage: 'scanning',
             isGroup: true,
             totalFiles: 2,
             finishedFiles: 2,
@@ -1811,8 +1822,8 @@ describe('files backend content boundary', () => {
             toHost: 'sftp.example.test',
             status: 'success',
             children: expect.arrayContaining([
-              expect.objectContaining({ type: 'upload', name: 'README.txt', target: '/srv/archive/release-dir/README.txt', stage: 'pending' }),
-              expect.objectContaining({ type: 'upload', name: 'payload.bin', target: '/srv/archive/release-dir/nested/payload.bin', stage: 'pending' })
+              expect.objectContaining({ type: 'upload', name: 'README.txt', target: '/srv/archive/release-dir/README.txt' }),
+              expect.objectContaining({ type: 'upload', name: 'payload.bin', target: '/srv/archive/release-dir/nested/payload.bin' })
             ])
           })
         })
@@ -1955,7 +1966,6 @@ describe('files backend content boundary', () => {
             name: 'logs',
             source: '/srv/logs',
             target: join(dir, 'logs'),
-            stage: 'scanning',
             isGroup: true,
             totalFiles: 2,
             finishedFiles: 2,

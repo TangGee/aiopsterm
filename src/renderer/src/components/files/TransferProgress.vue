@@ -134,6 +134,7 @@ const fabIcon = computed(() => {
 })
 
 const taskSummary = (task: FileTransferTask) => {
+  if (task.status !== 'running') return task.speed || (task.status === 'success' ? '完成' : '失败')
   if (task.stage === 'scanning') return '扫描中...'
   if (task.stage === 'pending' || task.speed === 'pending') return '等待中...'
   if (task.isGroup) return `${task.finishedFiles || 0}/${task.totalFiles || task.children?.length || 0}`

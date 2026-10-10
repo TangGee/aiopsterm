@@ -141,6 +141,7 @@ describe('filesClient', () => {
           }
         })
       ),
+      resolveFileHomeDirectory: vi.fn(async () => '/custom/home'),
       listFiles: vi.fn(async () => [fileEntry]),
       readFileContent: vi.fn(async () => fileReadResult),
       writeFileContent: vi.fn(async () => fileWriteResult),
@@ -165,6 +166,8 @@ describe('filesClient', () => {
     await expect(filesClient.deleteFileSessionFolder()?.('folder-1')).resolves.toEqual(
       expect.objectContaining({ data: expect.objectContaining({ folderUuid: 'folder-1' }) })
     )
+    await expect(filesClient.resolveFileHomeDirectory()?.({ sessionId: fileSession.id, kind: fileSession.kind })).resolves.toBe('/custom/home')
+    expect(window.aiops.resolveFileHomeDirectory).toHaveBeenCalledWith({ sessionId: fileSession.id, kind: fileSession.kind })
     await expect(filesClient.listFiles()?.('/var/log', { sessionId: fileSession.id, kind: fileSession.kind })).resolves.toEqual([fileEntry])
     await expect(filesClient.readFileContent()?.(fileEntry.path, { sessionId: fileSession.id, kind: fileSession.kind })).resolves.toEqual(fileReadResult)
     await expect(filesClient.writeFileContent()?.(fileEntry.path, 'updated', { sessionId: fileSession.id, kind: fileSession.kind })).resolves.toEqual(

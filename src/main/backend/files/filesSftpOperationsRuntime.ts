@@ -77,9 +77,15 @@ const cancellableTransferPromise = <T>(control: FileTransferAbortControl, execut
     }
   })
 
-export const sftpOpenCancellable = (sftp: SftpLowLevelWrapper, path: string, flags: string, control: FileTransferAbortControl) =>
+export const sftpOpenCancellable = (
+  sftp: SftpLowLevelWrapper, path: string, flags: string, control: FileTransferAbortControl, onCancelledOpen?: () => void
+) =>
   cancellableTransferPromise<SftpFileHandle>(control, (settle) => {
-    sftp.open(path, flags, (error, handle) => settle(error || (!handle ? new Error('SFTP file handle is unavailable') : null), handle))
+    control.assertActive()
+    sftp.open(path, flags, (error, handle) => {
+      if (control.cancelled && handle) sftp.close(handle, () => onCancelledOpen?.())
+      settle(error || (!handle ? new Error('SFTP file handle is unavailable') : null), handle)
+    })
   })
 
 export const sftpReadChunkCancellable = (

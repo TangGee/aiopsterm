@@ -9,6 +9,7 @@ const backendSuites = readdirSync(resolve('tests')).filter((name) => /(?:-backen
 export const nodeSuites = [
   'tests/regression/**/*.test.ts',
   ...backendSuites.map((name) => `tests/${name}`),
+  'tests/files-cross-host-transfer-runtime.test.ts',
   'tests/product-session-registry.test.ts',
   'tests/database-sqlite-runtime.test.ts',
   'tests/database-sqlite-worker-cancel.test.ts',

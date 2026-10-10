@@ -1,4 +1,5 @@
 import { dirname as getLocalDirname, join } from 'path'
+import { copyBetweenRemoteHosts } from './filesCrossHostTransferRuntime'
 import { mkdir, open as openFile, readFile, readdir, stat, unlink, writeFile } from 'fs/promises'
 import type {
   FileContentOptions,
@@ -465,8 +466,10 @@ export const copyRemoteTransferViaSftp = async (
   remotePath: string,
   targetPath: string,
   overwrite: boolean | undefined,
-  options: FileListOptions
+  options: FileListOptions,
+  sourceOptions?: FileListOptions
 ): Promise<FileTransferOperationResult | null> => {
+  if (sourceOptions) return copyBetweenRemoteHosts(normalizeRemotePath(remotePath), normalizeRemotePath(targetPath), overwrite, sourceOptions, options)
   const target = resolveRemoteSftpTarget(options)
   if (!target) return null
   const source = normalizeRemotePath(remotePath)

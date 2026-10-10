@@ -170,7 +170,16 @@ export const createFileBrowserBackendRuntime = (input: {
     }
   }
 
+  const resolveHomeDirectory = async () => {
+    const resolveHome = filesClient.resolveFileHomeDirectory()
+    if (!resolveHome) return props.session.rootPath
+    const path = await resolveHome(getListOptions())
+    if (typeof path !== 'string' || !path.trim()) throw new Error(malformedFilesBackendResultMessage)
+    return path
+  }
+
   return {
+    resolveHomeDirectory,
     getListOptions,
     getSessionListOptions,
     pushBackendTransferTask,

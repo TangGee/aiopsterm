@@ -440,6 +440,7 @@ const api: AiopsPreloadApi = {
   deleteFileSession: (id: string) => ipcRenderer.invoke('files:sessions:delete', id),
   saveFileSessionFolder: (folder) => ipcRenderer.invoke('files:sessions:folder:save', folder),
   deleteFileSessionFolder: (uuid: string) => ipcRenderer.invoke('files:sessions:folder:delete', uuid),
+  resolveFileHomeDirectory: (options) => ipcRenderer.invoke('files:home-directory', options),
   listFiles: (directory: string, options) => ipcRenderer.invoke('files:list', directory, options) as Promise<FileListEntry[]>,
   readFileContent: (filePath: string, options) => ipcRenderer.invoke('files:read-content', filePath, options),
   writeFileContent: (filePath: string, content: string, options) => ipcRenderer.invoke('files:write-content', filePath, content, options),

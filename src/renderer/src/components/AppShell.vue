@@ -53,8 +53,10 @@
         aria-label="调整左侧面板宽度"
         @mousedown="startResize('left', $event)"
       ></button>
-      <FilesWorkspace v-if="workspace.mode === 'terminal' && workspace.activeCenterSurface === 'files'" />
-      <AssetsWorkspace v-else-if="workspace.mode === 'terminal' && workspace.activeCenterSurface === 'assets'" />
+      <KeepAlive>
+        <FilesWorkspace v-if="workspace.mode === 'terminal' && workspace.activeCenterSurface === 'files'" />
+      </KeepAlive>
+      <AssetsWorkspace v-if="workspace.mode === 'terminal' && workspace.activeCenterSurface === 'assets'" />
       <ExtensionsWorkspace v-else-if="workspace.mode === 'terminal' && workspace.activeCenterSurface === 'extensions'" />
       <KubernetesWorkspace v-else-if="workspace.mode === 'terminal' && workspace.activeCenterSurface === 'kubernetes'" />
       <SettingsWorkspace v-else-if="workspace.mode === 'terminal' && workspace.activeCenterSurface === 'settings'" />

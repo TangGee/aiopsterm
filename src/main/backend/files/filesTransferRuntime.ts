@@ -220,12 +220,14 @@ export const updateRunningFileTransferProgress = (task: FileTransferTask, contro
 }
 
 export const completeRunningFileTransferTask = (task: FileTransferTask, fileCount: number) => {
+  delete task.stage
   task.status = 'success'
   task.progress = 100
   task.speed = '完成'
   task.totalFiles = fileCount
   task.finishedFiles = fileCount
   task.children?.forEach((child) => {
+    delete child.stage
     child.status = 'success'
     child.progress = 100
     child.speed = '完成'
@@ -235,11 +237,13 @@ export const completeRunningFileTransferTask = (task: FileTransferTask, fileCoun
 }
 
 export const cancelRunningFileTransferTask = (task: FileTransferTask) => {
+  delete task.stage
   task.status = 'failed'
   task.speed = '已取消'
   task.progress = Math.min(task.progress, 99)
   task.children?.forEach((child) => {
     if (child.status === 'success') return
+    delete child.stage
     child.status = 'failed'
     child.speed = '已取消'
     child.progress = Math.min(child.progress, 99)
@@ -278,6 +282,7 @@ export const updateSingleFileTransferProgress = (
   totalBytes: number,
   stageText: string
 ) => {
+  delete task.stage
   task.progress = totalBytes > 0 ? Math.max(1, Math.min(99, Math.round((transferredBytes / totalBytes) * 100))) : 0
   task.speed = totalBytes > 0 ? `${stageText} ${formatTransferBytes(transferredBytes)} / ${formatTransferBytes(totalBytes)}` : `${stageText} ${formatTransferBytes(transferredBytes)}`
   updateActiveFileTransferTask(task, control)

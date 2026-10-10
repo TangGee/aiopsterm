@@ -73,6 +73,9 @@ export const useFileBrowserRuntime = (props: FileBrowserRuntimeProps, emit: File
   })
 
   let fileNoticeTimer: number | null = null
+  let loadSequence = 0
+  let sessionSequence = 0
+  const sessionPaths = new Map<string, string>()
 
   const permissionGroups = [
     { key: 'owner' as const, label: '所有者' },
@@ -137,11 +140,15 @@ export const useFileBrowserRuntime = (props: FileBrowserRuntimeProps, emit: File
   }
 
   const loadEntries = async (path = currentPath.value, options: { preserveOnFailure?: boolean } = {}) => {
+    const request = ++loadSequence
+    const sessionId = props.session.id
     const normalizedPath = pathRuntime.value.normalize(path)
     loading.value = true
     error.value = ''
     try {
       const result = await backend.loadDirectoryEntries(normalizedPath)
+      if (request !== loadSequence || sessionId !== props.session.id) return false
+      sessionPaths.set(sessionId, result.path)
       if (result.path !== currentPath.value) closeSearch()
       entries.value = result.rows
       currentPath.value = result.path
@@ -149,11 +156,12 @@ export const useFileBrowserRuntime = (props: FileBrowserRuntimeProps, emit: File
       if (!entries.value.some((entry) => entry.path === selectedPath.value)) selectedPath.value = ''
       return true
     } catch (fileError) {
+      if (request !== loadSequence || sessionId !== props.session.id) return false
       error.value = cleanFileBrowserErrorMessage(fileError, '读取文件失败')
       if (options.preserveOnFailure === false) entries.value = []
       return false
     } finally {
-      loading.value = false
+      if (request === loadSequence) loading.value = false
     }
   }
 
@@ -225,27 +233,39 @@ export const useFileBrowserRuntime = (props: FileBrowserRuntimeProps, emit: File
     requireEntriesReload
   })
 
-  watch(
-    () => props.session.id,
-    async () => {
-      closeSearch()
+  const openSessionDirectory = async () => {
+    const request = ++sessionSequence
+    ++loadSequence
+    const sessionId = props.session.id
+    closeSearch()
+    entries.value = []
+    loading.value = true
+    error.value = ''
+    try {
       await refreshPlatform()
-      currentPath.value = pathRuntime.value.normalize(props.session.rootPath)
+      if (request !== sessionSequence) return
+      const path = sessionPaths.get(sessionId) || await backend.resolveHomeDirectory()
+      if (request !== sessionSequence) return
+      currentPath.value = pathRuntime.value.normalize(path)
       pathInput.value = currentPath.value
-      entries.value = []
       await loadEntries(currentPath.value, { preserveOnFailure: false })
+    } catch (fileError) {
+      if (request === sessionSequence) error.value = cleanFileBrowserErrorMessage(fileError, '读取主目录失败')
+    } finally {
+      if (request === sessionSequence) loading.value = false
     }
-  )
+  }
+
+  watch(() => props.session.id, openSessionDirectory)
 
   onMounted(() => {
-    void (async () => {
-      await refreshPlatform()
-      await loadEntries()
-    })()
+    void openSessionDirectory()
     document.addEventListener('click', entryActionRuntime.onGlobalClick)
   })
 
   onBeforeUnmount(() => {
+    ++sessionSequence
+    ++loadSequence
     document.removeEventListener('click', entryActionRuntime.onGlobalClick)
     if (fileNoticeTimer) window.clearTimeout(fileNoticeTimer)
   })

@@ -448,6 +448,19 @@ describe('filesRuntime', () => {
     expect(normalizeFileTransferTaskSnapshot([normalized, { id: 'bad' }])).toEqual([normalized])
   })
 
+  it('keeps concurrent transfer rows in place as progress and completion arrive', () => {
+    const first = task({ id: 'first', type: 'upload', status: 'running', progress: 10 })
+    const second = task({ id: 'second', type: 'upload', status: 'running', progress: 20 })
+    let tasks = [second, first]
+    expect(mergeFileTransferTaskSnapshot(tasks, [first, second]).map(item => item.id)).toEqual(['second', 'first'])
+    for (const progress of [25, 50, 75, 100]) {
+      tasks = upsertFileTransferTask(tasks, { ...first, progress, status: progress === 100 ? 'success' : 'running' })
+      expect(tasks.map(item => item.id)).toEqual(['second', 'first'])
+      tasks = upsertFileTransferTask(tasks, { ...second, progress })
+      expect(tasks.map(item => item.id)).toEqual(['second', 'first'])
+    }
+  })
+
   it('merges snapshots, upserts tasks, schedules removal classes, and marks cancellations', () => {
     const running = task({ id: 'running', type: 'download', status: 'running', progress: 20 })
     const oldFinished = task({ id: 'old-success', type: 'upload', status: 'success', progress: 100 })

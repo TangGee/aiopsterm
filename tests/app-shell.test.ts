@@ -11763,6 +11763,100 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('preserves both file directories across tab switches and starts sessions at their HOME', async () => {
+    const originalHome = window.aiops.resolveFileHomeDirectory
+    const originalList = window.aiops.listFiles
+    window.aiops.resolveFileHomeDirectory = vi.fn(async options => options?.kind === 'local' ? '/users/local' : '/srv/account-home')
+    window.aiops.listFiles = vi.fn(async directory => [{ name: 'payload.bin', path: `${directory}/payload.bin`, type: 'file' as const, size: 8, modifiedAt: 1 }])
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AppShell, { global: { plugins: [pinia], stubs: { teleport: true } } })
+    try {
+      await flushPromises()
+      const store = useWorkspaceStore()
+      store.mode = 'terminal'
+      store.activeCenterSurface = 'files'
+      await flushPromises()
+      store.openFileSession('asset-1', 'left')
+      await flushPromises()
+      const browsers = wrapper.findComponent(FilesWorkspace).findAllComponents(FileBrowser)
+      const left = browsers.find(browser => browser.props('panelSide') === 'left')!
+      const right = browsers.find(browser => browser.props('panelSide') === 'right')!
+      expect((left.find('.file-path-input').element as HTMLInputElement).value).toBe('/srv/account-home')
+      expect((right.find('.file-path-input').element as HTMLInputElement).value).toBe('/users/local')
+      for (const [browser, path] of [[left, '/srv/releases'], [right, '/users/local/builds']] as const) {
+        await browser.find('.file-path-input').setValue(path)
+        await browser.find('.file-path-input').trigger('keydown', { key: 'Enter' })
+        await flushPromises()
+      }
+      const listCount = vi.mocked(window.aiops.listFiles).mock.calls.length
+      const homeCount = vi.mocked(window.aiops.resolveFileHomeDirectory).mock.calls.length
+      store.activeCenterSurface = 'main-workspace'
+      await flushPromises()
+      expect(wrapper.find('.files-workspace').exists()).toBe(false)
+      store.activeCenterSurface = 'files'
+      await flushPromises()
+      const restored = wrapper.findComponent(FilesWorkspace).findAllComponents(FileBrowser)
+      expect(restored.find(browser => browser.props('panelSide') === 'left')!.element === left.element).toBe(true)
+      expect(restored.find(browser => browser.props('panelSide') === 'right')!.element === right.element).toBe(true)
+      expect((left.find('.file-path-input').element as HTMLInputElement).value).toBe('/srv/releases')
+      expect((right.find('.file-path-input').element as HTMLInputElement).value).toBe('/users/local/builds')
+      expect(window.aiops.listFiles).toHaveBeenCalledTimes(listCount)
+      expect(window.aiops.resolveFileHomeDirectory).toHaveBeenCalledTimes(homeCount)
+    } finally {
+      wrapper.unmount()
+      window.aiops.resolveFileHomeDirectory = originalHome
+      window.aiops.listFiles = originalList
+    }
+  })
+
+  it('sends both SSH sessions and the child directory name when dragging between hosts', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(FilesWorkspace, { global: { plugins: [pinia] } })
+    const store = useWorkspaceStore()
+    await flushPromises()
+    store.openFileSession('asset-1', 'left')
+    store.openFileSession('asset-2', 'right')
+    await flushPromises()
+    const left = wrapper.findAllComponents(FileBrowser).find(browser => browser.props('panelSide') === 'left')!
+    const right = wrapper.findAllComponents(FileBrowser).find(browser => browser.props('panelSide') === 'right')!
+    const row = left.findAll('tbody tr').find(row => row.text().includes('boot'))!
+    const payload = new Map<string, string>()
+    await row.trigger('dragstart', { dataTransfer: { effectAllowed: '', setData: (type: string, value: string) => payload.set(type, value) } })
+    await right.find('.file-drop-zone').trigger('drop', { dataTransfer: { getData: (type: string) => payload.get(type) || '' } })
+    await flushPromises()
+    expect(window.aiops.transferFileEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'copy-remote', remotePath: '/home/ops/boot', targetPath: '/home/deploy/boot', sourceOptions: expect.objectContaining({ sessionId: 'asset-1', kind: 'remote' }) }),
+      expect.objectContaining({ sessionId: 'asset-2', kind: 'remote' })
+    )
+    wrapper.unmount()
+  })
+
+  it('keeps transfer task DOM rows stable during alternating progress updates', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(FilesWorkspace, { global: { plugins: [pinia] } })
+    const store = useWorkspaceStore()
+    await flushPromises()
+    const first = { id: 'upload-a', type: 'upload' as const, name: 'first.apk', source: '/tmp/first.apk', target: '/remote/first.apk', status: 'running' as const, progress: 10, speed: '上传中 1 MB / 10 MB' }
+    const second = { ...first, id: 'upload-b', name: 'second.apk' }
+    store.pushFileTransferTask(first)
+    store.pushFileTransferTask(second)
+    await flushPromises()
+    const originalRows = wrapper.findAll('.transfer-task').map(row => row.element)
+    for (const progress of [20, 40, 60]) {
+      store.pushFileTransferTask({ ...first, progress })
+      await flushPromises()
+      expect(wrapper.findAll('.transfer-task').map(row => row.element)).toEqual(originalRows)
+      store.pushFileTransferTask({ ...second, progress })
+      await flushPromises()
+      expect(wrapper.findAll('.transfer-task').map(row => row.element)).toEqual(originalRows)
+      expect(wrapper.find('.transfer-progress-panel').text()).not.toContain('等待中')
+    }
+    wrapper.unmount()
+  })
+
   it('matches Files workspace modes, sessions, and transfer panel', async () => {
     vi.useFakeTimers()
     const pinia = createPinia()
@@ -11837,6 +11931,7 @@ describe('AppShell', () => {
       expect(store.filesUiMode).toBe('default')
       expect(wrapper.find('.files-default-layout').exists()).toBe(true)
       expect(wrapper.text()).toContain('Local')
+      await flushPromises()
       const defaultBrowser = wrapper.findComponent(FileBrowser)
       const defaultListCallsBeforeSearch = vi.mocked(window.aiops.listFiles).mock.calls.length
       const searchFocusSpy = vi.spyOn(HTMLInputElement.prototype, 'focus')
