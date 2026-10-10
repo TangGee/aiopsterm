@@ -3,7 +3,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
-import { encodeVoiceWav } from '../../src/renderer/src/services/voice/voiceWav'
+import { fakeVoiceMicrophoneArgs } from './support/voiceAudio'
 import { isolatedEnvironment } from '../regression/support/environment'
 
 test('global voice records WAV, inserts with undo, and opens a reusable editor @quick', async () => {
@@ -17,11 +17,8 @@ test('global voice records WAV, inserts with undo, and opens a reusable editor @
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   const port = (server.address() as { port: number }).port
   await writeFile(path.join(directory, 'voice-input.json'), JSON.stringify({ preferences: { mode: 'service', endpoint: `http://127.0.0.1:${port}/audio/transcriptions`, model: 'test-speech', executablePath: '', modelPath: '', shortcut: '', headsetEnabled: false } }))
-  const audioFile = path.join(directory, 'microphone.wav')
-  const samples = Float32Array.from({ length: 16000 * 10 }, (_, index) => 0.3 * Math.sin(2 * Math.PI * (220 + 40 * Math.sin(index / 800)) * index / 16000))
-  await writeFile(audioFile, Buffer.from(encodeVoiceWav([samples], 16000)))
   const app = await electron.launch({
-    args: ['.', '--lang=zh-CN', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', `--use-file-for-fake-audio-capture=${audioFile}`],
+    args: ['.', '--lang=zh-CN', ...await fakeVoiceMicrophoneArgs(directory)],
     env: { ...await isolatedEnvironment(directory), NODE_ENV: 'test', AIOPSTERM_USER_DATA_DIR: directory, AIOPSTERM_MCP_DISCOVERY_DISABLE: '1', AIOPSTERM_ASSETS_ENABLE_SEED: '1', ELECTRON_DISABLE_SECURITY_WARNINGS: '1' }
   })
   try {

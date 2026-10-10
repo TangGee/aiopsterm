@@ -7,6 +7,7 @@ import os from 'os'
 import path from 'path'
 import { deflateRawSync } from 'zlib'
 import { isolatedEnvironment } from '../regression/support/environment'
+import { fakeVoiceMicrophoneArgs } from './support/voiceAudio'
 
 const e2eUserDataDir = (name: string) => path.join(os.tmpdir(), `aiopsterm-e2e-${name}-${Date.now()}`)
 
@@ -14,7 +15,7 @@ const launchApp = async (name: string, env: NodeJS.ProcessEnv = {}, options: { u
   const userDataDir = options.userDataDir || e2eUserDataDir(name)
   await mkdir(userDataDir, { recursive: true })
   return electron.launch({
-    args: ['.', '--lang=zh-CN', ...(options.fakeMicrophone ? ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] : [])],
+    args: ['.', '--lang=zh-CN', ...(options.fakeMicrophone ? await fakeVoiceMicrophoneArgs(userDataDir) : [])],
     env: {
       ...await isolatedEnvironment(userDataDir),
       ...env,
