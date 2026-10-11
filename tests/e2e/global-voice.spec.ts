@@ -84,11 +84,33 @@ test('global voice records WAV, inserts with undo, and opens a reusable editor @
     await page.keyboard.press('Control+u')
     // Permission/device errors share a stack with the fallback editor and can be dismissed.
     await page.evaluate(() => {
-      Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true, value: async () => { throw new DOMException('Requested device not found', 'NotFoundError') } })
+      Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true, value: async () => {
+        ;(window as any).__voiceFailedAttempts = ((window as any).__voiceFailedAttempts || 0) + 1
+        ;(document.activeElement as HTMLElement)?.blur()
+        throw new DOMException('Requested device not found', 'NotFoundError')
+      } })
+    })
+    const alert = page.getByRole('alert').filter({ hasText: /未找到可用的麦克风|No usable microphone/ })
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      if (attempt === 3) await alert.getByRole('button').focus()
+      await button.click()
+      await expect.poll(() => page.evaluate(() => (window as any).__voiceFailedAttempts)).toBe(attempt)
+      await expect(alert).toBeVisible()
+      await expect(page.getByTestId('voice-transcript')).toHaveCount(0)
+    }
+    await alert.getByRole('button').click()
+    await button.click()
+    await expect.poll(() => page.evaluate(() => (window as any).__voiceFailedAttempts)).toBe(4)
+    await expect(alert).toBeVisible()
+    await expect(page.getByTestId('voice-transcript')).toHaveCount(0)
+    await page.screenshot({ path: 'test-results/global-voice-retry-focus.png', fullPage: true })
+    // A deliberate click outside the terminal clears its remembered input destination.
+    await page.evaluate(() => {
+      document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
       ;(document.activeElement as HTMLElement)?.blur()
     })
     await button.click()
-    const alert = page.getByRole('alert').filter({ hasText: /未找到可用的麦克风|No usable microphone/ })
+    await expect(page.getByTestId('voice-transcript')).toBeVisible()
     await expect(alert).toBeVisible()
     const alertBox = (await alert.boundingBox())!
     const closeBox = (await alert.getByRole('button').boundingBox())!

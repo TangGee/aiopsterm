@@ -106,15 +106,26 @@ const toggle = async (destination?: VoiceInputTarget | null, background = false)
   if (!target.value) notice.value = t('fallback')
   await recording.start()
 }
+const captureDestination = () => {
+  const active = document.activeElement
+  const isVoiceControl = active instanceof Element && root.value?.contains(active) && active !== transcriptInput.value
+  const focusLost = !active || active === document.body || active === document.documentElement
+  const origin = isVoiceControl || focusLost ? lastFocused : active
+  const destination = captureVoiceInputTarget(origin)
+  if (destination && origin && !root.value?.contains(origin)) lastFocused = origin
+  return destination
+}
+
 const click = (event: MouseEvent) => {
   if (suppressClick) { suppressClick = false; return }
-  void toggle(event.detail === 0 && !captured ? captureVoiceInputTarget(lastFocused) : captured)
+  void toggle(event.detail === 0 && !captured ? captureDestination() : captured)
   captured = null
 }
 const pointerDown = (event: PointerEvent) => {
   suppressClick = false
   if (event.button !== 0) return
-  captured = captureVoiceInputTarget(document.activeElement === event.currentTarget ? lastFocused : document.activeElement)
+  captured?.dispose?.()
+  captured = captureDestination()
   drag = { x: event.clientX, y: event.clientY, ...position.value, moved: false }
   ;(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId)
   event.preventDefault()
@@ -148,7 +159,7 @@ const onKey = (event: KeyboardEvent) => {
 }
 const onTrigger = (event: VoiceInputTrigger) => {
   if (event.source === 'headset' && workspace.activeModule === 'settings' && workspace.activeSettingsSection === 'voice' && !busy.value) return
-  void toggle(event.background ? null : captureVoiceInputTarget(document.activeElement), event.background)
+  void toggle(event.background ? null : captureDestination(), event.background)
 }
 const continueDictating = async () => {
   transcriptInput.value?.focus()
@@ -164,11 +175,12 @@ watch(state, (value) => {
 }, { flush: 'sync' })
 
 watch(() => [workspace.activePanelId, workspace.selectedConversationId, workspace.selectedManagedAiSessionKey, workspace.activeModule, workspace.mode], () => {
+  lastFocused = null
   if (target.value) { targetChanged = true; target.value.dispose?.() }
 }, { flush: 'sync' })
 
 onMounted(async () => {
-  unregisterController = registerGlobalVoiceController({ state, toggle: () => { void toggle(captureVoiceInputTarget(document.activeElement)) } })
+  unregisterController = registerGlobalVoiceController({ state, toggle: () => { void toggle(captureDestination()) } })
   document.addEventListener('focusin', rememberFocus)
   document.addEventListener('pointerdown', externalPointer, true)
   window.addEventListener('keydown', onKey, true)
@@ -216,13 +228,13 @@ onBeforeUnmount(() => {
           <button @click="close">{{ t('done') }}</button>
         </div>
       </section>
-      <div v-if="errorText" class="voice-error" role="alert"><span>{{ t('failed') }}: {{ errorText }}</span><button @click="error = ''" :aria-label="t('close')"><X :size="14" /></button></div>
+      <div v-if="errorText" class="voice-error" role="alert"><span>{{ t('failed') }}: {{ errorText }}</span><button @pointerdown.prevent @click="error = ''" :aria-label="t('close')"><X :size="14" /></button></div>
       <div v-if="busy" class="voice-status" role="status"><span>{{ t(state) }} {{ state === 'recording' ? duration : '' }}</span><meter v-if="state === 'recording'" min="0" max="1" :value="level" :aria-label="t('recording')" /><button @click="cancel">{{ t('cancel') }}</button></div>
     </div>
     <div class="voice-controls">
       <button v-if="!busy" class="voice-secondary" :aria-label="t('openDraft')" :title="t('openDraft')" @click="panel = true"><FileText :size="17" /></button>
       <button v-if="!busy" class="voice-secondary" :aria-label="t('settings')" :title="t('settings')" @click="openSettings"><Settings :size="17" /></button>
-      <button class="voice-mic" :class="{ recording: state === 'recording' }" data-testid="global-voice-button" :aria-label="buttonTitle" :title="`${buttonTitle}. ${t('drag')}`" :aria-pressed="state === 'recording'" :aria-busy="state === 'starting' || state === 'transcribing'" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerUp" @pointercancel="drag = null; captured = null" @click="click">
+      <button class="voice-mic" :class="{ recording: state === 'recording' }" data-testid="global-voice-button" :aria-label="buttonTitle" :title="`${buttonTitle}. ${t('drag')}`" :aria-pressed="state === 'recording'" :aria-busy="state === 'starting' || state === 'transcribing'" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerUp" @pointercancel="drag = null; captured?.dispose?.(); captured = null" @click="click">
         <Square v-if="state === 'recording'" :size="20" /><LoaderCircle v-else-if="busy" class="voice-spinner" :size="23" /><Mic v-else :size="24" />
       </button>
     </div>

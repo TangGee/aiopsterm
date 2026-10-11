@@ -143,6 +143,44 @@ describe('global voice controls', () => {
     await wrapper!.get('[role="alert"] button').trigger('click')
     expect(wrapper!.find('[role="alert"]').exists()).toBe(false)
   })
+  it.each(['button', 'body', 'dismiss'])('retains the terminal across failed attempts with focus on %s', async (focus) => {
+    await mountInput(); const element = input(); const insert = vi.fn(() => true)
+    const remove = registerVoiceInputTarget(element, () => ({ kind: 'terminal', insert }))
+    await clickMic()
+    recording.runtime.error.value = 'Requested device not found'
+    recording.runtime.state.value = 'idle'
+    await flushPromises()
+    if (focus === 'body') element.blur()
+    else if (focus === 'button') (wrapper!.get('[data-testid="global-voice-button"]').element as HTMLElement).focus()
+    else (wrapper!.get('[role="alert"] button').element as HTMLElement).focus()
+    await clickMic()
+    expect(wrapper!.find('[role="dialog"]').exists()).toBe(false)
+    await deliver('second attempt')
+    expect(insert).toHaveBeenCalledWith('second attempt')
+    remove()
+  })
+  it('uses the original input for shortcut retries from voice controls', async () => {
+    await mountInput(); const element = input(); await clickMic()
+    recording.runtime.error.value = 'Requested device not found'
+    recording.runtime.state.value = 'idle'
+    await flushPromises()
+    ;(wrapper!.get('[role="alert"] button').element as HTMLElement).focus()
+    trigger?.({ source: 'shortcut', background: false })
+    await flushPromises(); await deliver('retry ')
+    expect(element.value).toBe('hello retry world')
+    expect(wrapper!.find('[role="dialog"]').exists()).toBe(false)
+  })
+  it.each(['outside', 'session'])('forgets the previous input after a deliberate %s change', async (change) => {
+    await mountInput(); const element = input(); await clickMic()
+    recording.runtime.state.value = 'idle'
+    await flushPromises()
+    if (change === 'outside') document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    else session.context.activePanelId = 'two'
+    element.blur()
+    await clickMic(); await deliver('new text')
+    expect(element.value).toBe('hello world')
+    expect(wrapper!.find('[role="dialog"]').exists()).toBe(true)
+  })
   it('routes the gear to formal settings and leaves headset detection to that page', async () => {
     await mountInput(); await wrapper!.get('button[aria-label="语音设置"]').trigger('click')
     expect(session.context.setActiveSettingsSection).toHaveBeenCalledWith('voice')
