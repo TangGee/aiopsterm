@@ -416,6 +416,7 @@ describe('terminalWorkspaceViewRuntime', () => {
 
     const terminal = runtime.terminalViews.get(panel.id)?.terminal as unknown as FakeTerminal
     expect(terminal.options.allowTransparency).toBe(true)
+    expect(terminal.options.convertEol).toBe(false)
     expect((terminal.options.theme as { background?: string }).background).toBe('#f5f7fb')
 
     ;(workspace.config as any).background.mode = 'custom'

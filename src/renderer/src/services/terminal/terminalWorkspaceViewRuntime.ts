@@ -1225,7 +1225,7 @@ export const createTerminalWorkspaceViewRuntime = ({
       const terminal = new TerminalConstructor({
         allowTransparency: true,
         cursorBlink: workspace.terminalSettings.cursorBlink,
-        convertEol: true,
+        convertEol: false,
         cursorStyle: workspace.terminalSettings.cursorStyle,
         fontFamily: resolveTerminalFontFamily(workspace.terminalSettings.fontFamily),
         fontSize: terminalFontSizeForPanel(panel.id),

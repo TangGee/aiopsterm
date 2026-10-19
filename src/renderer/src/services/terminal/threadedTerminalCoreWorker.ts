@@ -944,7 +944,8 @@ const createRecord = (options: ThreadedTerminalCreateOptions): CoreTerminalRecor
     allowProposedApi: true,
     cols: options.cols,
     rows: options.rows,
-    convertEol: options.surface !== 'codex',
+    // PTYs own line endings. Bare LF must retain the cursor column.
+    convertEol: false,
     cursorBlink: options.settings.cursorBlink,
     cursorStyle: options.settings.cursorStyle,
     scrollback: options.settings.scrollBack

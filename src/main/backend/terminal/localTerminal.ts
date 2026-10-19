@@ -454,7 +454,7 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
       rows: options.rows || 30,
       cwd,
       env,
-      ...(getPlatform() === 'win32' ? { useConpty: false } : {})
+      ...(getPlatform() === 'win32' ? { useConpty: true } : {})
     })
     const processId = cleanProcessId(ptyProcess.pid)
     const session: LocalTerminalSession = {

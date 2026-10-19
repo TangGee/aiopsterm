@@ -96,8 +96,8 @@ describe('threadedTerminalCoreWorker', () => {
     await waitFor(() => messages.some((message) => message.type === 'created'))
   }
 
-  it('preserves the column of bare line feeds in Codex ConPTY redraws', async () => {
-    const options = { ...createOptions(), surface: 'codex' as const }
+  it.each(['workspace', 'codex'] as const)('preserves bare LF columns in ConPTY redraws on %s', async (surface) => {
+    const options = { ...createOptions(), surface }
     send({ type: 'create', requestId: 'create-codex', options })
     await waitFor(() => messages.some((message) => message.type === 'created'))
     // ConPTY redraw captured on Windows: line feeds retain column two.
@@ -139,7 +139,7 @@ describe('threadedTerminalCoreWorker', () => {
     send({
       type: 'data',
       terminalId: createOptions().terminalId,
-      data: Array.from({ length: 18 }, (_item, index) => `line-${index}\n`).join('')
+      data: Array.from({ length: 18 }, (_item, index) => `line-${index}\r\n`).join('')
     })
 
     const first = await waitFor(() => {
@@ -148,7 +148,7 @@ describe('threadedTerminalCoreWorker', () => {
     })
     expect(first.viewportY).toBe(first.baseY)
 
-    send({ type: 'data', terminalId: createOptions().terminalId, data: 'after-find\n' })
+    send({ type: 'data', terminalId: createOptions().terminalId, data: 'after-find\r\n' })
     const next = await waitFor(() => {
       const snapshot = latestScreen(messages)
       return snapshot && snapshot.seq > first.seq && visibleText(snapshot).includes('after-find') ? snapshot : undefined
@@ -287,7 +287,7 @@ describe('threadedTerminalCoreWorker', () => {
     send({
       type: 'data',
       terminalId: createOptions().terminalId,
-      data: Array.from({ length: 18 }, (_item, index) => `line-${index}\n`).join('')
+      data: Array.from({ length: 18 }, (_item, index) => `line-${index}\r\n`).join('')
     })
     const bottom = await waitFor(() => {
       const snapshot = latestScreen(messages)
@@ -455,15 +455,15 @@ describe('threadedTerminalCoreWorker', () => {
       type: 'data',
       terminalId: createOptions().terminalId,
       data: [
-        'line-0\n',
-        'wide-你-tail\n',
+        'line-0\r\n',
+        'wide-你-tail\r\n',
         'soft-wrap-part-one-',
-        'part-two\n',
-        'line-4\n',
-        'line-5\n',
-        'line-6\n',
-        'line-7\n',
-        'line-8\n'
+        'part-two\r\n',
+        'line-4\r\n',
+        'line-5\r\n',
+        'line-6\r\n',
+        'line-7\r\n',
+        'line-8\r\n'
       ].join('')
     })
     await waitFor(() => {

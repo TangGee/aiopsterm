@@ -566,7 +566,7 @@ describe('local terminal backend runtime', () => {
     ])
   })
 
-  it('uses WinPTY for Windows local terminals', async () => {
+  it('uses ConPTY for Windows local terminals', async () => {
     const backend = await loadBackend()
     const pty = new MockPtyProcess()
     const spawnCalls: Array<Record<string, unknown>> = []
@@ -583,12 +583,12 @@ describe('local terminal backend runtime', () => {
       })
     })
 
-    backend.createLocalTerminalSession('local-winpty-1', { kind: 'local' }, createSink(createRecorder()))
+    backend.createLocalTerminalSession('local-conpty-1', { kind: 'local' }, createSink(createRecorder()))
 
     expect(spawnCalls).toEqual([
       expect.objectContaining({
         args: [],
-        options: expect.objectContaining({ useConpty: false })
+        options: expect.objectContaining({ useConpty: true })
       })
     ])
   })
