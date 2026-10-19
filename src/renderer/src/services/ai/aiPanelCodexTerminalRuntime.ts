@@ -839,7 +839,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
       ? new options.terminalConstructor!({
           allowTransparency: true,
           cursorBlink: settings.cursorBlink,
-          convertEol: true,
+          convertEol: false,
           cursorStyle: settings.cursorStyle,
           fontFamily: settings.fontFamily || TERMINAL_FONT_FAMILY,
           fontSize: settings.fontSize || DEFAULT_TERMINAL_FONT_SIZE,

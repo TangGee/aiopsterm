@@ -825,7 +825,7 @@ export const createCodexSession = async (
       rows,
       cwd,
       env,
-      ...(getPlatform() === 'win32' ? { useConpty: false } : {})
+      ...(getPlatform() === 'win32' ? { useConpty: true } : {})
     })
     const record: CodexSessionRecord = {
       id,

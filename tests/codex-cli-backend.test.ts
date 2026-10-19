@@ -335,7 +335,7 @@ describe('Codex CLI backend runtime', () => {
           cwd: expectedCwd,
           cols: 120,
           rows: 40,
-          useConpty: false,
+          useConpty: true,
           env: expect.objectContaining({
             CODEX_HOME: join('/tmp/aiopsterm-user-data', 'codex-agent'),
             CODEX_MANAGED_PACKAGE_ROOT: CODEX_PACKAGE_ROOT,

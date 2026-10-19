@@ -96,6 +96,32 @@ describe('threadedTerminalCoreWorker', () => {
     await waitFor(() => messages.some((message) => message.type === 'created'))
   }
 
+  it('preserves the column of bare line feeds in Codex ConPTY redraws', async () => {
+    const options = { ...createOptions(), surface: 'codex' as const }
+    send({ type: 'create', requestId: 'create-codex', options })
+    await waitFor(() => messages.some((message) => message.type === 'created'))
+    // ConPTY redraw captured on Windows: line feeds retain column two.
+    send({
+      type: 'data', terminalId: options.terminalId,
+      data: '\x1b[1;2H\x1b[K\n\x1b[K\n CURSOR_abc123\x1b[K\x1b[3;16H'
+    })
+    const snapshot = await waitFor(() => {
+      const next = latestScreen(messages)
+      return next?.lines.some((line) => line.text.includes('CURSOR_abc123')) ? next : undefined
+    })
+    expect(snapshot.lines.find((line) => line.y === 2)?.text.trimEnd()).toBe('  CURSOR_abc123')
+    expect(snapshot.cursorX).toBe(15)
+    expect(snapshot.cursorY).toBe(2)
+
+    send({ type: 'data', terminalId: options.terminalId, data: '\r\nNEXT' })
+    const next = await waitFor(() => {
+      const screen = latestScreen(messages)
+      return screen?.lines.some((line) => line.text.includes('NEXT')) ? screen : undefined
+    })
+    expect(next.lines.find((line) => line.y === 3)?.text.trimEnd()).toBe('NEXT')
+    expect(next.cursorX).toBe(4)
+  })
+
   it('checkpoints only normal history while an alternate-screen program is visible', async () => {
     await createTerminal()
     const terminalId = createOptions().terminalId

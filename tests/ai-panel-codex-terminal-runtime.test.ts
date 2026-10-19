@@ -321,6 +321,7 @@ describe('aiPanelCodexTerminalRuntime', () => {
     expect(terminal.open).toHaveBeenCalledWith(host)
     expect(terminal.loadAddon).toHaveBeenCalledWith(conversation.fit)
     expect(terminal.options).toMatchObject({
+      convertEol: false,
       termName: 'xterm-256color',
       fontFamily: 'JetBrains Mono',
       fontSize: 13,

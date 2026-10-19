@@ -944,7 +944,7 @@ const createRecord = (options: ThreadedTerminalCreateOptions): CoreTerminalRecor
     allowProposedApi: true,
     cols: options.cols,
     rows: options.rows,
-    convertEol: true,
+    convertEol: options.surface !== 'codex',
     cursorBlink: options.settings.cursorBlink,
     cursorStyle: options.settings.cursorStyle,
     scrollback: options.settings.scrollBack
