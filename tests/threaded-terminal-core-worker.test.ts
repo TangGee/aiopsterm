@@ -122,6 +122,43 @@ describe('threadedTerminalCoreWorker', () => {
     expect(next.cursorX).toBe(4)
   })
 
+  it('publishes cursor visibility for redraws and cursor-only mode changes', async () => {
+    await createTerminal()
+    const terminalId = createOptions().terminalId
+    send({ type: 'data', terminalId, data: '\x1b[2;3HINPUT' })
+    const initial = await waitFor(() => {
+      const screen = latestScreen(messages)
+      return screen?.lines.some((line) => line.text.includes('INPUT')) ? screen : undefined
+    })
+    expect(initial.cursorVisible).toBe(true)
+
+    send({ type: 'data', terminalId, data: '\x1b[?25l' })
+    const hidden = await waitFor(() => {
+      const screen = latestScreen(messages)
+      return screen && screen.seq > initial.seq ? screen : undefined
+    })
+    expect(hidden.cursorVisible).toBe(false)
+    expect(hidden.dirtyRows).toContain(initial.cursorY)
+
+    send({ type: 'data', terminalId, data: '\x1b[5;1HFOOTER' })
+    const footer = await waitFor(() => {
+      const screen = latestScreen(messages)
+      return screen?.lines.some((line) => line.text.includes('FOOTER')) ? screen : undefined
+    })
+    expect(footer.cursorVisible).toBe(false)
+    expect(footer.cursorY).toBe(4)
+
+    send({ type: 'data', terminalId, data: '\x1b[2;3H\x1b[?25h' })
+    const shown = await waitFor(() => {
+      const screen = latestScreen(messages)
+      return screen && screen.seq > footer.seq ? screen : undefined
+    })
+    expect(shown.cursorVisible).toBe(true)
+    expect(shown.cursorX).toBe(2)
+    expect(shown.cursorY).toBe(1)
+    expect(shown.dirtyRows).toEqual(expect.arrayContaining([1, 4]))
+  })
+
   it('checkpoints only normal history while an alternate-screen program is visible', async () => {
     await createTerminal()
     const terminalId = createOptions().terminalId

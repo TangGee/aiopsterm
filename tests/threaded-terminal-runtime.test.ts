@@ -473,6 +473,7 @@ describe('threadedTerminalRuntime', () => {
       seq: 3,
       cols: 80,
       rows: 10,
+      cursorVisible: false,
       cursorX: 6,
       cursorY: 1,
       cursorAbsoluteY: 1,
@@ -502,6 +503,7 @@ describe('threadedTerminalRuntime', () => {
           terminalId: 'panel-1',
           full: true,
           fullReason: 'visibility',
+          cursorVisible: false,
           lines: expect.arrayContaining([expect.objectContaining({ y: 1, text: 'shell ready' })])
         })
       })

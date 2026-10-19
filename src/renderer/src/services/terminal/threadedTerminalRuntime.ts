@@ -3029,6 +3029,7 @@ export class ThreadedTerminalHost {
       seq: snapshot?.seq || 0,
       cols: snapshot?.cols || this.cols,
       rows,
+      cursorVisible: snapshot?.cursorVisible,
       cursorX: snapshot?.cursorX || this.buffer.active.cursorX,
       cursorY: snapshot?.cursorY || this.buffer.active.cursorY,
       cursorAbsoluteY: snapshot?.cursorAbsoluteY,

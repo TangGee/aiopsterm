@@ -700,7 +700,7 @@ const cursorCellAt = (line: ThreadedTerminalScreenLine | undefined, x: number): 
 }
 
 const drawCursor = (surface: RenderSurface, snapshot: ThreadedTerminalScreenSnapshot) => {
-  if (snapshot.cursorY < 0 || snapshot.cursorY >= snapshot.rows) return
+  if (snapshot.cursorVisible === false || snapshot.cursorY < 0 || snapshot.cursorY >= snapshot.rows) return
   const context = surface.context
   const x = surface.geometry.paddingLeft + snapshot.cursorX * surface.cellWidth
   const y = surface.geometry.paddingTop + snapshot.cursorY * surface.cellHeight

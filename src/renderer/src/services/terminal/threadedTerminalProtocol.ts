@@ -208,6 +208,7 @@ export type ThreadedTerminalScreenSnapshot = {
   seq: number
   cols: number
   rows: number
+  cursorVisible?: boolean
   cursorX: number
   cursorY: number
   cursorAbsoluteY?: number

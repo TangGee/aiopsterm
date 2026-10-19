@@ -39,8 +39,9 @@ type DedicatedWorkerScopeLike = {
 type HeadlessTerminalClass = typeof import('@xterm/headless').Terminal
 type HeadlessTerminalLike = InstanceType<HeadlessTerminalClass>
 type HeadlessTerminalOptionsWithTermName = HeadlessTerminalLike['options'] & { termName?: string }
-type HeadlessTerminalWithCoreMouse = HeadlessTerminalLike & {
+type HeadlessTerminalWithCore = HeadlessTerminalLike & {
   _core?: {
+    coreService?: { isCursorHidden?: boolean }
     coreMouseService?: {
       triggerMouseEvent?: (event: {
         col: number
@@ -816,6 +817,8 @@ const buildSnapshot = (record: CoreTerminalRecord, forceFull = false, fullReason
     seq: ++record.seq,
     cols: record.terminal.cols,
     rows: record.terminal.rows,
+    // xterm parses DECTCEM internally but does not expose it in public modes.
+    cursorVisible: !(record.terminal as HeadlessTerminalWithCore)._core?.coreService?.isCursorHidden,
     cursorX: buffer.cursorX,
     cursorY: cursorViewportY,
     cursorAbsoluteY,
@@ -1178,7 +1181,7 @@ const mouseActionCode = (action: ThreadedTerminalMouseAction) => {
 }
 
 const triggerMouseEvent = (record: CoreTerminalRecord, event: ThreadedTerminalMouseEventPayload) => {
-  const coreMouseService = (record.terminal as HeadlessTerminalWithCoreMouse)._core?.coreMouseService
+  const coreMouseService = (record.terminal as HeadlessTerminalWithCore)._core?.coreMouseService
   if (!coreMouseService?.triggerMouseEvent) return false
   return Boolean(coreMouseService.triggerMouseEvent({
     col: Math.max(0, Math.min(record.terminal.cols - 1, Math.floor(event.col))),

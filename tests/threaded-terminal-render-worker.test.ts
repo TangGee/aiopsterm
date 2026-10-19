@@ -348,6 +348,34 @@ describe('threadedTerminalRenderWorker', () => {
     expect(messages).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'frame', terminalId: 'render-worker-terminal', seq: 1 })]))
   })
 
+  it.each(['block', 'bar', 'underline'] as const)('honors hidden %s cursors and clears their previous paint', async (style) => {
+    const current = snapshot()
+    const attachment = attachMessage()
+    if (attachment.type === 'attach') attachment.options.settings.cursorStyle = style
+    send(attachGroupMessage(canvas))
+    send(attachment)
+    send({ type: 'screen', snapshot: { ...current, cursorVisible: true } })
+    await vi.advanceTimersByTimeAsync(16)
+    expect(canvas.context.operations.some((op) => op.fillStyle === '#ff00ff')).toBe(true)
+
+    canvas.context.operations.length = 0
+    send({ type: 'screen', snapshot: { ...current, seq: 2, full: false, cursorVisible: false } })
+    await vi.advanceTimersByTimeAsync(16)
+    expect(canvas.context.operations.some((op) => op.fillStyle === '#ff00ff')).toBe(false)
+    expect(canvas.context.operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'fillRect', y: 0, fillStyle: '#000000' })
+    ]))
+
+    canvas.context.operations.length = 0
+    send({ type: 'screen', snapshot: { ...current, seq: 3, cursorVisible: false } })
+    await vi.advanceTimersByTimeAsync(16)
+    expect(canvas.context.operations.some((op) => op.fillStyle === '#ff00ff')).toBe(false)
+
+    send({ type: 'screen', snapshot: { ...current, seq: 4, full: false, cursorVisible: true } })
+    await vi.advanceTimersByTimeAsync(16)
+    expect(canvas.context.operations.some((op) => op.fillStyle === '#ff00ff')).toBe(true)
+  })
+
   it('redraws the ASCII character addressed by a block cursor after a wide glyph', async () => {
     const current = snapshot()
     current.cursorX = 3
