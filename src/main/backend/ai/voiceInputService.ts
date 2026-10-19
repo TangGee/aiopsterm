@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { transcribeViaSenseVoiceServer } from './voiceEngineServer'
 import { doubaoSpeechEndpoint } from '../../../shared/voicePresets'
 import { execFile } from 'node:child_process'
 import { constants } from 'node:fs'
@@ -40,11 +41,20 @@ export const transcribeGlobalVoice = async (
     await validateVoicePreferences(preferences)
     if (preferences.mode === 'local') {
       if (bytes.toString('ascii', 0, 4) !== 'RIFF' || bytes.toString('ascii', 8, 12) !== 'WAVE') return failure('Local recognition requires WAV audio. Use the global voice button.')
+      const sensevoice = preferences.localEngine === 'sensevoice'
+      if (sensevoice) {
+        try {
+          const text = (await transcribeViaSenseVoiceServer(preferences, bytes, signal)).replace(/<\|[^|]*\|>/g, '').trim()
+          return text ? { ok: true, data: { text, provider: 'aiopsterm-local', model: preferences.modelPath } } : noSpeech()
+        } catch (error) {
+          signal.throwIfAborted()
+          // Fall back to the one-shot CLI below when the resident engine is unavailable.
+        }
+      }
       directory = await mkdtemp(join(tmpdir(), 'aiopsterm-voice-'))
       const audioPath = join(directory, 'input.wav')
       const outputPath = join(directory, 'result')
       await writeFile(audioPath, bytes, { mode: 0o600 })
-      const sensevoice = preferences.localEngine === 'sensevoice'
       const args = sensevoice
         ? [`--sense-voice-model=${preferences.modelPath}`, `--tokens=${preferences.tokensPath}`, '--sense-voice-language=auto', '--sense-voice-use-itn=1', '--num-threads=2', audioPath]
         : ['-m', preferences.modelPath, '-f', audioPath, '-l', 'auto', '-otxt', '-of', outputPath, '-np']
