@@ -6,6 +6,7 @@ import { join, relative } from 'node:path'
 import type { VoiceInputPreferences, VoiceInstallProgress } from '../../../shared/contracts/voice'
 import { validateVoicePreferences } from './voiceInputService'
 import { downloadVoiceArchive } from './voiceModelDownload'
+import { createVoiceInstallLog, voiceInstallError } from './voiceInstallDiagnostics'
 export { downloadVoiceArchive } from './voiceModelDownload'
 
 const version = '1.12.14'
@@ -37,7 +38,11 @@ const execute = (file: string, args: string[], signal: AbortSignal) => new Promi
   const child = execFile(file, args, { signal, timeout: 120_000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 })
   let failure: Error | undefined
   child.on('error', (error) => { failure = error })
-  child.on('close', (code) => code === 0 && !failure ? resolve() : reject(failure || new Error(`Voice installation command failed (${file}, exit ${code}). Check system compatibility and available disk space.`)))
+  let stderr = ''
+  child.stderr?.on('data', (chunk) => { stderr = `${stderr}${String(chunk)}`.slice(-4000) })
+  child.on('close', (code) => code === 0 && !failure ? resolve() : reject(failure || new Error(
+    `Voice installation command failed (${file}, exit ${code}). ${stderr.trim() || 'Check system compatibility and available disk space.'}`
+  )))
 })
 const findFile = async (directory: string, name: string): Promise<string> => {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -67,8 +72,9 @@ const verifyInstalledVoiceModel = async (installed: InstalledVoiceModel, root: s
 }
 export const installVoiceModel = async (
   root: string, signal: AbortSignal, report: (value: VoiceInstallProgress) => void,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch, installationId = randomUUID()
 ): Promise<InstalledVoiceModel> => {
+  const log = createVoiceInstallLog({ installationId })
   const assets = voiceInstallAssets()
   await mkdir(root, { recursive: true })
   const manifest = join(root, `sensevoice-${version}-${process.platform}-${process.arch}.json`)
@@ -77,8 +83,12 @@ export const installVoiceModel = async (
     report({ phase: 'checking', received: 0, total: 0 })
     await verifyInstalledVoiceModel(installed, root, signal)
     signal.throwIfAborted()
+    log('info', 'cache.reused')
     return installed
-  } catch { signal.throwIfAborted() }
+  } catch (error) {
+    signal.throwIfAborted()
+    log('info', 'cache.unavailable', { error: voiceInstallError(error) })
+  }
   for (const entry of await readdir(root, { withFileTypes: true })) {
     if (entry.isDirectory() && (entry.name.startsWith('.download-') || entry.name.startsWith('.check-'))) await rm(join(root, entry.name), { recursive: true, force: true })
   }
@@ -90,22 +100,27 @@ export const installVoiceModel = async (
       signal.throwIfAborted()
       const archive = join(root, `${asset.name}.tar.bz2`)
       const cached = await digest(archive).then((value) => value === asset.sha256, () => false)
+      log('info', 'archive.checked', { asset: asset.kind, cached })
       if (!cached) {
         const partial = join(staging, `${asset.kind}.part`)
         report({ phase: 'downloading', asset: asset.kind, received: 0, total: 0 })
         const progress = (received: number, total: number) => report({ phase: 'downloading', asset: asset.kind, received, total })
         try {
           // Prefer release URLs so each range does not consume a REST API request.
-          await downloadVoiceArchive(asset.url, partial, asset.sha256, signal, progress, fetcher)
-        } catch {
+          await downloadVoiceArchive(asset.url, partial, asset.sha256, signal, progress, fetcher, undefined, { installationId, asset: asset.kind })
+        } catch (error) {
           signal.throwIfAborted()
-          await downloadVoiceArchive(`https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/assets/${asset.assetId}`, partial, asset.sha256, signal, progress, fetcher)
+          log('warn', 'download.fallback', { asset: asset.kind, error: voiceInstallError(error) })
+          await downloadVoiceArchive(`https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/assets/${asset.assetId}`, partial, asset.sha256, signal, progress, fetcher, undefined, { installationId, asset: asset.kind })
         }
         await rm(archive, { force: true })
         await rename(partial, archive)
       }
       report({ phase: 'extracting', asset: asset.kind, received: 0, total: 0 })
+      const extractionStart = Date.now()
+      log('info', 'extraction.started', { asset: asset.kind })
       await execute('tar', ['-xf', archive, '-C', staging], signal)
+      log('info', 'extraction.completed', { asset: asset.kind, elapsedMs: Date.now() - extractionStart })
     }
     report({ phase: 'checking', received: 0, total: 0 })
     const executablePath = await findFile(staging, process.platform === 'win32' ? 'sherpa-onnx-offline.exe' : 'sherpa-onnx-offline')
@@ -114,7 +129,9 @@ export const installVoiceModel = async (
     if (!executablePath || !modelPath || !tokensPath) throw new Error('The voice package is missing required files. Retry installation.')
     if (process.platform !== 'win32') await chmod(executablePath, 0o755)
     const installed: InstalledVoiceModel = { mode: 'local', localEngine: 'sensevoice', executablePath, modelPath, tokensPath }
+    log('info', 'validation.started')
     await verifyInstalledVoiceModel(installed, root, signal)
+    log('info', 'validation.completed')
     signal.throwIfAborted()
     const destination = join(root, `sensevoice-${version}-${randomUUID()}`)
     await rename(staging, destination)

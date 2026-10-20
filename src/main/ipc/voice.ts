@@ -1,10 +1,12 @@
-import { app, BrowserWindow, globalShortcut, safeStorage, net, type IpcMain } from 'electron'
+import { app, BrowserWindow, globalShortcut, safeStorage, net, session, type IpcMain } from 'electron'
+import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { installVoiceModel, voiceInstallEnvironment } from '../backend/ai/voiceModelInstaller'
 import Store from 'electron-store'
 import { transcribeGlobalVoice, validateVoicePreferences } from '../backend/ai/voiceInputService'
 import { shutdownVoiceEngineServer } from '../backend/ai/voiceEngineServer'
 import type { VoiceInputPreferences, VoiceInputStatus, VoiceInstallProgress, VoiceTranscriptionInput } from '@shared/contracts/voice'
+import { createVoiceInstallLog, voiceInstallError } from '../backend/ai/voiceInstallDiagnostics'
 
 export const registerVoiceIpc = (ipcMain: IpcMain) => {
   const store = new Store<{ preferences: VoiceInputPreferences; encryptedKey?: string }>({
@@ -100,17 +102,37 @@ export const registerVoiceIpc = (ipcMain: IpcMain) => {
     const controller = new AbortController()
     installer = controller
     installerOwner = event.sender.id
+    const installationId = randomUUID()
+    const started = Date.now()
+    const log = createVoiceInstallLog({ installationId })
+    log('info', 'started', { ...voiceInstallEnvironment() })
+    for (const host of ['github.com', 'api.github.com']) {
+      void session.defaultSession.resolveProxy(`https://${host}`).then((route) => {
+        log('info', 'network-route', { host, route: route.replace(/[^;\s]+@/g, '[redacted]@') })
+      }).catch((error) => log('warn', 'network-route-failed', { host, error: voiceInstallError(error) }))
+    }
     installation = { phase: 'downloading', asset: 'engine', received: 0, total: 0 }
     publish()
-    const timeout = setTimeout(() => controller.abort(), 30 * 60_000)
+    const timeout = setTimeout(() => controller.abort(new Error('Voice installation exceeded the 30 minute deadline.')), 30 * 60_000)
+    let lastPhase = ''
     void installVoiceModel(join(app.getPath('userData'), 'voice-models'), controller.signal, (progress) => {
       installation = progress; publish()
-    }, net.fetch.bind(net) as typeof fetch).then((installed) => {
+      const phase = `${progress.phase}:${progress.asset || ''}`
+      if (phase !== lastPhase) {
+        log('info', 'phase', { ...progress, elapsedMs: Date.now() - started })
+        lastPhase = phase
+      }
+    }, net.fetch.bind(net) as typeof fetch, installationId).then((installed) => {
       controller.signal.throwIfAborted()
       shutdownVoiceEngineServer()
       store.set('preferences', { ...preferences(), ...installed })
       installation = { phase: 'complete', received: 0, total: 0 }
+      log('info', 'completed', { elapsedMs: Date.now() - started })
     }).catch((error: unknown) => {
+      log(controller.signal.aborted ? 'info' : 'error', controller.signal.aborted ? 'cancelled' : 'failed', {
+        ...installation, elapsedMs: Date.now() - started,
+        error: voiceInstallError(controller.signal.aborted ? controller.signal.reason : error)
+      })
       installation = { phase: controller.signal.aborted ? 'cancelled' : 'error', received: 0, total: 0,
         errorMessage: controller.signal.aborted ? undefined : error instanceof Error ? error.message : String(error) }
     }).finally(() => {

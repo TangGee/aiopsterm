@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 const fake = vi.hoisted(() => ({
   install: vi.fn<(...args: any[]) => Promise<any>>(),
+  log: vi.fn(),
   stored: new Map<string, any>(), bindings: new Map<string, () => void>(), failKeyboard: false,
   handlers: new Map<string, (...args: any[]) => any>(), focused: true,
   window: { show: vi.fn(), focus: vi.fn() },
@@ -15,6 +16,7 @@ vi.mock('electron-store', () => ({ default: class {
 vi.mock('electron', () => ({
   app: { once: vi.fn(), getPath: () => '/test-user-data' },
   net: { fetch: vi.fn() },
+  session: { defaultSession: { resolveProxy: vi.fn(async () => 'DIRECT') } },
   BrowserWindow: { fromWebContents: () => ({ ...fake.window, isFocused: () => fake.focused }) },
   globalShortcut: {
     register: (key: string, callback: () => void) => { if (fake.failKeyboard && key !== 'MediaPlayPause') return false; fake.bindings.set(key, callback); return true },
@@ -23,6 +25,7 @@ vi.mock('electron', () => ({
   safeStorage: { isEncryptionAvailable: () => true, encryptString: (text: string) => Buffer.from(`encrypted:${text}`), decryptString: (bytes: Buffer) => bytes.toString().replace('encrypted:', '') }
 }))
 vi.mock('../src/main/backend/ai/voiceModelInstaller', () => ({ installVoiceModel: fake.install, voiceInstallEnvironment: () => ({ platform: 'linux', arch: 'x64', autoInstallSupported: true }) }))
+vi.mock('../src/main/backend/app/runtimeLog', () => ({ logRuntimeEvent: fake.log }))
 vi.mock('../src/main/backend/ai/voiceInputService', () => ({ transcribeGlobalVoice: fake.transcribe, validateVoicePreferences: vi.fn(async () => undefined) }))
 const sender = { id: 1, send: vi.fn(), once: vi.fn(), isDestroyed: () => false }
 const invoke = (name: string, ...args: any[]) => fake.handlers.get(`voice:${name}`)!({ sender }, ...args)
@@ -115,6 +118,13 @@ describe('voice install IPC', () => {
     await vi.waitFor(() => expect(invoke('status').installation.phase).toBe('error'))
     expect(invoke('status').installation.errorMessage).toBe('network unavailable')
     expect(invoke('status').preferences.modelPath).toBe('/previous')
+    expect(fake.log).toHaveBeenCalledWith('error', 'voice.install.failed', expect.objectContaining({
+      installationId: expect.any(String), phase: 'downloading', asset: 'engine',
+      error: expect.objectContaining({ message: 'network unavailable', stack: expect.any(String) })
+    }))
+    expect(fake.log).toHaveBeenCalledWith('info', 'voice.install.cancelled', expect.objectContaining({
+      installationId: expect.any(String)
+    }))
   })
   it('does not reuse a saved service key for a different provider or endpoint', () => {
     invoke('preferences', { serviceProvider: 'doubao', apiKey: 'private-key', endpoint: 'https://speech.test' })

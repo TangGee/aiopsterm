@@ -1,9 +1,10 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { setTimeout as delay } from 'node:timers/promises'
+import { createVoiceInstallLog, voiceInstallError, type VoiceInstallLog } from './voiceInstallDiagnostics'
 
 const maxArchiveSize = 600 * 1024 * 1024
 const maxAttempts = 3
@@ -16,6 +17,7 @@ class InvalidDownload extends Error {}
 const withResponse = async <T>(
   fetcher: typeof fetch, url: string, headers: Record<string, string>, signal: AbortSignal,
   timing: DownloadTiming,
+  log: VoiceInstallLog,
   consume: (response: Response, signal: AbortSignal, activity: () => void) => Promise<T>
 ): Promise<T> => {
   signal.throwIfAborted()
@@ -46,7 +48,20 @@ const withResponse = async <T>(
       return value
     })
     response = await Promise.race([pending, aborted])
+    log('info', 'download.response', {
+      range: headers.Range, status: response.status,
+      length: response.headers.get('content-length'), contentRange: response.headers.get('content-range'),
+      retryAfter: response.headers.get('retry-after'),
+      rateLimitRemaining: response.headers.get('x-ratelimit-remaining'),
+      rateLimitReset: response.headers.get('x-ratelimit-reset')
+    })
     if (!response.ok || !response.body) {
+      if (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0') {
+        const reset = Number(response.headers.get('x-ratelimit-reset'))
+        const retryAt = reset > 0 && Number.isFinite(new Date(reset * 1000).getTime())
+          ? ` Retry after ${new Date(reset * 1000).toISOString()}.` : ''
+        throw new InvalidDownload(`GitHub download API rate limit exceeded (HTTP 403).${retryAt}`)
+      }
       const message = `Voice download failed (HTTP ${response.status}).`
       if (response.status === 408 || response.status === 429 || response.status >= 500) throw new Error(message)
       throw new InvalidDownload(message)
@@ -69,16 +84,22 @@ const withResponse = async <T>(
 }
 
 const retryDownload = async <T>(
-  signal: AbortSignal, timing: DownloadTiming, operation: () => Promise<T>
+  signal: AbortSignal, timing: DownloadTiming, log: VoiceInstallLog, operation: () => Promise<T>
 ): Promise<T> => {
   for (let attempt = 0; ; attempt++) {
     signal.throwIfAborted()
+    const started = Date.now()
     try { return await operation() } catch (error) {
       signal.throwIfAborted()
       const code = (error as NodeJS.ErrnoException)?.code
-      if (error instanceof InvalidDownload || ['ENOSPC', 'EACCES', 'EROFS'].includes(code || '')) throw error
+      const permanent = error instanceof InvalidDownload || ['ENOSPC', 'EACCES', 'EROFS'].includes(code || '')
+      log('warn', 'download.attempt-failed', {
+        attempt: attempt + 1, maxAttempts, willRetry: !permanent && attempt + 1 < maxAttempts,
+        elapsedMs: Date.now() - started, error: voiceInstallError(error)
+      })
+      if (permanent) throw error
       if (attempt + 1 >= maxAttempts) {
-        throw new Error(`Voice download failed after ${maxAttempts} attempts: ${error instanceof Error ? error.message : String(error)}`)
+        throw new Error(`Voice download failed after ${maxAttempts} attempts: ${error instanceof Error ? error.message : String(error)}`, { cause: error })
       }
       await delay(timing.retryDelayMs * (attempt + 1), undefined, { signal })
     }
@@ -88,8 +109,14 @@ const retryDownload = async <T>(
 export const downloadVoiceArchive = async (
   url: string, destination: string, expectedHash: string, signal: AbortSignal,
   report: (received: number, total: number) => void, fetcher: typeof fetch = fetch,
-  timing: DownloadTiming = defaultTiming
+  timing: DownloadTiming = defaultTiming, context: Record<string, unknown> = {}
 ): Promise<void> => {
+  const source = new URL(url)
+  const log = createVoiceInstallLog({
+    ...context, downloadId: randomUUID(), source: `${source.origin}${source.pathname}`
+  })
+  const started = Date.now()
+  log('info', 'download.started', { ...timing, maxAttempts })
   const controller = new AbortController()
   const abort = () => controller.abort(signal.reason)
   signal.addEventListener('abort', abort, { once: true })
@@ -99,10 +126,15 @@ export const downloadVoiceArchive = async (
   let total = 0
   let lastReport = 0
   let completed = false
+  let lastLog = 0
   const progress = (force = false) => {
     if (force || Date.now() - lastReport > 150) {
       report(bytes.reduce((sum, value) => sum + value, 0), total)
       lastReport = Date.now()
+      if (Date.now() - lastLog >= 10_000) {
+        log('info', 'download.progress', { received: bytes.reduce((sum, value) => sum + value, 0), total, elapsedMs: Date.now() - started })
+        lastLog = Date.now()
+      }
     }
   }
   const consume = async (
@@ -126,14 +158,15 @@ export const downloadVoiceArchive = async (
     if (expected && bytes[index] !== expected) throw new Error('Voice download was incomplete.')
   }
   try {
-    const ranged = await retryDownload(controller.signal, timing, async () => {
+    const ranged = await retryDownload(controller.signal, timing, log, async () => {
       bytes[0] = 0
       progress(true)
-      return withResponse(fetcher, url, {}, controller.signal, timing, async (response, requestSignal, activity) => {
+      return withResponse(fetcher, url, {}, controller.signal, timing, log, async (response, requestSignal, activity) => {
         total = Number(response.headers.get('content-length')) || 0
         if (total < 0 || !Number.isSafeInteger(total) || total > maxArchiveSize) throw new InvalidDownload('Voice download exceeded the expected size.')
         progress(true)
-        if (total > 16 * 1024 * 1024 && response.headers.get('accept-ranges') === 'bytes') return true
+        // Each API redirect consumes anonymous quota. Stream it with one request.
+        if (source.hostname !== 'api.github.com' && total > 16 * 1024 * 1024 && response.headers.get('accept-ranges') === 'bytes') return true
         await consume(response, destination, 0, total, requestSignal, activity)
         return false
       })
@@ -149,12 +182,13 @@ export const downloadVoiceArchive = async (
             const index = nextPart++
             const start = index * partSize
             const end = Math.min(total - 1, start + partSize - 1)
-            await retryDownload(controller.signal, timing, async () => {
+            const rangeLog: VoiceInstallLog = (level, event, fields) => log(level, event, { ...fields, range: `bytes=${start}-${end}` })
+            await retryDownload(controller.signal, timing, rangeLog, async () => {
               // Only discard bytes from this failed attempt; completed parts stay intact.
               bytes[index] = 0
               progress(true)
               // Request the original asset URL so redirects can refresh expired CDN links.
-              await withResponse(fetcher, url, { Range: `bytes=${start}-${end}` }, controller.signal, timing, async (part, requestSignal, activity) => {
+              await withResponse(fetcher, url, { Range: `bytes=${start}-${end}` }, controller.signal, timing, rangeLog, async (part, requestSignal, activity) => {
                 if (part.status !== 206 || part.headers.get('content-range') !== `bytes ${start}-${end}/${total}`) {
                   throw new InvalidDownload('The download server returned an invalid byte range. Retry the installation.')
                 }
@@ -174,6 +208,7 @@ export const downloadVoiceArchive = async (
       })()), createWriteStream(destination, { mode: 0o600 }), { signal: controller.signal })
     }
     controller.signal.throwIfAborted()
+    log('info', 'download.checksum-started')
     const hash = createHash('sha256')
     for await (const chunk of createReadStream(destination, { signal: controller.signal })) hash.update(chunk)
     if (hash.digest('hex') !== expectedHash) throw new InvalidDownload('Voice download checksum mismatch. Retry the download.')
@@ -181,6 +216,13 @@ export const downloadVoiceArchive = async (
     const received = bytes.reduce((sum, value) => sum + value, 0)
     report(received, total || received)
     completed = true
+    log('info', 'download.completed', { received, total, elapsedMs: Date.now() - started })
+  } catch (error) {
+    log(signal.aborted ? 'info' : 'error', signal.aborted ? 'download.cancelled' : 'download.failed', {
+      received: bytes.reduce((sum, value) => sum + value, 0), total,
+      elapsedMs: Date.now() - started, error: voiceInstallError(error)
+    })
+    throw error
   } finally {
     signal.removeEventListener('abort', abort)
     controller.abort()

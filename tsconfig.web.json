@@ -29,6 +29,7 @@
     "tests/terminal-recovery-store-backend.test.ts",
     "tests/global-voice-service-backend.test.ts",
     "tests/voice-engine-server-backend.test.ts",
-    "tests/voice-model-installer-backend.test.ts"
+    "tests/voice-model-installer-backend.test.ts",
+    "tests/voice-install-diagnostics-backend.test.ts"
   ]
 }

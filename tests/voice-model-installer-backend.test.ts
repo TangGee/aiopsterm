@@ -51,6 +51,17 @@ describe('voice model installation', () => {
     expect(fetcher).toHaveBeenCalledTimes(10)
     expect(progress).toHaveBeenLastCalledWith(data.length, data.length)
   })
+  it('downloads a large API fallback in one request instead of exhausting quota with ranges', async () => {
+    const data = Buffer.alloc(17 * 1024 * 1024, 5)
+    const path = await target()
+    const fetcher = vi.fn(async () => new Response(data, {
+      headers: { 'content-length': String(data.length), 'accept-ranges': 'bytes' }
+    }))
+    await downloadVoiceArchive('https://api.github.com/repos/example/releases/assets/1', path,
+      hash(data), new AbortController().signal, vi.fn(), fetcher as typeof fetch)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(hash(await readFile(path))).toBe(hash(data))
+  })
   it('removes corrupt or incomplete downloads so retry can replace them', async () => {
     const path = await target(); const data = Buffer.from('corrupt')
     await expect(downloadVoiceArchive('https://example.test/archive', path, hash(Buffer.from('expected')), new AbortController().signal, vi.fn(),
