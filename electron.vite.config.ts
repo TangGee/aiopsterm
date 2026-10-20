@@ -12,7 +12,8 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: resolve(__dirname, 'src/main/index.ts'),
-        external: ['node-pty', 'better-sqlite3', 'ssh2']
+        // ws must resolve its optional native accelerators at runtime.
+        external: ['node-pty', 'better-sqlite3', 'ssh2', 'ws']
       }
     }
   },

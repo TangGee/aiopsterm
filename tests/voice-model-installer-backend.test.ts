@@ -10,6 +10,7 @@ let directory = ''
 afterEach(async () => { if (directory) await rm(directory, { recursive: true, force: true }) })
 const target = async () => { directory = await mkdtemp(join(tmpdir(), 'voice-download-test-')); return join(directory, 'archive') }
 const hash = (data: Buffer) => createHash('sha256').update(data).digest('hex')
+const fastTiming = { responseTimeoutMs: 50, idleTimeoutMs: 50, retryDelayMs: 1 }
 
 describe('voice model installation', () => {
   it.each([['linux', 'x64'], ['linux', 'arm64'], ['darwin', 'x64'], ['darwin', 'arm64'], ['win32', 'x64']] as const)('selects pinned CPU packages for %s/%s', (platform, arch) => {
@@ -84,4 +85,118 @@ it('automatically retries transient connection failures before downloading', asy
   await downloadVoiceArchive('https://example.test/archive', path, hash(data), new AbortController().signal, vi.fn(), fetcher as typeof fetch)
   expect(fetcher).toHaveBeenCalledTimes(2)
   expect(hash(await readFile(path))).toBe(hash(data))
+})
+
+it('bounds requests that never return headers and cleans up after retry exhaustion', async () => {
+  const path = await target()
+  const fetcher = vi.fn(() => new Promise<Response>(() => {}))
+  await expect(downloadVoiceArchive('https://example.test/archive', path, '', new AbortController().signal, vi.fn(),
+    fetcher as typeof fetch, fastTiming)).rejects.toThrow('waiting for the server response')
+  expect(fetcher).toHaveBeenCalledTimes(3)
+  expect(await readdir(directory)).toEqual([])
+})
+
+it('retries a stalled single stream without counting failed bytes twice', async () => {
+  const path = await target()
+  const data = Buffer.from('complete archive')
+  const cancelled = vi.fn()
+  const progress = vi.fn()
+  const fetcher = vi.fn()
+    .mockResolvedValueOnce(new Response(new ReadableStream({
+      start(stream) { stream.enqueue(data.subarray(0, 3)) },
+      cancel: cancelled
+    }), { headers: { 'content-length': String(data.length) } }))
+    .mockImplementation(async () => new Response(data, { headers: { 'content-length': String(data.length) } }))
+  await downloadVoiceArchive('https://example.test/archive', path, hash(data), new AbortController().signal, progress,
+    fetcher as typeof fetch, fastTiming)
+  expect(fetcher).toHaveBeenCalledTimes(2)
+  expect(cancelled).toHaveBeenCalledTimes(1)
+  expect(hash(await readFile(path))).toBe(hash(data))
+  expect(progress.mock.calls.every(([received]) => received <= data.length)).toBe(true)
+  expect(progress).toHaveBeenLastCalledWith(data.length, data.length)
+})
+
+it('reports persistent body stalls instead of waiting for the installation deadline', async () => {
+  const path = await target()
+  const fetcher = vi.fn(async () => new Response(new ReadableStream({
+    start(stream) { stream.enqueue(Buffer.from('partial')) }
+  })))
+  await expect(downloadVoiceArchive('https://example.test/archive', path, '', new AbortController().signal, vi.fn(),
+    fetcher as typeof fetch, fastTiming)).rejects.toThrow('no data received')
+  expect(fetcher).toHaveBeenCalledTimes(3)
+  expect(await readdir(directory)).toEqual([])
+})
+
+it('allows a slow stream to continue while bytes keep arriving', async () => {
+  const path = await target()
+  const data = Buffer.alloc(10, 7)
+  let sent = 0
+  const fetcher = vi.fn(async () => new Response(new ReadableStream({
+    async pull(stream) {
+      await new Promise(resolve => setTimeout(resolve, 30))
+      if (sent === data.length) stream.close()
+      else stream.enqueue(data.subarray(sent, ++sent))
+    }
+  }), { headers: { 'content-length': String(data.length) } }))
+  await downloadVoiceArchive('https://example.test/archive', path, hash(data), new AbortController().signal, vi.fn(),
+    fetcher as typeof fetch, { ...fastTiming, idleTimeoutMs: 150 })
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  expect(hash(await readFile(path))).toBe(hash(data))
+})
+
+it('retries only a stalled range and refreshes the original asset URL', async () => {
+  const path = await target()
+  const data = Buffer.alloc(17 * 1024 * 1024, 13)
+  const url = 'https://example.test/archive'
+  const attempts = new Map<string, number>()
+  const progress = vi.fn()
+  const fetcher = vi.fn(async (requestedUrl, options) => {
+    expect(requestedUrl).toBe(url)
+    expect(options.cache).toBe('no-store')
+    const range = options.headers.Range as string | undefined
+    if (!range) {
+      const response = new Response(data, { headers: { 'content-length': String(data.length), 'accept-ranges': 'bytes' } })
+      Object.defineProperty(response, 'url', { value: 'https://expired.example.test/signed-asset' })
+      return response
+    }
+    attempts.set(range, (attempts.get(range) || 0) + 1)
+    const [start, end] = range.slice(6).split('-').map(Number)
+    const body = start === 0 && attempts.get(range) === 1
+      ? new ReadableStream({ start(stream) { stream.enqueue(data.subarray(0, 100)) } })
+      : data.subarray(start, end + 1)
+    return new Response(body, { status: 206, headers: { 'content-range': `bytes ${start}-${end}/${data.length}` } })
+  })
+  await downloadVoiceArchive(url, path, hash(data), new AbortController().signal, progress, fetcher as typeof fetch,
+    { ...fastTiming, idleTimeoutMs: 150 })
+  expect(attempts.get('bytes=0-2097151')).toBe(2)
+  expect([...attempts.values()].filter(value => value === 1)).toHaveLength(8)
+  expect(hash(await readFile(path))).toBe(hash(data))
+  expect(progress.mock.calls.every(([received]) => received <= data.length)).toBe(true)
+  expect(progress).toHaveBeenLastCalledWith(data.length, data.length)
+  expect(await readdir(directory)).toEqual(['archive'])
+})
+
+it('cancels stalled concurrent bodies without starting retries or leaving parts', async () => {
+  const path = await target()
+  const controller = new AbortController()
+  const cancelled = vi.fn()
+  const fetcher = vi.fn(async (_url, options) => {
+    const range = options.headers.Range as string | undefined
+    const total = 17 * 1024 * 1024
+    if (!range) return new Response('', { headers: { 'content-length': String(total), 'accept-ranges': 'bytes' } })
+    const [start, end] = range.slice(6).split('-').map(Number)
+    return new Response(new ReadableStream({
+      start(stream) { stream.enqueue(Buffer.from('partial')) },
+      cancel: cancelled
+    }), { status: 206, headers: { 'content-range': `bytes ${start}-${end}/${total}` } })
+  })
+  const pending = downloadVoiceArchive('https://example.test/archive', path, '', controller.signal, vi.fn(),
+    fetcher as typeof fetch, { ...fastTiming, idleTimeoutMs: 1000 })
+  const rejected = expect(pending).rejects.toThrow('User cancelled')
+  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(9))
+  controller.abort(new Error('User cancelled'))
+  await rejected
+  expect(fetcher).toHaveBeenCalledTimes(9)
+  expect(cancelled).toHaveBeenCalledTimes(8)
+  expect(await readdir(directory)).toEqual([])
 })

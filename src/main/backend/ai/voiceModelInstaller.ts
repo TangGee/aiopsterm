@@ -1,13 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { createReadStream, createWriteStream } from 'node:fs'
+import { createReadStream } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
-import { Readable, Transform } from 'node:stream'
-import { pipeline } from 'node:stream/promises'
-import { setTimeout as delay } from 'node:timers/promises'
 import type { VoiceInputPreferences, VoiceInstallProgress } from '../../../shared/contracts/voice'
 import { validateVoicePreferences } from './voiceInputService'
+import { downloadVoiceArchive } from './voiceModelDownload'
+export { downloadVoiceArchive } from './voiceModelDownload'
 
 const version = '1.12.14'
 const modelName = 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17'
@@ -49,86 +48,6 @@ const findFile = async (directory: string, name: string): Promise<string> => {
     }
   }
   return ''
-}
-const fetchVoiceAsset = async (fetcher: typeof fetch, url: string, options: RequestInit & { signal: AbortSignal }): Promise<Response> => {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const response = await fetcher(url, { ...options, headers: { ...(url.startsWith('https://api.github.com/') ? { Accept: 'application/octet-stream' } : {}), ...options.headers } })
-      if (response.status === 408 || response.status === 429 || response.status >= 500) {
-        await response.body?.cancel()
-        throw new Error(`HTTP ${response.status}`)
-      }
-      return response
-    } catch (error) {
-      options.signal.throwIfAborted()
-      if (attempt >= 2) throw new Error(`Voice download failed: ${error instanceof Error ? error.message : String(error)}. Check access to GitHub and retry.`)
-      await delay(400 * (attempt + 1), undefined, { signal: options.signal })
-    }
-  }
-}
-export const downloadVoiceArchive = async (
-  url: string, destination: string, expectedHash: string, signal: AbortSignal,
-  report: (received: number, total: number) => void, fetcher: typeof fetch = fetch
-): Promise<void> => {
-  const controller = new AbortController()
-  const abort = () => controller.abort()
-  signal.addEventListener('abort', abort, { once: true })
-  if (signal.aborted) controller.abort()
-  const parts: string[] = []
-  let completed = false
-  try {
-    const response = await fetchVoiceAsset(fetcher, url, { signal: controller.signal })
-    if (!response.ok || !response.body) throw new Error(`Download failed (HTTP ${response.status}). Check network access to GitHub and retry.`)
-    const total = Number(response.headers.get('content-length')) || 0
-    if (total > 600 * 1024 * 1024) { await response.body.cancel(); throw new Error('Voice download exceeded the expected size.') }
-    let received = 0
-    let last = 0
-    const tracker = () => new Transform({ transform(chunk: Buffer, _encoding, callback) {
-      received += chunk.length
-      if (received > 600 * 1024 * 1024) { callback(new Error('Voice download exceeded the expected size.')); return }
-      if (Date.now() - last > 150) { report(received, total); last = Date.now() }
-      callback(null, chunk)
-    } })
-    if (total > 16 * 1024 * 1024 && response.headers.get('accept-ranges') === 'bytes') {
-      await response.body.cancel()
-      const partSize = 2 * 1024 * 1024
-      const count = Math.ceil(total / partSize)
-      for (let index = 0; index < count; index++) parts.push(`${destination}.${index}`)
-      let nextPart = 0
-      const downloads = Array.from({ length: Math.min(8, count) }, async () => {
-        try {
-          while (nextPart < count) {
-            const index = nextPart++
-            const start = index * partSize
-            const end = Math.min(total - 1, start + partSize - 1)
-            const part = await fetchVoiceAsset(fetcher, response.url || url, { signal: controller.signal, headers: { Range: `bytes=${start}-${end}` } })
-            if (part.status !== 206 || !part.body || part.headers.get('content-range') !== `bytes ${start}-${end}/${total}`) {
-              await part.body?.cancel()
-              throw new Error('The download server returned an invalid byte range. Retry the installation.')
-            }
-            await pipeline(Readable.fromWeb(part.body as Parameters<typeof Readable.fromWeb>[0]), tracker(), createWriteStream(parts[index], { mode: 0o600 }), { signal: controller.signal })
-          }
-        } catch (error) { controller.abort(); throw error }
-      })
-      const results = await Promise.allSettled(downloads)
-      const failure = results.find((result) => result.status === 'rejected')
-      if (failure?.status === 'rejected') throw failure.reason
-      await pipeline(Readable.from((async function* () {
-        for (const path of parts) for await (const chunk of createReadStream(path)) yield chunk
-      })()), createWriteStream(destination, { mode: 0o600 }), { signal: controller.signal })
-    } else {
-      await pipeline(Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]), tracker(), createWriteStream(destination, { mode: 0o600 }), { signal: controller.signal })
-    }
-    signal.throwIfAborted()
-    if (total && received !== total) throw new Error('Voice download was incomplete. Retry installation.')
-    if (await digest(destination) !== expectedHash) throw new Error('Voice download checksum mismatch. Retry the download.')
-    report(received, total || received)
-    completed = true
-  } finally {
-    signal.removeEventListener('abort', abort)
-    await Promise.all(parts.map((path) => rm(path, { force: true })))
-    if (!completed) await rm(destination, { force: true })
-  }
 }
 export type InstalledVoiceModel = Pick<VoiceInputPreferences, 'mode' | 'localEngine' | 'executablePath' | 'modelPath' | 'tokensPath'>
 const verifyInstalledVoiceModel = async (installed: InstalledVoiceModel, root: string, signal: AbortSignal) => {
@@ -176,10 +95,11 @@ export const installVoiceModel = async (
         report({ phase: 'downloading', asset: asset.kind, received: 0, total: 0 })
         const progress = (received: number, total: number) => report({ phase: 'downloading', asset: asset.kind, received, total })
         try {
-          await downloadVoiceArchive(`https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/assets/${asset.assetId}`, partial, asset.sha256, signal, progress, fetcher)
+          // Prefer release URLs so each range does not consume a REST API request.
+          await downloadVoiceArchive(asset.url, partial, asset.sha256, signal, progress, fetcher)
         } catch {
           signal.throwIfAborted()
-          await downloadVoiceArchive(asset.url, partial, asset.sha256, signal, progress, fetcher)
+          await downloadVoiceArchive(`https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/assets/${asset.assetId}`, partial, asset.sha256, signal, progress, fetcher)
         }
         await rm(archive, { force: true })
         await rename(partial, archive)
