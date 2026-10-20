@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { installVoiceModel, voiceInstallEnvironment } from '../backend/ai/voiceModelInstaller'
 import Store from 'electron-store'
 import { transcribeGlobalVoice, validateVoicePreferences } from '../backend/ai/voiceInputService'
+import { shutdownVoiceEngineServer } from '../backend/ai/voiceEngineServer'
 import type { VoiceInputPreferences, VoiceInputStatus, VoiceInstallProgress, VoiceTranscriptionInput } from '@shared/contracts/voice'
 
 export const registerVoiceIpc = (ipcMain: IpcMain) => {
@@ -87,6 +88,8 @@ export const registerVoiceIpc = (ipcMain: IpcMain) => {
     }
     if (input.apiKey === undefined && (previous.endpoint !== next.endpoint || (previous.serviceProvider || 'compatible') !== (next.serviceProvider || 'compatible'))) store.delete('encryptedKey')
     store.set('preferences', next)
+    // Keep the resident engine in sync with the engine/model it was started with.
+    if (previous.mode !== next.mode || previous.localEngine !== next.localEngine || previous.executablePath !== next.executablePath || previous.modelPath !== next.modelPath || previous.tokensPath !== next.tokensPath) shutdownVoiceEngineServer()
     if (previous.shortcut !== next.shortcut || previous.headsetEnabled !== next.headsetEnabled) bind()
     const value = status()
     if (owner && !owner.isDestroyed()) owner.send('voice:status-changed', value)
@@ -104,6 +107,7 @@ export const registerVoiceIpc = (ipcMain: IpcMain) => {
       installation = progress; publish()
     }, net.fetch.bind(net) as typeof fetch).then((installed) => {
       controller.signal.throwIfAborted()
+      shutdownVoiceEngineServer()
       store.set('preferences', { ...preferences(), ...installed })
       installation = { phase: 'complete', received: 0, total: 0 }
     }).catch((error: unknown) => {
@@ -129,5 +133,5 @@ export const registerVoiceIpc = (ipcMain: IpcMain) => {
     finally { clearTimeout(timeout); if (requests.get(id) === controller) requests.delete(id) }
   })
   ipcMain.handle('voice:cancel', (event, requestId: string) => requests.get(`${event.sender.id}:${requestId}`)?.abort())
-  app.once('will-quit', () => { unbind(); installer?.abort(); requests.forEach((request) => request.abort()) })
+  app.once('will-quit', () => { unbind(); installer?.abort(); requests.forEach((request) => request.abort()); shutdownVoiceEngineServer() })
 }
