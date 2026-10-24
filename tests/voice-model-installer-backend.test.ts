@@ -127,7 +127,7 @@ it('retries a stalled single stream without counting failed bytes twice', async 
   expect(progress).toHaveBeenLastCalledWith(data.length, data.length)
 })
 
-it('reports persistent body stalls instead of waiting for the installation deadline', async () => {
+it('reports persistent body stalls instead of waiting indefinitely', async () => {
   const path = await target()
   const fetcher = vi.fn(async () => new Response(new ReadableStream({
     start(stream) { stream.enqueue(Buffer.from('partial')) }

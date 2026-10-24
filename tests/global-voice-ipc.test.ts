@@ -95,6 +95,33 @@ describe('global voice IPC', () => {
 
 
 describe('voice install IPC', () => {
+  it('allows a slow download with continuing progress to finish after thirty minutes', async () => {
+    vi.useFakeTimers()
+    let progressTimer: ReturnType<typeof setInterval> | undefined
+    try {
+      let finish!: (value: unknown) => void
+      fake.install.mockImplementationOnce((_root, signal, report) => {
+        let received = 0
+        progressTimer = setInterval(() => report({ phase: 'downloading', asset: 'model', received: ++received, total: 100 }), 60_000)
+        return new Promise((resolve, reject) => {
+          finish = resolve
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+        })
+      })
+      invoke('status'); invoke('install')
+      await vi.advanceTimersByTimeAsync(31 * 60_000)
+      expect(fake.install.mock.calls[0][1].aborted).toBe(false)
+      expect(invoke('status').installation).toMatchObject({ phase: 'downloading', received: 31 })
+      finish({ mode: 'local', localEngine: 'zipformer', modelPath: '/model' })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(invoke('status').installation.phase).toBe('complete')
+      expect(invoke('status').preferences.modelPath).toBe('/model')
+      expect(fake.log).not.toHaveBeenCalledWith('info', 'voice.install.cancelled', expect.anything())
+    } finally {
+      clearInterval(progressTimer)
+      vi.useRealTimers()
+    }
+  })
   it('publishes progress and saves model paths only after successful installation', async () => {
     let finish!: (value: unknown) => void
     fake.install.mockImplementationOnce((_root, _signal, report) => {

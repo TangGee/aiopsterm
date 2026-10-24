@@ -144,7 +144,8 @@ export const registerVoiceIpc = (ipcMain: IpcMain) => {
     }
     installation = { phase: 'downloading', asset: 'engine', received: 0, total: 0 }
     publish()
-    const timeout = setTimeout(() => controller.abort(new Error('Voice installation exceeded the 30 minute deadline.')), 30 * 60_000)
+    // Requests, idle streams, extraction and model loading have their own limits.
+    // A download that keeps receiving bytes must not expire on total duration.
     let lastPhase = ''
     void installVoiceModel(join(app.getPath('userData'), 'voice-models'), controller.signal, (progress) => {
       installation = progress; publish()
@@ -167,7 +168,7 @@ export const registerVoiceIpc = (ipcMain: IpcMain) => {
       installation = { phase: controller.signal.aborted ? 'cancelled' : 'error', received: 0, total: 0,
         errorMessage: controller.signal.aborted ? undefined : error instanceof Error ? error.message : String(error) }
     }).finally(() => {
-      clearTimeout(timeout); installer = undefined; installerOwner = undefined; publish()
+      installer = undefined; installerOwner = undefined; publish()
     })
     return status()
   })
