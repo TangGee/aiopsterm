@@ -86,3 +86,30 @@ describe('global voice input targets', () => {
     expect(stale?.insert('voice')).toBe(false)
   })
 })
+
+it('updates and cancels only a textarea dictation range while preserving the original selection', () => {
+  const element = input('one selected three'); element.setSelectionRange(4, 12)
+  const target = captureVoiceInputTarget()!
+  expect(target.replaceDraft!('实时')).toBe(true)
+  expect(target.replaceDraft!('实时识别')).toBe(true)
+  expect(element.value).toBe('one 实时识别 three')
+  target.cancelDraft!()
+  expect(element.value).toBe('one selected three')
+  target.dispose?.()
+})
+it('does not overwrite manual changes when replacing or cancelling a draft', () => {
+  const element = input()
+  const target = captureVoiceInputTarget()!
+  target.replaceDraft!('hello')
+  element.value += 'manual'; element.dispatchEvent(new InputEvent('input'))
+  expect(target.replaceDraft!('final。')).toBe(false)
+  target.cancelDraft!(); expect(element.value).toContain('manual'); target.dispose?.()
+})
+it('replaces a contenteditable draft without duplicating earlier partial results', () => {
+  const element = document.createElement('div'); element.setAttribute('contenteditable', 'true'); element.textContent = 'left right'; document.body.append(element)
+  const range = document.createRange(); range.setStart(element.firstChild!, 5); range.collapse(true)
+  const selection = document.getSelection()!; selection.removeAllRanges(); selection.addRange(range)
+  const target = captureVoiceInputTarget(element)!
+  expect(target.replaceDraft!('实')).toBe(true); expect(target.replaceDraft!('实时。', true)).toBe(true)
+  expect(element.textContent).toBe('left 实时。right'); target.dispose?.()
+})

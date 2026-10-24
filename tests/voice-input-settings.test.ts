@@ -9,7 +9,7 @@ const original = window.aiops
 let wrapper: VueWrapper | undefined
 let changed: ((value: VoiceInputStatus) => void) | undefined
 let trigger: ((event: VoiceInputTrigger) => void) | undefined
-const defaults: VoiceInputPreferences = { mode: 'local', localEngine: 'sensevoice', executablePath: '', modelPath: '', tokensPath: '', endpoint: '', model: '', shortcut: 'CommandOrControl+Alt+R', headsetEnabled: false }
+const defaults: VoiceInputPreferences = { mode: 'local', localEngine: 'zipformer', executablePath: '', modelPath: '', tokensPath: '', endpoint: '', model: '', shortcut: 'CommandOrControl+Alt+R', headsetEnabled: false }
 const status = (preferences = defaults) => ({ preferences: { ...preferences }, shortcutRegistered: true, headsetRegistered: preferences.headsetEnabled })
 const render = async () => { wrapper = mount(VoiceInputSettings); await flushPromises(); return wrapper }
 beforeEach(() => {
@@ -27,14 +27,14 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); window.aiops = original; vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('voice setup and presets', () => {
-  it('recommends SenseVoice, explains installation and offers official downloads', async () => {
+  it('recommends Zipformer, explains installation and offers official downloads', async () => {
     const view = await render()
-    expect((view.get('[data-testid="voice-preset"]').element as HTMLSelectElement).value).toBe('sensevoice')
+    expect((view.get('[data-testid="voice-preset"]').element as HTMLSelectElement).value).toBe('zipformer')
     expect(view.text()).toContain('请先配置语音识别')
     expect(view.text()).toContain('应用未内置引擎和模型')
-    expect(view.text()).toContain('中文、英文')
+    expect(view.text()).toContain('不纠正同音错字')
     await view.findAll('button').find((button) => button.text() === '下载模型')!.trigger('click')
-    expect(window.aiops.openExternalUrl).toHaveBeenCalledWith(expect.stringContaining('sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2'))
+    expect(window.aiops.openExternalUrl).toHaveBeenCalledWith(expect.stringContaining('sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30.tar.bz2'))
   })
   it('blocks incomplete setup, validates files and saves a usable preset', async () => {
     const view = await render()
@@ -45,12 +45,15 @@ describe('voice setup and presets', () => {
     await view.get('form').trigger('submit'); await flushPromises()
     expect(window.aiops.saveVoiceInputPreferences).not.toHaveBeenCalled()
     await view.get('[data-testid="voice-tokens"]').setValue('/tokens.txt')
+    await view.get('[data-testid="voice-decoder"]').setValue('/decoder.onnx')
+    await view.get('[data-testid="voice-joiner"]').setValue('/joiner.int8.onnx')
+    await view.get('[data-testid="voice-punctuation"]').setValue('/punctuation/model.int8.onnx')
     vi.mocked(window.aiops.validateVoiceInputPreferences!).mockResolvedValueOnce({ ok: false, errorMessage: 'missing file' })
     await view.get('form').trigger('submit'); await flushPromises()
     expect(view.text()).toContain('配置检查失败')
     expect(window.aiops.saveVoiceInputPreferences).not.toHaveBeenCalled()
     await view.get('form').trigger('submit'); await flushPromises()
-    expect(window.aiops.saveVoiceInputPreferences).toHaveBeenCalledWith(expect.objectContaining({ localEngine: 'sensevoice', tokensPath: '/tokens.txt', modelPath: '/model.int8.onnx' }))
+    expect(window.aiops.saveVoiceInputPreferences).toHaveBeenCalledWith(expect.objectContaining({ localEngine: 'zipformer', tokensPath: '/tokens.txt', modelPath: '/model.int8.onnx' }))
     expect(view.text()).toContain('设置已保存')
     expect(view.text()).not.toContain('请先配置语音识别')
   })
@@ -60,7 +63,7 @@ describe('voice setup and presets', () => {
     expect((view.get('[data-testid="voice-preset"]').element as HTMLSelectElement).value).toBe('whisper')
     expect((view.get('[data-testid="voice-model-file"]').element as HTMLInputElement).value).toBe('/models/base.bin')
     expect(view.find('[data-testid="voice-tokens"]').exists()).toBe(false)
-    await view.get('[data-testid="voice-preset"]').setValue('sensevoice')
+    await view.get('[data-testid="voice-preset"]').setValue('zipformer')
     expect((view.get('[data-testid="voice-model-file"]').element as HTMLInputElement).value).toBe('')
   })
   it('keeps service settings and saved credentials when no replacement key is entered', async () => {

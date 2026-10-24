@@ -1,6 +1,12 @@
 import type { VoiceInputPreferences } from './contracts/voice'
 
 export const voiceModelPresets = {
+  zipformer: {
+    engine: 'zipformer', name: 'Zipformer INT8 + CT-Transformer INT8', executable: 'sherpa-onnx.js',
+    modelFile: 'encoder.int8.onnx', engineUrl: 'https://www.npmjs.com/package/sherpa-onnx-node/v/1.12.40',
+    modelUrl: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30.tar.bz2',
+    helpUrl: 'https://github.com/k2-fsa/sherpa-onnx/tree/v1.12.40/nodejs-addon-examples'
+  },
   sensevoice: {
     engine: 'sensevoice', name: 'SenseVoiceSmall INT8', executable: 'sherpa-onnx-offline',
     modelFile: 'model.int8.onnx',
@@ -22,6 +28,10 @@ export const doubaoSpeechHelpUrl = 'https://www.volcengine.com/docs/6561/1631584
 
 export const isVoiceInputConfigured = (preferences?: VoiceInputPreferences): boolean => {
   if (!preferences) return false
+  if (preferences.mode === 'local' && preferences.localEngine === 'sensevoice') return false
+  if (preferences.mode === 'local' && preferences.localEngine === 'zipformer') return Boolean(
+    preferences.executablePath.trim() && preferences.modelPath.trim() && preferences.decoderPath?.trim()
+    && preferences.joinerPath?.trim() && preferences.tokensPath?.trim() && preferences.punctuationPath?.trim())
   if (preferences.mode === 'local') return Boolean(preferences.executablePath.trim() && preferences.modelPath.trim()
     && (preferences.localEngine !== 'sensevoice' || preferences.tokensPath?.trim()))
   try {

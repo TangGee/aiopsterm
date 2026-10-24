@@ -2,6 +2,8 @@ export type VoiceInputTarget = {
   kind: 'text' | 'terminal'
   dispose?: () => void
   insert: (text: string) => boolean
+  replaceDraft?: (text: string, final?: boolean) => boolean
+  cancelDraft?: () => void
 }
 
 type TargetFactory = () => VoiceInputTarget | null
@@ -35,9 +37,13 @@ export const captureVoiceInputTarget = (element: Element | null = document.activ
     let start = element.selectionStart ?? value.length
     let end = element.selectionEnd ?? start
     let changed = false
+    const draftStart = start
+    let draftEnd = end
+    const originalSelection = value.slice(start, end)
+    let hasDraft = false
     const markChanged = () => { changed = true }
     element.addEventListener('input', markChanged, { once: true })
-    return {
+    const target: VoiceInputTarget = {
       kind: 'text',
       dispose: () => element.removeEventListener('input', markChanged),
       insert(text) {
@@ -58,6 +64,16 @@ export const captureVoiceInputTarget = (element: Element | null = document.activ
         return true
       }
     }
+    target.replaceDraft = (text) => {
+      start = draftStart; end = draftEnd
+      if (!target.insert(text)) return false
+      draftEnd = draftStart + text.length; hasDraft = true
+      return true
+    }
+    target.cancelDraft = () => {
+      if (hasDraft && target.replaceDraft!(originalSelection) && element.selectionStart !== null) element.setSelectionRange(draftStart, draftStart + originalSelection.length)
+    }
+    return target
   }
   if (element.closest('[contenteditable="false"]')) return null
   const editable = element.closest<HTMLElement>('[contenteditable="true"], [contenteditable="plaintext-only"]')
@@ -67,9 +83,11 @@ export const captureVoiceInputTarget = (element: Element | null = document.activ
   let range = selection.getRangeAt(0).cloneRange()
   let html = editable.innerHTML
   let changed = false
+  let draft: Text | undefined
+  const originalFragment = range.cloneContents()
   const observer = new MutationObserver(() => { changed = true })
   observer.observe(editable, { subtree: true, childList: true, characterData: true, attributes: true })
-  return {
+  const target: VoiceInputTarget = {
     kind: 'text',
     dispose: () => observer.disconnect(),
     insert(text) {
@@ -96,4 +114,27 @@ export const captureVoiceInputTarget = (element: Element | null = document.activ
       return true
     }
   }
+  target.replaceDraft = (text) => {
+    changed ||= observer.takeRecords().length > 0
+    if (changed || !isVoiceTargetVisible(editable) || editable.innerHTML !== html || (draft && !editable.contains(draft))) return false
+    observer.disconnect()
+    if (!draft) {
+      range.deleteContents(); draft = document.createTextNode(text); range.insertNode(draft)
+    } else draft.data = text
+    range = document.createRange(); range.setStartAfter(draft); range.collapse(true)
+    editable.focus({ preventScroll: true })
+    const current = document.getSelection(); current?.removeAllRanges(); current?.addRange(range)
+    editable.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }))
+    html = editable.innerHTML
+    observer.observe(editable, { subtree: true, childList: true, characterData: true, attributes: true })
+    return true
+  }
+  target.cancelDraft = () => {
+    changed ||= observer.takeRecords().length > 0
+    if (!draft || changed || editable.innerHTML !== html) return
+    observer.disconnect(); draft.replaceWith(originalFragment); draft = undefined
+    editable.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'historyUndo' }))
+    html = editable.innerHTML
+  }
+  return target
 }

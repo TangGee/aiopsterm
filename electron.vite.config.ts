@@ -11,7 +11,10 @@ export default defineConfig({
     },
     build: {
       rollupOptions: {
-        input: resolve(__dirname, 'src/main/index.ts'),
+        input: {
+          index: resolve(__dirname, 'src/main/index.ts'),
+          voiceRuntimeWorker: resolve(__dirname, 'src/main/backend/ai/voiceRuntimeWorker.ts')
+        },
         // ws must resolve its optional native accelerators at runtime.
         external: ['node-pty', 'better-sqlite3', 'ssh2', 'ws']
       }

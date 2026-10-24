@@ -16,10 +16,10 @@ describe('voice model installation', () => {
   it.each([['linux', 'x64'], ['linux', 'arm64'], ['darwin', 'x64'], ['darwin', 'arm64'], ['win32', 'x64']] as const)('selects pinned CPU packages for %s/%s', (platform, arch) => {
     expect(voiceInstallEnvironment(platform, arch).autoInstallSupported).toBe(true)
     const assets = voiceInstallAssets(platform, arch)
-    expect(assets).toHaveLength(2)
+    expect(assets).toHaveLength(4)
     for (const asset of assets) {
       expect(asset.sha256).toMatch(/^[a-f0-9]{64}$/)
-      expect(asset.url).toMatch(/^https:\/\/github.com\/k2-fsa\/sherpa-onnx\/releases\/download\//)
+      expect(['github.com', 'registry.npmjs.org']).toContain(new URL(asset.url).hostname)
       expect(asset.url).not.toContain('gpu')
     }
   })

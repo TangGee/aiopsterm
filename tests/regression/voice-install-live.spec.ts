@@ -25,7 +25,7 @@ test('one-click voice installation cancels, retries, validates and persists @voi
     ;(globalThis as any).voiceDownloadRequests = 0
     ;(globalThis as any).voiceApiRequests = 0
     session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
-      if (/^https:\/\/(github\.com|api\.github\.com|release-assets\.githubusercontent\.com)\//.test(details.url)) {
+      if (/^https:\/\/(github\.com|api\.github\.com|release-assets\.githubusercontent\.com|registry\.npmjs\.org)\//.test(details.url)) {
         ;(globalThis as any).voiceDownloadRequests++
       }
       if (details.url.startsWith('https://api.github.com/')) (globalThis as any).voiceApiRequests++
@@ -73,21 +73,21 @@ test('one-click voice installation cancels, retries, validates and persists @voi
     }
   }
   const preferences = await waitForComplete()
-  expect(preferences).toMatchObject({ mode: 'local', localEngine: 'sensevoice' })
-  for (const field of ['executablePath', 'modelPath', 'tokensPath']) expect((await stat(preferences[field])).size).toBeGreaterThan(0)
+  expect(preferences).toMatchObject({ mode: 'local', localEngine: 'zipformer' })
+  for (const field of ['executablePath', 'modelPath', 'tokensPath', 'decoderPath', 'joinerPath', 'punctuationPath']) expect((await stat(preferences[field])).size).toBeGreaterThan(0)
   expect(await desktop.api('validateVoiceInputPreferences', preferences)).toEqual({ ok: true })
   await expect(desktop.page.getByTestId('voice-model-file')).toHaveValue(preferences.modelPath)
   await expect(desktop.page.getByTestId('voice-executable')).toHaveValue(preferences.executablePath)
   await expect(desktop.page.getByTestId('voice-tokens')).toHaveValue(preferences.tokensPath)
   const progress = await desktop.page.evaluate(() => (window as any).voiceInstallProbe)
   expect(progress.phases).toEqual(expect.arrayContaining([
-    'cancelled:', 'downloading:engine', 'extracting:engine', 'downloading:model', 'extracting:model', 'checking:', 'complete:'
+    'cancelled:', 'downloading:engine', 'extracting:engine', 'downloading:model', 'extracting:model', 'downloading:punctuation', 'extracting:punctuation', 'checking:', 'complete:'
   ]))
   await info.attach('installation-progress', { body: JSON.stringify(progress), contentType: 'application/json' })
   await info.attach('installed-settings', { body: await desktop.page.screenshot(), contentType: 'image/png' })
 
   const samples = join(dirname(preferences.modelPath), 'test_wavs')
-  for (const name of ['zh.wav', 'en.wav']) {
+  for (const name of ['0.wav', '1.wav']) {
     const audio = await readFile(join(samples, name))
     const pending = desktop.api('transcribeVoiceInput', {
       requestId: `live-${name}`, audioData: audio.toString('base64'), audioFormat: 'wav'
@@ -111,8 +111,8 @@ test('one-click voice installation cancels, retries, validates and persists @voi
   expect(await waitForComplete()).toEqual(preferences)
   expect(await desktop.app.evaluate(() => (globalThis as any).voiceDownloadRequests)).toBe(requests)
   if (forceApiFallback) {
-    // One cancelled engine request, then one complete engine and one model request.
-    expect(await desktop.app.evaluate(() => (globalThis as any).voiceApiRequests)).toBe(3)
+    // Engine packages use npm; each speech and punctuation API fallback needs one request.
+    expect(await desktop.app.evaluate(() => (globalThis as any).voiceApiRequests)).toBe(2)
   }
   console.log('Reinstallation reused the validated model without network requests')
   await desktop.restart()

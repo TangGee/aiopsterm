@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { transcribeViaSenseVoiceServer } from './voiceEngineServer'
+import { decodeWavPcm16Mono, transcribeViaSenseVoiceServer } from './voiceEngineServer'
+import { startZipformerStream, pushZipformerStream, finishZipformerStream, cancelZipformerStream } from './zipformerRuntime'
 import { doubaoSpeechEndpoint } from '../../../shared/voicePresets'
 import { execFile } from 'node:child_process'
 import { constants } from 'node:fs'
@@ -15,11 +16,12 @@ export const validateVoicePreferences = async (preferences: VoiceInputPreference
   if (preferences.mode === 'local') {
     const paths = [preferences.executablePath, preferences.modelPath]
     if (preferences.localEngine === 'sensevoice') paths.push(preferences.tokensPath || '')
+    if (preferences.localEngine === 'zipformer') paths.push(preferences.tokensPath || '', preferences.decoderPath || '', preferences.joinerPath || '', preferences.punctuationPath || '')
     for (const path of paths) {
       if (!path || !isAbsolute(path) || !(await stat(path)).isFile()) throw new Error('Select the local engine, model and required tokens files in voice settings.')
       await access(path, constants.R_OK)
     }
-    if (process.platform !== 'win32') await access(preferences.executablePath, constants.X_OK)
+    if (process.platform !== 'win32' && preferences.localEngine !== 'zipformer') await access(preferences.executablePath, constants.X_OK)
   } else {
     if (preferences.serviceProvider === 'doubao' && preferences.endpoint !== doubaoSpeechEndpoint) throw new Error('Use the official Doubao speech endpoint.')
     if (preferences.serviceProvider === 'doubao' && !preferences.apiKey?.trim() && !preferences.hasApiKey) throw new Error('Enter the Doubao speech API Key or Access Token.')
@@ -41,6 +43,25 @@ export const transcribeGlobalVoice = async (
     await validateVoicePreferences(preferences)
     if (preferences.mode === 'local') {
       if (bytes.toString('ascii', 0, 4) !== 'RIFF' || bytes.toString('ascii', 8, 12) !== 'WAVE') return failure('Local recognition requires WAV audio. Use the global voice button.')
+      if (preferences.localEngine === 'zipformer') {
+        const audio = decodeWavPcm16Mono(bytes)
+        if (audio.sampleRate !== 16000) return failure('Zipformer requires 16 kHz mono audio.')
+        const id = randomUUID()
+        const abort = () => { void cancelZipformerStream(id).catch(() => undefined) }
+        signal.addEventListener('abort', abort, { once: true })
+        try {
+          await startZipformerStream(preferences, id)
+          let sequence = 0
+          for (let offset = 0; offset < audio.samples.length; offset += 16000) {
+            signal.throwIfAborted()
+            await pushZipformerStream(id, audio.samples.slice(offset, offset + 16000), sequence++)
+          }
+          signal.throwIfAborted()
+          const result = await finishZipformerStream(id)
+          signal.throwIfAborted()
+          return result.text ? { ok: true, data: { text: result.text, provider: 'aiopsterm-local', model: 'zipformer-zh-2025-06-30' } } : noSpeech()
+        } finally { signal.removeEventListener('abort', abort); await cancelZipformerStream(id).catch(() => undefined) }
+      }
       const sensevoice = preferences.localEngine === 'sensevoice'
       if (sensevoice) {
         try {

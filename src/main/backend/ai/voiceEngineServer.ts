@@ -94,7 +94,7 @@ export const shutdownVoiceEngineServer = () => {
   try { current?.child.kill() } catch { /* The process may already be gone. */ }
 }
 
-const decodeWavPcm16Mono = (wav: Buffer): { samples: Float32Array; sampleRate: number } => {
+export const decodeWavPcm16Mono = (wav: Buffer): { samples: Float32Array; sampleRate: number } => {
   if (wav.length < 44 || wav.toString('ascii', 0, 4) !== 'RIFF' || wav.toString('ascii', 8, 12) !== 'WAVE') throw new Error('Local recognition requires WAV audio. Use the global voice button.')
   let format = 0
   let channels = 0

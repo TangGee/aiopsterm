@@ -204,3 +204,16 @@ describe('global voice controls', () => {
     expect(recording.runtime.start).toHaveBeenCalledOnce()
   })
 })
+
+it('replaces only the current dictation in the focused input and applies final punctuation', async () => {
+  vi.mocked(window.aiops.getVoiceInputStatus!).mockResolvedValue({ preferences: { ...preferences, mode: 'local', localEngine: 'zipformer', executablePath: '/runtime', modelPath: '/encoder', decoderPath: '/decoder', joinerPath: '/joiner', tokensPath: '/tokens', punctuationPath: '/punct' }, shortcutRegistered: true, headsetRegistered: false })
+  await mountInput(); const originalInput = input(); await clickMic()
+  recording.options.online.onPartial('今天天气')
+  recording.options.online.onPartial('今天天气很好')
+  await flushPromises()
+  expect(originalInput.value).toBe('hello 今天天气很好world')
+  expect(document.activeElement).toBe(originalInput)
+  expect(wrapper!.find('[role="dialog"]').exists()).toBe(false)
+  await deliver('今天天气很好。')
+  expect(originalInput.value).toBe('hello 今天天气很好。world')
+})

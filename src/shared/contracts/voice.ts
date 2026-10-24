@@ -23,8 +23,11 @@ export type VoiceInputPreferences = {
   mode: 'local' | 'service'
   serviceProvider?: 'compatible' | 'doubao'
   doubaoAppId?: string
-  localEngine?: 'whisper' | 'sensevoice'
+  localEngine?: 'whisper' | 'sensevoice' | 'zipformer'
   tokensPath?: string
+  decoderPath?: string
+  joinerPath?: string
+  punctuationPath?: string
   endpoint: string
   model: string
   apiKey?: string
@@ -48,8 +51,11 @@ export type VoiceInputTrigger = { source: 'shortcut' | 'headset'; background: bo
 
 export type VoiceInstallProgress = {
   phase: 'idle' | 'downloading' | 'extracting' | 'checking' | 'complete' | 'cancelled' | 'error'
-  asset?: 'engine' | 'model'
+  asset?: 'engine' | 'model' | 'punctuation'
   received: number
   total: number
   errorMessage?: string
 }
+
+export type VoiceStreamResult = { text: string; final: boolean; endpoint?: boolean; warning?: string }
+export type VoiceStreamChunk = { sessionId: string; samples: Float32Array; sequence: number }

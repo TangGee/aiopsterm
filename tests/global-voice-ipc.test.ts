@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const fake = vi.hoisted(() => ({
   install: vi.fn<(...args: any[]) => Promise<any>>(),
   log: vi.fn(),
+  streamStart: vi.fn(async () => undefined), streamPush: vi.fn(async () => ({ text: '实时', final: false })),
+  streamFinish: vi.fn(async () => ({ text: '实时。', final: true })), streamCancel: vi.fn(async () => undefined),
   stored: new Map<string, any>(), bindings: new Map<string, () => void>(), failKeyboard: false,
   handlers: new Map<string, (...args: any[]) => any>(), focused: true,
   window: { show: vi.fn(), focus: vi.fn() },
@@ -26,6 +28,11 @@ vi.mock('electron', () => ({
 }))
 vi.mock('../src/main/backend/ai/voiceModelInstaller', () => ({ installVoiceModel: fake.install, voiceInstallEnvironment: () => ({ platform: 'linux', arch: 'x64', autoInstallSupported: true }) }))
 vi.mock('../src/main/backend/app/runtimeLog', () => ({ logRuntimeEvent: fake.log }))
+vi.mock('../src/main/backend/ai/zipformerRuntime', () => ({
+  preloadZipformer: vi.fn(async () => undefined), shutdownZipformerRuntime: vi.fn(async () => undefined),
+  startZipformerStream: fake.streamStart, pushZipformerStream: fake.streamPush,
+  finishZipformerStream: fake.streamFinish, cancelZipformerStream: fake.streamCancel
+}))
 vi.mock('../src/main/backend/ai/voiceInputService', () => ({ transcribeGlobalVoice: fake.transcribe, validateVoicePreferences: vi.fn(async () => undefined) }))
 const sender = { id: 1, send: vi.fn(), once: vi.fn(), isDestroyed: () => false }
 const invoke = (name: string, ...args: any[]) => fake.handlers.get(`voice:${name}`)!({ sender }, ...args)
@@ -135,4 +142,25 @@ describe('voice install IPC', () => {
     invoke('preferences', { endpoint: 'https://other.test' })
     expect(invoke('status').preferences.hasApiKey).toBe(false)
   })
+})
+
+it('migrates SenseVoice paths without losing shortcuts, service settings or the previous configuration', async () => {
+  const old = { ...fake.stored.get('preferences'), localEngine: 'sensevoice', modelPath: '/old/model', executablePath: '/old/engine', tokensPath: '/old/tokens', shortcut: 'Control+Alt+S', mode: 'service', endpoint: 'https://speech.test', model: 'speech' }
+  fake.stored.set('preferences', old)
+  const path = '../src/main/ipc/voice'
+  const { registerVoiceIpc } = await import(path)
+  registerVoiceIpc({ handle: (name: string, fn: (...args: any[]) => any) => fake.handlers.set(name, fn) } as any)
+  expect(fake.stored.get('previousSenseVoice')).toEqual(old)
+  expect(invoke('status').preferences).toMatchObject({ localEngine: 'zipformer', executablePath: '', modelPath: '', shortcut: 'Control+Alt+S', mode: 'service', endpoint: 'https://speech.test' })
+})
+it('scopes live streams to their renderer and rejects stale sessions', async () => {
+  const id = await invoke('stream-start')
+  const input = { sessionId: id, samples: new Float32Array(1600), sequence: 0 }
+  expect(() => fake.handlers.get('voice:stream-push')!({ sender: { id: 2 } }, input)).toThrow('no longer active')
+  expect(await invoke('stream-push', input)).toEqual({ text: '实时', final: false })
+  fake.handlers.get('voice:stream-cancel')!({ sender: { id: 2 } }, id)
+  expect(fake.streamCancel).not.toHaveBeenCalled()
+  expect(await invoke('stream-finish', id)).toEqual({ text: '实时。', final: true })
+  expect(() => invoke('stream-push', input)).toThrow('no longer active')
+  expect(fake.streamCancel).toHaveBeenCalledWith(id)
 })

@@ -7,7 +7,7 @@ import type { VoiceInputPreferences, VoiceInputStatus } from '@shared/contracts/
 
 const { locale } = useI18n()
 const t = (key: keyof typeof voiceInputMessages.en) => voiceInputMessages[locale.value.startsWith('zh') ? 'zh' : 'en'][key]
-const preferences = ref<VoiceInputPreferences>({ mode: 'local', localEngine: 'sensevoice', tokensPath: '', endpoint: '', model: '', executablePath: '', modelPath: '', shortcut: 'CommandOrControl+Alt+R', headsetEnabled: false })
+const preferences = ref<VoiceInputPreferences>({ mode: 'local', localEngine: 'zipformer', tokensPath: '', endpoint: '', model: '', executablePath: '', modelPath: '', shortcut: 'CommandOrControl+Alt+R', headsetEnabled: false })
 const status = ref<VoiceInputStatus>()
 const apiKey = ref('')
 const clearKey = ref(false)
@@ -16,12 +16,12 @@ const loading = ref(true)
 const saving = ref(false)
 const detecting = ref(false)
 const failed = ref(false)
-const preset = computed(() => voiceModelPresets[preferences.value.localEngine || 'whisper'])
+const preset = computed(() => voiceModelPresets[preferences.value.localEngine || 'zipformer'])
 const installing = computed(() => ['downloading', 'extracting', 'checking'].includes(status.value?.installation?.phase || ''))
 const installation = computed(() => status.value?.installation)
 const installLabel = computed(() => {
   const phase = installation.value?.phase
-  return phase === 'downloading' ? t(installation.value?.asset === 'model' ? 'downloadingModel' : 'downloadingEngine')
+  return phase === 'downloading' ? t(installation.value?.asset === 'punctuation' ? 'downloadingPunctuation' : installation.value?.asset === 'model' ? 'downloadingModel' : 'downloadingEngine')
     : phase === 'extracting' ? t('extracting') : phase === 'checking' ? t('checkingInstall')
     : phase === 'complete' ? t('installed') : phase === 'cancelled' ? t('installCancelled') : phase === 'error' ? t('installFailed') : ''
 })
@@ -52,9 +52,10 @@ const selectPreset = () => {
   preferences.value.executablePath = ''
   preferences.value.modelPath = ''
   preferences.value.tokensPath = ''
+  preferences.value.decoderPath = ''; preferences.value.joinerPath = ''; preferences.value.punctuationPath = ''
   notice.value = ''
 }
-const browse = async (field: 'executablePath' | 'modelPath' | 'tokensPath') => {
+const browse = async (field: 'executablePath' | 'modelPath' | 'tokensPath' | 'decoderPath' | 'joinerPath' | 'punctuationPath') => {
   try {
     const result = await window.aiops.showOpenDialog({ properties: ['openFile'] })
     if (!disposed && result?.filePaths?.[0]) preferences.value[field] = result.filePaths[0]
@@ -105,7 +106,7 @@ onMounted(async () => {
     status.value = value
     if (completed) {
       const installed = value.preferences
-      Object.assign(preferences.value, { mode: installed.mode, localEngine: installed.localEngine, executablePath: installed.executablePath, modelPath: installed.modelPath, tokensPath: installed.tokensPath })
+      Object.assign(preferences.value, { mode: installed.mode, localEngine: installed.localEngine, executablePath: installed.executablePath, modelPath: installed.modelPath, tokensPath: installed.tokensPath, decoderPath: installed.decoderPath, joinerPath: installed.joinerPath, punctuationPath: installed.punctuationPath })
       notice.value = t('installed')
     }
   })
@@ -120,7 +121,7 @@ onMounted(async () => {
     if (disposed) return
     if (!value) throw new Error('Voice settings are unavailable.')
     status.value = value
-    preferences.value = { ...value.preferences, serviceProvider: value.preferences.serviceProvider || 'compatible', localEngine: value.preferences.localEngine || (value.preferences.executablePath || value.preferences.modelPath ? 'whisper' : 'sensevoice') }
+    preferences.value = { ...value.preferences, serviceProvider: value.preferences.serviceProvider || 'compatible', localEngine: value.preferences.localEngine || (value.preferences.executablePath || value.preferences.modelPath ? 'whisper' : 'zipformer') }
   } catch { failed.value = true; notice.value = t('loadFailed') }
   finally { loading.value = false }
 })
@@ -143,8 +144,8 @@ onBeforeUnmount(() => { disposed = true; clearTimeout(timer); unsubscribe?.(); u
       <fieldset :disabled="loading || saving || failed || installing">
         <label>{{ t('mode') }}<select v-model="preferences.mode" data-testid="voice-mode"><option value="local">{{ t('local') }}</option><option value="service">{{ t('service') }}</option></select></label>
         <template v-if="preferences.mode === 'local'">
-          <label>{{ t('preset') }}<select v-model="preferences.localEngine" data-testid="voice-preset" @change="selectPreset"><option value="sensevoice">{{ t('recommended') }}</option><option value="whisper">{{ t('whisperPreset') }}</option></select></label>
-          <section v-if="preferences.localEngine === 'sensevoice'" class="voice-auto-install">
+          <label>{{ t('preset') }}<select v-model="preferences.localEngine" data-testid="voice-preset" @change="selectPreset"><option value="zipformer">{{ t('recommended') }}</option><option value="whisper">{{ t('whisperPreset') }}</option></select></label>
+          <section v-if="preferences.localEngine === 'zipformer'" class="voice-auto-install">
             <p v-if="status?.environment">{{ t('environment') }}: {{ status.environment.platform }} / {{ status.environment.arch }}</p>
             <button type="button" class="voice-save" data-testid="voice-auto-install" :disabled="status?.environment?.autoInstallSupported === false" @click="install">{{ t('autoInstall') }}</button>
             <p>{{ t('autoHelp') }}</p>
@@ -152,16 +153,21 @@ onBeforeUnmount(() => { disposed = true; clearTimeout(timer); unsubscribe?.(); u
           </section>
           <details :open="preferences.localEngine === 'whisper'" data-testid="voice-manual-setup">
           <summary>{{ t('manualSetup') }}</summary>
-          <p>{{ preferences.localEngine === 'sensevoice' ? t('senseHelp') : t('whisperHelp') }}</p>
+          <p>{{ preferences.localEngine === 'zipformer' ? t('zipformerHelp') : t('whisperHelp') }}</p>
           <h4>{{ t('engineStep') }}</h4>
           <p>{{ t('engineHelp') }}</p>
           <div class="voice-links"><button type="button" @click="open(preset.engineUrl)">{{ t('engineDownload') }}</button><button type="button" @click="open(preset.helpUrl)">{{ t('officialHelp') }}</button></div>
           <label>{{ preset.executable }}<span class="voice-file"><input v-model="preferences.executablePath" data-testid="voice-executable" :placeholder="preset.executable" spellcheck="false" /><button type="button" @click="browse('executablePath')">{{ t('browse') }}</button></span></label>
           <h4>{{ t('modelStep') }}</h4>
-          <p>{{ preferences.localEngine === 'sensevoice' ? t('senseFiles') : t('whisperFiles') }}</p>
+          <p>{{ preferences.localEngine === 'zipformer' ? t('zipformerFiles') : t('whisperFiles') }}</p>
           <div class="voice-links"><button type="button" @click="open(preset.modelUrl)">{{ t('modelDownload') }}</button></div>
           <label>{{ t('modelFile') }}<span class="voice-file"><input v-model="preferences.modelPath" data-testid="voice-model-file" :placeholder="preset.modelFile" spellcheck="false" /><button type="button" @click="browse('modelPath')">{{ t('browse') }}</button></span></label>
-          <label v-if="preferences.localEngine === 'sensevoice'">{{ t('tokens') }}<span class="voice-file"><input v-model="preferences.tokensPath" data-testid="voice-tokens" placeholder="tokens.txt" spellcheck="false" /><button type="button" @click="browse('tokensPath')">{{ t('browse') }}</button></span></label>
+          <label v-if="preferences.localEngine === 'zipformer'">{{ t('tokens') }}<span class="voice-file"><input v-model="preferences.tokensPath" data-testid="voice-tokens" placeholder="tokens.txt" spellcheck="false" /><button type="button" @click="browse('tokensPath')">{{ t('browse') }}</button></span></label>
+          <template v-if="preferences.localEngine === 'zipformer'">
+            <label>{{ t('decoder') }}<span class="voice-file"><input v-model="preferences.decoderPath" data-testid="voice-decoder" placeholder="decoder.onnx" spellcheck="false" /><button type="button" @click="browse('decoderPath')">{{ t('browse') }}</button></span></label>
+            <label>{{ t('joiner') }}<span class="voice-file"><input v-model="preferences.joinerPath" data-testid="voice-joiner" placeholder="joiner.int8.onnx" spellcheck="false" /><button type="button" @click="browse('joinerPath')">{{ t('browse') }}</button></span></label>
+            <label>{{ t('punctuation') }}<span class="voice-file"><input v-model="preferences.punctuationPath" data-testid="voice-punctuation" placeholder="model.int8.onnx" spellcheck="false" /><button type="button" @click="browse('punctuationPath')">{{ t('browse') }}</button></span></label>
+          </template>
           </details>
         </template>
         <template v-else>

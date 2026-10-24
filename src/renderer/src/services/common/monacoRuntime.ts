@@ -117,9 +117,21 @@ export const loadMonaco = (): Promise<MonacoModule> => {
         let selection = editor.getSelection()
         if (!model || !selection || editor.getRawOptions().readOnly) return null
         let version = model.getVersionId()
-        return {
-          kind: 'text',
-          insert(text) {
+        const draftStart = selection.getStartPosition()
+        let draftEnd = selection.getEndPosition()
+        const originalText = model.getValueInRange(selection)
+        let hasDraft = false
+        const target = {
+          kind: 'text' as const,
+          replaceDraft(text: string) {
+            selection = new monaco.Selection(draftStart.lineNumber, draftStart.column, draftEnd.lineNumber, draftEnd.column)
+            if (!target.insert(text)) return false
+            draftEnd = model.getPositionAt(model.getOffsetAt(draftStart) + text.length)
+            hasDraft = true
+            return true
+          },
+          cancelDraft() { if (hasDraft) target.replaceDraft(originalText) },
+          insert(text: string) {
             if (!isVoiceTargetVisible(element) || model.isDisposed() || editor.getModel() !== model || model.getVersionId() !== version || editor.getRawOptions().readOnly) return false
             editor.pushUndoStop()
             if (!selection) return false
@@ -135,6 +147,7 @@ export const loadMonaco = (): Promise<MonacoModule> => {
             return inserted
           }
         }
+        return target
       })
       editor.onDidDispose(unregister)
     })

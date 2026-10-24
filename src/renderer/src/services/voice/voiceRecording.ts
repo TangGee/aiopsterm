@@ -1,12 +1,14 @@
-import { ref } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
 import type { VoiceTranscriptionInput, VoiceTranscriptionResult } from '@shared/contracts/voice'
 
 import { voiceBlobToWav } from './voiceWav'
 import { createStreamingVoiceRecording } from './voiceStreamingRecording'
+import { createRealtimeVoiceRecording, type RealtimeVoiceOptions } from './voiceRealtimeRecording'
 export { encodeVoiceWav, voiceBlobToWav } from './voiceWav'
 
 export type RecordingOptions = {
   streaming?: boolean
+  online?: RealtimeVoiceOptions
   transcribe: (input: VoiceTranscriptionInput) => Promise<VoiceTranscriptionResult>
   cancelTranscription?: (id: string) => void
   onText: (text: string) => void
@@ -17,6 +19,22 @@ export type RecordingOptions = {
 }
 
 export const createVoiceRecording = (options: RecordingOptions) => {
+  if (options.online) {
+    const legacy = createStreamingVoiceRecording(options)
+    const live = createRealtimeVoiceRecording({ ...options, online: options.online })
+    const active = shallowRef(legacy)
+    return {
+      state: computed(() => active.value.state.value),
+      error: computed({ get: () => active.value.error.value, set: value => { active.value.error.value = value } }),
+      startedAt: computed(() => active.value.startedAt.value),
+      start: () => {
+        if (active.value.state.value !== 'idle') return Promise.resolve()
+        active.value = options.online!.enabled() ? live : legacy
+        return active.value.start()
+      },
+      stop: () => active.value.stop(), cancel: () => active.value.cancel()
+    }
+  }
   if (options.streaming) return createStreamingVoiceRecording(options)
   const state = ref<'idle' | 'starting' | 'recording' | 'transcribing'>('idle')
   const error = ref('')

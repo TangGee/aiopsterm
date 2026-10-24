@@ -1,4 +1,5 @@
-import { registerVoiceInputTarget, isVoiceTargetVisible } from '@/services/voice/voiceInputTargets'
+import { createTerminalVoiceTarget } from '@/services/voice/terminalVoiceDraft'
+import { registerVoiceInputTarget } from '@/services/voice/voiceInputTargets'
 import { nextTick, reactive, type ComponentPublicInstance, type ComputedRef, type Ref } from 'vue'
 import { Terminal as XtermTerminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -466,15 +467,30 @@ export const createTerminalWorkspaceViewRuntime = ({
       view.voiceInputDispose = registerVoiceInputTarget(openedElement, () => {
         const sessionId = panel.sessionId
         if (!sessionId) return null
-        return {
-          kind: 'terminal',
+        return createTerminalVoiceTarget({
+          element: openedElement,
+          valid: () => terminalViews.get(panel.id) === view && panel.sessionId === sessionId && workspace.activePanelId === panel.id,
+          cursor: () => {
+            const terminal = view.terminal
+            const buffer = terminal.buffer.active
+            const screen = openedElement.querySelector<HTMLElement>('.xterm-screen') || openedElement
+            const rect = screen.getBoundingClientRect()
+            const input = openedElement.querySelector<HTMLElement>('.threaded-terminal-input')
+            const inputRect = input?.getBoundingClientRect()
+            const height = inputRect?.height || rect.height / Math.max(1, terminal.rows)
+            return {
+              left: inputRect?.left ?? rect.left + buffer.cursorX * rect.width / Math.max(1, terminal.cols),
+              top: inputRect?.top ?? rect.top + buffer.cursorY * height,
+              height, font: input ? getComputedStyle(input).font : `${terminal.options.fontSize || 14}px ${terminal.options.fontFamily || 'monospace'}`,
+              identity: [sessionId, buffer.cursorX, buffer.cursorY, buffer.viewportY, buffer.getLine?.(buffer.viewportY + buffer.cursorY)?.translateToString(false)].join(':')
+            }
+          },
           insert(text) {
-            if (!isVoiceTargetVisible(openedElement) || terminalViews.get(panel.id) !== view || panel.sessionId !== sessionId || workspace.activePanelId !== panel.id) return false
             void writeXtermInput(panel.id, text.replace(/[\r\n\x00-\x1f\x7f-\x9f]+/g, ' '))
             view.terminal.focus()
             return true
           }
-        }
+        })
       })
     }
 

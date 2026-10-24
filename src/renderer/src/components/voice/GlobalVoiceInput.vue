@@ -17,6 +17,8 @@ const root = ref<HTMLElement | null>(null)
 const transcriptInput = ref<HTMLTextAreaElement | null>(null)
 const panel = ref(false)
 const transcript = ref('')
+const liveTranscript = ref('')
+const liveWarning = ref('')
 const notice = ref('')
 const position = ref({ right: 24, bottom: 96 })
 const now = ref(Date.now())
@@ -40,6 +42,27 @@ let suppressClick = false
 
 const recording = createVoiceRecording({
   streaming: true,
+  online: {
+    enabled: () => preferences.value.mode === 'local' && preferences.value.localEngine === 'zipformer',
+    start: () => window.aiops.startVoiceStream(),
+    push: (input) => window.aiops.pushVoiceStream(input),
+    finish: (id) => window.aiops.finishVoiceStream(id),
+    cancel: (id) => window.aiops.cancelVoiceStream(id),
+    onPartial: (text) => {
+      liveTranscript.value = text
+      if (!text || targetChanged) return
+      const destination = target.value
+      if (destination?.replaceDraft?.(text)) liveTranscript.value = ''
+      else if (destination?.replaceDraft) {
+        destination.dispose?.(); target.value = null; notice.value = t('invalid'); panel.value = true
+      }
+    },
+    onWarning: (text) => { liveWarning.value = text },
+    onRecovery: (text) => {
+      target.value?.cancelDraft?.(); target.value?.dispose?.(); target.value = null
+      transcript.value += text; panel.value = true; notice.value = t('invalid')
+    }
+  },
   transcribe: (input) => window.aiops.transcribeVoiceInput(input),
   cancelTranscription: (id) => { void window.aiops.cancelVoiceTranscription?.(id) },
   onStream(stream) {
@@ -61,7 +84,8 @@ const recording = createVoiceRecording({
     previousText = text
     const destination = target.value
     const value = destination?.kind === 'terminal' ? fragment.replace(/[\r\n\x00-\x1f\x7f-\x9f]+/g, ' ') : fragment
-    if (!targetChanged && destination?.insert(value)) return
+    const live = preferences.value.mode === 'local' && preferences.value.localEngine === 'zipformer'
+    if (!targetChanged && (live && destination?.replaceDraft ? destination.replaceDraft(value, true) : destination?.insert(value))) return
     destination?.dispose?.()
     target.value = null
     transcript.value += fragment
@@ -100,10 +124,19 @@ const toggle = async (destination?: VoiceInputTarget | null, background = false)
   targetChanged = false
   target.value = background ? null : destination === undefined ? captureVoiceInputTarget(lastFocused) : destination
   previousText = ''
+  liveWarning.value = ''
   notice.value = ''
   const editingDraft = document.activeElement === transcriptInput.value
   panel.value = !target.value || editingDraft
   if (!target.value) notice.value = t('fallback')
+  if (!target.value && preferences.value.localEngine === 'zipformer' && preferences.value.mode === 'local') {
+    await nextTick()
+    if (transcriptInput.value) {
+      transcriptInput.value.focus()
+      transcriptInput.value.setSelectionRange(transcript.value.length, transcript.value.length)
+      target.value = captureVoiceInputTarget(transcriptInput.value)
+    }
+  }
   await recording.start()
 }
 const captureDestination = () => {
@@ -152,7 +185,7 @@ const rememberFocus = (event: FocusEvent) => {
 const externalPointer = (event: PointerEvent) => {
   if (event.target instanceof Element && !root.value?.contains(event.target) && !event.target.closest('input, textarea, [contenteditable], .monaco-editor, .xterm')) lastFocused = null
 }
-const cancel = () => { recording.cancel(); target.value?.dispose?.(); target.value = null; captured?.dispose?.(); captured = null; notice.value = '' }
+const cancel = () => { target.value?.cancelDraft?.(); recording.cancel(); target.value?.dispose?.(); target.value = null; captured?.dispose?.(); captured = null; notice.value = '' }
 const close = () => { cancel(); panel.value = false }
 const onKey = (event: KeyboardEvent) => {
   if (event.key === 'Escape' && (busy.value || panel.value)) { event.preventDefault(); event.stopPropagation(); close() }
@@ -217,6 +250,8 @@ onBeforeUnmount(() => {
 <template>
   <div ref="root" class="global-voice" data-testid="global-voice" :style="{ right: `${position.right}px`, bottom: `${position.bottom}px` }">
     <div class="voice-overlays">
+      <div v-if="liveTranscript && busy" class="voice-preview" data-testid="voice-live-preview" role="status"><strong>{{ t('livePreview') }}</strong><p>{{ liveTranscript }}</p></div>
+      <div v-if="liveWarning" class="voice-error" role="status"><span>{{ liveWarning }}</span><button @pointerdown.prevent @click="liveWarning = ''" :aria-label="t('close')"><X :size="14" /></button></div>
       <section v-if="panel" class="voice-panel" role="dialog" :aria-label="t('title')">
         <header><strong>{{ t('title') }}</strong><button :aria-label="t('close')" @click="close"><X :size="18" /></button></header>
         <p>{{ notice || t('fallback') }}</p>
@@ -253,6 +288,8 @@ onBeforeUnmount(() => {
 .global-voice:hover .voice-secondary, .global-voice:focus-within .voice-secondary { opacity: 1; pointer-events: auto; }
 .voice-status { max-width: 100%; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 6px 8px; background: var(--theme-core-surface-muted, #2c2a3c); border: 1px solid var(--theme-core-border, #545268); border-radius: 10px; }
 .voice-status meter { width: 45px; }
+.voice-preview { box-sizing: border-box; width: min(420px, calc(100vw - 32px)); max-height: 180px; overflow-y: auto; padding: 12px; background: var(--theme-core-surface, #242232); border: 1px solid var(--theme-core-border, #545268); border-radius: 8px; overflow-wrap: anywhere; }
+.voice-preview p { margin: 8px 0 0; white-space: pre-wrap; }
 .voice-panel { box-sizing: border-box; width: min(420px, calc(100vw - 32px)); border: 1px solid var(--theme-core-border, #545268); border-radius: 12px; padding: 16px; background: var(--theme-core-surface, #242232); box-shadow: 0 8px 32px #0006; }
 .voice-panel header { display: flex; align-items: center; justify-content: space-between; }
 .voice-panel p { line-height: 1.5; opacity: .85; }

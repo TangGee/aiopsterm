@@ -1,4 +1,4 @@
-import type { VoiceInputPreferences, VoiceInputStatus, VoiceInputTrigger } from './voice'
+import type { VoiceInputPreferences, VoiceInputStatus, VoiceInputTrigger, VoiceStreamChunk, VoiceStreamResult } from './voice'
 import type { TerminalRecoverySnapshot, TerminalRecoveryLoadResult } from './terminalRecovery'
 import type { ImportedTerminalFont } from '../terminalFonts'
 import type { AiopstermDeepLinkPayload } from '../deepLink'
@@ -734,6 +734,10 @@ export type AiopsPreloadApi = {
   abortClineAgentTask: (input: ClineAgentAbortInput) => Promise<ClineAgentAbortResult>
   onClineAgentTaskEvent: (listener: (event: ClineAgentTaskEvent) => void) => () => void
   transcribeVoiceInput: (input?: VoiceTranscriptionInput) => Promise<VoiceTranscriptionResult>
+  startVoiceStream: () => Promise<string>
+  pushVoiceStream: (input: VoiceStreamChunk) => Promise<VoiceStreamResult>
+  finishVoiceStream: (sessionId: string) => Promise<VoiceStreamResult>
+  cancelVoiceStream: (sessionId: string) => Promise<void>
   validateVoiceInputPreferences?: (input: VoiceInputPreferences) => Promise<{ ok: boolean; errorMessage?: string }>
   onVoiceInputStatusChanged?: (listener: (status: VoiceInputStatus) => void) => () => void
   installVoiceInputModel?: () => Promise<VoiceInputStatus>
