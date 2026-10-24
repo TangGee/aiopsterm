@@ -36,6 +36,7 @@ export type VoiceInputPreferences = {
   modelPath: string
   shortcut: string
   headsetEnabled: boolean
+  showFloatingButton?: boolean
   position?: { right: number; bottom: number }
 }
 

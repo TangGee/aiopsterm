@@ -14,6 +14,8 @@ const clearKey = ref(false)
 const notice = ref('')
 const loading = ref(true)
 const saving = ref(false)
+const savingVisibility = ref(false)
+const visibilityError = ref('')
 const detecting = ref(false)
 const failed = ref(false)
 const preset = computed(() => voiceModelPresets[preferences.value.localEngine || 'zipformer'])
@@ -64,8 +66,26 @@ const browse = async (field: 'executablePath' | 'modelPath' | 'tokensPath' | 'de
 const open = async (url: string) => {
   try { await window.aiops.openExternalUrl(url) } catch (error) { notice.value = String(error) }
 }
+const saveVisibility = async (event: Event) => {
+  const checkbox = event.target as HTMLInputElement
+  if (loading.value || failed.value || saving.value || savingVisibility.value) return
+  savingVisibility.value = true
+  visibilityError.value = ''
+  try {
+    if (!window.aiops.saveVoiceInputPreferences) throw new Error('Voice settings are unavailable.')
+    const value = await window.aiops.saveVoiceInputPreferences({ showFloatingButton: checkbox.checked })
+    if (disposed) return
+    status.value = value
+    preferences.value.showFloatingButton = value.preferences.showFloatingButton !== false
+  } catch (error) {
+    if (!disposed) visibilityError.value = String(error)
+  } finally {
+    checkbox.checked = preferences.value.showFloatingButton !== false
+    savingVisibility.value = false
+  }
+}
 const save = async () => {
-  if (saving.value || loading.value || failed.value || installing.value) return
+  if (saving.value || savingVisibility.value || loading.value || failed.value || installing.value) return
   const candidate = { ...toRaw(preferences.value), ...(clearKey.value ? { hasApiKey: false } : apiKey.value ? { apiKey: apiKey.value } : {}) }
   if (candidate.endpoint !== status.value?.preferences.endpoint || candidate.serviceProvider !== status.value?.preferences.serviceProvider) candidate.hasApiKey = false
   const validation = clearKey.value ? { ...candidate, hasApiKey: true } : candidate
@@ -104,6 +124,7 @@ onMounted(async () => {
   unsubscribeStatus = window.aiops.onVoiceInputStatusChanged?.((value) => {
     const completed = installing.value && value.installation?.phase === 'complete'
     status.value = value
+    preferences.value.showFloatingButton = value.preferences.showFloatingButton !== false
     if (completed) {
       const installed = value.preferences
       Object.assign(preferences.value, { mode: installed.mode, localEngine: installed.localEngine, executablePath: installed.executablePath, modelPath: installed.modelPath, tokensPath: installed.tokensPath, decoderPath: installed.decoderPath, joinerPath: installed.joinerPath, punctuationPath: installed.punctuationPath })
@@ -131,6 +152,11 @@ onBeforeUnmount(() => { disposed = true; clearTimeout(timer); unsubscribe?.(); u
 <template>
   <div class="voice-settings-page" data-testid="voice-settings-page">
     <h3>{{ t('title') }}</h3>
+    <section class="voice-visibility">
+      <label class="voice-check"><input type="checkbox" data-testid="voice-show-floating-button" :checked="preferences.showFloatingButton !== false" :disabled="loading || failed || saving || savingVisibility" @change="saveVisibility" />{{ t('showFloatingButton') }}</label>
+      <p>{{ t('showFloatingButtonHelp') }}</p>
+      <p v-if="visibilityError" role="alert">{{ visibilityError }}</p>
+    </section>
     <p v-if="needsSetup" class="voice-setup-hint" role="status">{{ t('setup') }}</p>
     <p>{{ t('introduction') }}</p>
     <section v-if="preferences.mode === 'local' && installation && installation.phase !== 'idle'" class="voice-install-progress" data-testid="voice-install-progress" aria-live="polite">
@@ -141,7 +167,7 @@ onBeforeUnmount(() => { disposed = true; clearTimeout(timer); unsubscribe?.(); u
       <button v-if="installing" type="button" @click="cancelInstall">{{ t('cancel') }}</button>
     </section>
     <form @submit.prevent="save">
-      <fieldset :disabled="loading || saving || failed || installing">
+      <fieldset :disabled="loading || saving || savingVisibility || failed || installing">
         <label>{{ t('mode') }}<select v-model="preferences.mode" data-testid="voice-mode"><option value="local">{{ t('local') }}</option><option value="service">{{ t('service') }}</option></select></label>
         <template v-if="preferences.mode === 'local'">
           <label>{{ t('preset') }}<select v-model="preferences.localEngine" data-testid="voice-preset" @change="selectPreset"><option value="zipformer">{{ t('recommended') }}</option><option value="whisper">{{ t('whisperPreset') }}</option></select></label>

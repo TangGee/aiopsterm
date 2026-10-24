@@ -266,7 +266,7 @@ onBeforeUnmount(() => {
       <div v-if="errorText" class="voice-error" role="alert"><span>{{ t('failed') }}: {{ errorText }}</span><button @pointerdown.prevent @click="error = ''" :aria-label="t('close')"><X :size="14" /></button></div>
       <div v-if="busy" class="voice-status" role="status"><span>{{ t(state) }} {{ state === 'recording' ? duration : '' }}</span><meter v-if="state === 'recording'" min="0" max="1" :value="level" :aria-label="t('recording')" /><button @click="cancel">{{ t('cancel') }}</button></div>
     </div>
-    <div class="voice-controls">
+    <div v-if="preferences.showFloatingButton !== false" class="voice-controls">
       <button v-if="!busy" class="voice-secondary" :aria-label="t('openDraft')" :title="t('openDraft')" @click="panel = true"><FileText :size="17" /></button>
       <button v-if="!busy" class="voice-secondary" :aria-label="t('settings')" :title="t('settings')" @click="openSettings"><Settings :size="17" /></button>
       <button class="voice-mic" :class="{ recording: state === 'recording' }" data-testid="global-voice-button" :aria-label="buttonTitle" :title="`${buttonTitle}. ${t('drag')}`" :aria-pressed="state === 'recording'" :aria-busy="state === 'starting' || state === 'transcribing'" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerUp" @pointercancel="drag = null; captured?.dispose?.(); captured = null" @click="click">

@@ -36,7 +36,7 @@ export const registerVoiceIpc = (ipcMain: IpcMain) => {
   let keyboard = ''
   let headsetRegistered = false
   let owner: Electron.WebContents | undefined
-  const preferences = () => store.get('preferences')
+  const preferences = () => ({ showFloatingButton: true, ...store.get('preferences') })
   const warm = () => {
     const value = preferences()
     if (value.mode !== 'local' || value.localEngine !== 'zipformer' || !value.executablePath || !value.punctuationPath) return
@@ -106,6 +106,7 @@ export const registerVoiceIpc = (ipcMain: IpcMain) => {
     if (input.localEngine === 'whisper' || input.localEngine === 'zipformer') next.localEngine = input.localEngine
     if (input.mode === 'local' || input.mode === 'service') next.mode = input.mode
     if (typeof input.headsetEnabled === 'boolean') next.headsetEnabled = input.headsetEnabled
+    if (typeof input.showFloatingButton === 'boolean') next.showFloatingButton = input.showFloatingButton
     if (input.position && Number.isFinite(input.position.right) && Number.isFinite(input.position.bottom)) next.position = { right: Math.max(8, input.position.right), bottom: Math.max(8, input.position.bottom) }
     if (input.apiKey !== undefined) {
       if (typeof input.apiKey !== 'string') throw new Error('Invalid API key.')

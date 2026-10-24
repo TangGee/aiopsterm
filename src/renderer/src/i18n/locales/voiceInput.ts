@@ -1,5 +1,7 @@
 export const voiceInputMessages = {
   en: {
+    showFloatingButton: 'Show floating voice button',
+    showFloatingButtonHelp: 'Shown by default. Changes are saved immediately, even before setting up recognition. When hidden, shortcuts and enabled headset controls still work. Turn it back on here at any time.',
     livePreview: 'Live transcript (punctuation is added when recording stops)',
     downloadingPunctuation: 'Downloading punctuation model', decoder: 'Zipformer decoder', joiner: 'Zipformer joiner', punctuation: 'CT-Transformer punctuation model',
     zipformerHelp: 'Chinese streaming Zipformer with local CPU inference. CT-Transformer adds Chinese and English punctuation after recording; it does not correct words or rewrite sentences. The speech model is Chinese, not a multilingual replacement for SenseVoice. Both models stay loaded for reuse.',
@@ -49,6 +51,8 @@ export const voiceInputMessages = {
     openDraft: 'Open transcript', clear: 'Clear text', copiedFailed: 'Copy failed. Select the text and copy it manually.'
   },
   zh: {
+    showFloatingButton: '显示悬浮语音按钮',
+    showFloatingButtonHelp: '默认显示，切换后立即保存，无需先配置语音模型。隐藏后仍可使用快捷键和已启用的耳机按键，也可随时在此重新开启。',
     livePreview: '实时识别预览（停录后补标点）',
     downloadingPunctuation: '正在下载标点模型', decoder: 'Zipformer 解码器', joiner: 'Zipformer 连接器', punctuation: 'CT-Transformer 标点模型',
     zipformerHelp: '中文 Zipformer 流式识别，在本机 CPU 上运行。停录后由 CT-Transformer 恢复中英文标点，仅补标点，不纠正同音错字或改写句子。语音模型以中文为主，不能等同于 SenseVoice 的多语言覆盖。两个模型加载后常驻复用。',
