@@ -1101,6 +1101,8 @@ export const createSshTerminalSession = (
         }
       }
       hiddenTextFilter.handle(chunk)
+      // A relay may disable command echo, so retire unmatched filters once the target is ready too.
+      if (targetReadyLogged) hiddenTextFilter.stop()
     })
     relayProcess.onExit((event) => {
       hiddenTextFilter.flush()

@@ -1204,7 +1204,8 @@ describe('ssh terminal backend runtime', () => {
     expect(JSON.stringify(secondEvents.lifecycle)).not.toContain('target-password')
   })
 
-  it('falls back to a relay shell when jump-host TCP forwarding is rejected', async () => {
+  it.each(['fragmented', 'coalesced', 'suppressed'] as const)(
+    'falls back to a relay shell without delaying typed echo when bootstrap echo is %s', async (echoMode) => {
     const backend = await loadSshTerminalBackend()
     const ssh = createSshRuntime({
       manualReady: true,
@@ -1316,13 +1317,26 @@ describe('ssh terminal backend runtime', () => {
     expect(pty.processes[0].writes).toEqual([command, 'uptime\n'])
     expect(pty.processes[0].resizes).toEqual([{ cols: 120, rows: 36 }])
 
-    pty.processes[0].emitData(command)
-    pty.processes[0].emitData('target login banner\n[root@target.internal ~]# ')
+    const targetPrompt = 'target login banner\n[root@target.internal ~]# '
+    if (echoMode === 'coalesced') {
+      pty.processes[0].emitData(`${command}${targetPrompt}`)
+    } else {
+      if (echoMode === 'fragmented') {
+        pty.processes[0].emitData(command.slice(0, 1))
+        pty.processes[0].emitData(command.slice(1))
+      }
+      pty.processes[0].emitData(targetPrompt)
+    }
     expect(pty.processes[0].writes).toEqual([command, 'uptime\n', 'queued-before-relay\n'])
 
     expect(events.data.map((chunk) => chunk.toString()).join('')).toBe("Please input user's password: ops@relay:~$ target login banner\n[root@target.internal ~]# ")
     expect(events.data.map((chunk) => chunk.toString()).join('')).not.toContain('__AIO_CTX_')
     expect(events.data.map((chunk) => chunk.toString()).join('')).not.toContain(command.trim())
+    const beforeTyping = events.data.length
+    result.session!.write('s')
+    expect(pty.processes[0].writes.at(-1)).toBe('s')
+    pty.processes[0].emitData('s')
+    expect(events.data.slice(beforeTyping)).toEqual(['s'])
     expect(events.lifecycle).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1414,6 +1428,11 @@ describe('ssh terminal backend runtime', () => {
 
       relay.emitData('\r\n[root@target.internal ~]# ')
       expect(events.lifecycle.at(-1)).toMatchObject({ stage: 'shell-ready', remoteHop: 'target' })
+      const beforeTyping = events.data.length
+      result.session!.write('s')
+      expect(relay.writes.at(-1)).toBe('s')
+      relay.emitData('s')
+      expect(events.data.slice(beforeTyping)).toEqual(['s'])
       result.session!.write('uptime\r')
       expect(relay.writes.at(-1)).toBe('uptime\r')
       expect(JSON.stringify(events)).not.toContain('relay-secret')

@@ -145,20 +145,22 @@ export const inferRelayTargetReady = (value: string, jumpTarget: SshTerminalTarg
 
 export const createHiddenTextFilter = (onData: (chunk: string) => void) => {
   let buffer = ''
-  const hidden: string[] = []
-  const addHiddenText = (value: string) => {
+  const hidden = new Set<string>()
+  const hiddenVariants = (value: string) => {
     const text = value.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-    if (!text) return
-    const variants = new Set([text, text.replace(/\n/g, '\r\n'), text.replace(/\n/g, '\r')])
-    for (const variant of variants) {
-      if (variant && !hidden.includes(variant)) hidden.push(variant)
+    return new Set([text, text.replace(/\n/g, '\r\n'), text.replace(/\n/g, '\r')])
+  }
+  const addHiddenText = (value: string) => {
+    for (const variant of hiddenVariants(value)) {
+      if (variant) hidden.add(variant)
     }
   }
   const safeEmitIndex = (value: string) => {
-    const maxLength = Math.max(1, ...hidden.map((item) => item.length))
+    const items = [...hidden]
+    const maxLength = Math.max(1, ...items.map((item) => item.length))
     for (let index = Math.max(0, value.length - maxLength + 1); index < value.length; index += 1) {
       const suffix = value.slice(index)
-      if (hidden.some((item) => item.startsWith(suffix))) return index
+      if (items.some((item) => item.startsWith(suffix))) return index
     }
     return value.length
   }
@@ -181,6 +183,8 @@ export const createHiddenTextFilter = (onData: (chunk: string) => void) => {
           if (emit) onData(emit)
         }
         buffer = buffer.slice(matchText.length)
+        // A bootstrap command is echoed only once. Retaining its prefixes delays typed input.
+        for (const variant of hiddenVariants(matchText)) hidden.delete(variant)
         continue
       }
       const emitIndex = safeEmitIndex(buffer)
@@ -195,7 +199,11 @@ export const createHiddenTextFilter = (onData: (chunk: string) => void) => {
     if (buffer) onData(buffer)
     buffer = ''
   }
-  return { addHiddenText, handle, flush }
+  const stop = () => {
+    hidden.clear()
+    flush()
+  }
+  return { addHiddenText, handle, flush, stop }
 }
 
 export const relayShellCommand = (target: SshTerminalTarget) => ['ssh', ...sshKeepaliveOptions(), '-tt', '-p', String(target.port), '--', shellSingleQuote(sshDestination(target))].join(' ')
