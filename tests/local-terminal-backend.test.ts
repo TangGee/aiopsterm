@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { basename, delimiter, join } from 'path'
 import { PassThrough } from 'stream'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { Terminal } from '@xterm/headless'
 
 type TerminalLifecycleEvent = {
   id: string
@@ -151,6 +152,50 @@ describe('local terminal backend runtime', () => {
   beforeEach(async () => {
     const backend = await loadBackend()
     backend.configureLocalTerminalBackendRuntime()
+  })
+
+  it.each([{ rows: 5, initialRows: 5 }, { rows: 30, initialRows: undefined }, { rows: 50, initialRows: 5 }])('keeps recovered history above the ConPTY startup viewport with $rows rows', async ({ rows, initialRows }) => {
+    const backend = await loadBackend()
+    const pty = new MockPtyProcess()
+    const events = createRecorder()
+    backend.configureLocalTerminalBackendRuntime({ getPlatform: () => 'win32', loadPty: () => ({ spawn: () => pty }) })
+    const session = backend.createLocalTerminalSession('restored-conpty', { restoreFromRecovery: true, rows: initialRows }, createSink(events))
+    if (initialRows && initialRows !== rows) session.session.resize(100, rows)
+    const terminal = new Terminal({ cols: 100, rows, scrollback: 100, allowProposedApi: true })
+    const write = (data: string) => new Promise<void>((done) => terminal.write(data, done))
+    const history = () => Array.from({ length: terminal.buffer.normal.length }, (_, i) => terminal.buffer.normal.getLine(i)?.translateToString(true)).join('\n')
+    try {
+      await write('REGRESSION_READY\r\nold prompt>\r\n')
+      pty.emitData('')
+      // Captured from native Windows PowerShell: erase, home, banner, absolute prompt row.
+      for (const chunk of ['\x1b[', '2J\x1b[m\x1b[HWindows PowerShell\r\n', '\x1b[3;1HPS > ']) pty.emitData(chunk)
+      await write(events.data.join(''))
+      expect(history()).toContain('REGRESSION_READY')
+      expect(terminal.buffer.normal.baseY).toBeGreaterThan(0)
+      expect(terminal.buffer.normal.getLine(terminal.buffer.normal.baseY)?.translateToString(true)).toBe('Windows PowerShell')
+      expect(terminal.buffer.normal.cursorY).toBe(2)
+      expect(terminal.buffer.normal.cursorX).toBe(5)
+      events.data.length = 0
+      pty.emitData('echo after')
+      expect(events.data).toEqual(['echo after'])
+      await write(events.data.join(''))
+      expect(history()).toContain('PS > echo after')
+      events.data.length = 0
+      pty.emitData('\x1b[3J\x1b[2J\x1b[H')
+      await write(events.data.join(''))
+      expect(history()).not.toContain('REGRESSION_READY')
+    } finally { terminal.dispose(); session.session.kill() }
+  })
+
+  it.each([['win32', false], ['linux', true], ['darwin', true]] as const)('preserves normal output for %s with recovery %s', async (platform, restoreFromRecovery) => {
+    const backend = await loadBackend()
+    const pty = new MockPtyProcess()
+    const events = createRecorder()
+    backend.configureLocalTerminalBackendRuntime({ getPlatform: () => platform, loadPty: () => ({ spawn: () => pty }) })
+    const session = backend.createLocalTerminalSession('ordinary', { restoreFromRecovery }, createSink(events))
+    pty.emitData('\x1b[2J\x1b[Hprompt> ')
+    expect(events.data).toEqual(['\x1b[2J\x1b[Hprompt> '])
+    session.session.kill()
   })
 
   it.each(['missing', 'file', 'directory'])('validates restored local cwd against a real %s', async (kind) => {

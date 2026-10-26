@@ -448,10 +448,12 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
 
   const ptyRuntime = getPtyRuntime()
   if (ptyRuntime) {
+    let screenRows = options.rows || 30
+    let preserveRecoveredHistory = getPlatform() === 'win32' && options.restoreFromRecovery === true
     const ptyProcess = ptyRuntime.spawn(terminalShell, terminalArgs, {
       name: terminalType,
       cols: options.cols || 100,
-      rows: options.rows || 30,
+      rows: screenRows,
       cwd,
       env,
       ...(getPlatform() === 'win32' ? { useConpty: true } : {})
@@ -469,6 +471,7 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
       },
       resize(cols: number, rows: number) {
         ptyProcess.resize(cols, rows)
+        screenRows = rows
       },
       pause() {
         ptyProcess.pause?.()
@@ -490,7 +493,14 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
       ...(processId ? { processId } : {}),
       message: `Local shell ready ${terminalShell}`
     })
-    ptyProcess.onData((data) => sink.data(data))
+    ptyProcess.onData((data) => {
+      if (preserveRecoveredHistory && data) {
+        preserveRecoveredHistory = false
+        // A new ConPTY clears and addresses its own viewport. Move recovered
+        // display text into scrollback before that first output arrives.
+        sink.data('\r\n'.repeat(screenRows) + '\x1b[H' + data)
+      } else sink.data(data)
+    })
     ptyProcess.onExit((event) => {
       finish(event.exitCode, 'process', 'Local shell exited.')
     })
