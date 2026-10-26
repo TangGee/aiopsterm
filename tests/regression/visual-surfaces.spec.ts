@@ -25,6 +25,15 @@ for (const locale of ['zh-CN', 'en-US']) for (const scale of [1, 1.5, 2]) for (c
     await desktop.api('publishAiAgentSessionEvent', { source: 'codex', sessionId: 'visual-session', event: 'session_start', title: 'REGRESSION_VISUAL_SESSION', transcriptPath: filePath, receivedAt: Date.now() })
     const snapshot = async (name: string) => {
       await viewport.send('Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: scale, mobile: false })
+      // Native resize events and CDP emulation can arrive in different orders.
+      // Pin the persisted floating control position in the final viewport.
+      await desktop.api('saveVoiceInputPreferences', { position: { right: 24, bottom: 96 } })
+      const microphone = desktop.page.getByTestId('global-voice-button')
+      await expect(microphone).toBeVisible()
+      await expect.poll(async () => {
+        const box = await microphone.boundingBox()
+        return box && { right: Math.round(box.x + box.width), bottom: Math.round(box.y + box.height) }
+      }).toEqual({ right: size.width - 24, bottom: size.height - 96 })
       const shell = desktop.page.locator('.app-shell')
       await desktop.page.evaluate(() => document.fonts.ready)
       await desktop.page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
@@ -49,7 +58,7 @@ for (const locale of ['zh-CN', 'en-US']) for (const scale of [1, 1.5, 2]) for (c
         expect(valid, 'Session toolbar controls must fit the actual pane, not just the outer window').toBe(true)
       }
       // Capture the configured device pixels directly; Electron's screenshot helper can reset emulation.
-      const captured = await viewport.send('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: true, clip: { x: 0, y: 0, ...size, scale: 1 } })
+      const captured = await viewport.send('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false, clip: { x: 0, y: 0, ...size, scale: 1 } })
       const png = Buffer.from(captured.data, 'base64')
       expect(png.readUInt32BE(16)).toBe(size.width * scale)
       expect(png.readUInt32BE(20)).toBe(size.height * scale)
