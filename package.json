@@ -1,6 +1,6 @@
 {
   "name": "aiopsterm",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Self-owned AI operations terminal shell with backend-owned runtime boundaries.",
   "main": "./out/main/index.js",
   "desktopName": "aiopsterm.desktop",
