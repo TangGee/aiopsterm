@@ -75,6 +75,17 @@ test('bundled Codex streams, cancels, reports errors and resumes edited context 
     await desktop.page.getByTestId('ai-codex-bind-current').click()
     const terminal = desktop.page.getByTestId('ai-codex-xterm').filter({ visible: true })
     await expect.poll(output).toContain('Press enter to continue')
+    if (process.platform === 'win32') {
+      const requirements = join(process.env.ProgramData || 'C:\\ProgramData', 'OpenAI', 'Codex', 'requirements.toml')
+      const policy = await readFile(requirements, 'utf8').catch(() => '')
+      if (/hooks\s*=\s*true/.test(policy)) {
+        const configPath = join(codexHome, 'config.toml')
+        const generated = await readFile(configPath, 'utf8')
+        // Honor the machine requirement in this disposable profile, as the
+        // native cursor regression does; never modify the managed policy.
+        await writeFile(configPath, generated.replace(/^hooks = false$/m, 'hooks = true'))
+      }
+    }
     await terminal.click()
     await desktop.page.keyboard.press('Enter')
     await expect.poll(output).toContain('/model')
