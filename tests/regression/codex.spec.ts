@@ -5,7 +5,6 @@ import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { isolatedEnvironment } from './support/environment'
 import { existsSync } from 'node:fs'
-import { Terminal } from '@xterm/headless'
 
 test('bundled Codex streams, cancels, reports errors and resumes edited context @codex', async ({ desktop }) => {
   test.setTimeout(process.platform === 'win32' ? 300000 : 180000)
@@ -18,15 +17,33 @@ test('bundled Codex streams, cancels, reports errors and resumes edited context 
     await writeFile(join(codexHome, 'config.toml'), '[windows]\nsandbox = "unelevated"\n')
   }
   const output = () => desktop.page.evaluate(() => (window as any).__regressionCodex.output as string)
-  const screen = new Terminal({ cols: 120, rows: 80, allowProposedApi: true })
-  let screenOffset = 0
-  const screenText = async () => {
-    const data = await output()
-    await new Promise<void>((resolve) => screen.write(data.slice(screenOffset), resolve))
-    screenOffset = data.length
-    return Array.from({ length: screen.buffer.active.length }, (_, row) =>
-      screen.buffer.active.getLine(row)?.translateToString(true) || '').join('\n')
-  }
+  // Observe the same screen snapshots used by the renderer. A separate
+  // fixed-size parser misinterprets ConPTY wrapping in the narrow AI panel.
+  await desktop.page.addInitScript(() => {
+    const state = (window as any).__codexScreen = { id: '', lines: {} as Record<number, string> }
+    const OriginalWorker = window.Worker
+    window.Worker = class extends OriginalWorker {
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options)
+        this.addEventListener('message', ({ data }) => {
+          if (data.type !== 'screen' || data.snapshot.terminalId !== state.id) return
+          if (data.snapshot.full) state.lines = {}
+          for (const line of data.snapshot.lines) state.lines[line.y] = line.text
+        })
+      }
+      postMessage(message: any, transfer?: any) {
+        if (message.type === 'create' && message.options.surface === 'codex') {
+          state.id = message.options.terminalId
+          state.lines = {}
+        }
+        super.postMessage(message, transfer)
+      }
+    }
+  })
+  const screenText = () => desktop.page.evaluate(() => {
+    const lines = (window as any).__codexScreen.lines as Record<number, string>
+    return Object.keys(lines).map(Number).sort((a, b) => a - b).map(row => lines[row]).join('\n')
+  })
   const submitPrompt = async (prompt: string) => {
     await desktop.page.keyboard.type(prompt, { delay: 30 })
     // Startup redraws are not input acknowledgments. Wait for this prompt's
@@ -152,5 +169,5 @@ test('bundled Codex streams, cancels, reports errors and resumes edited context 
       await expect.poll(() => resumedOutput).toContain('REGRESSION_AFTER_ERROR')
       expect(await exited).toBe(0)
     } finally { resumed.kill(); await exited.catch(() => undefined) }
-  } finally { screen.dispose(); await provider.close() }
+  } finally { await provider.close() }
 })
