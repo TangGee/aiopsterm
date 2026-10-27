@@ -17,7 +17,7 @@
   "scripts": {
     "dev": "npm run native:ensure:electron && electron-vite dev",
     "start": "npm run native:ensure:electron && electron-vite preview",
-    "build": "npm run audit:i18n && npm run audit:state-ownership && npm run audit:best-practices-docs && npm run typecheck && electron-vite build && node scripts/record-build-provenance.mjs",
+    "build": "npm run audit:i18n && npm run audit:state-ownership && npm run audit:best-practices-docs && npm run typecheck && vitest run tests/voice-archive-extraction-backend.test.ts && electron-vite build && node scripts/record-build-provenance.mjs",
     "build:cline-sidecar": "node scripts/build-cline-sidecar.mjs",
     "codex:ensure-source": "node scripts/ensure-codex-source.mjs",
     "build:codex": "npm run codex:ensure-source && node scripts/build-codex-cli.mjs",
@@ -86,6 +86,7 @@
     "opencc-js": "^1.4.1",
     "pg": "^8.21.0",
     "ssh2": "^1.17.0",
+    "unbzip2-stream": "1.4.3",
     "ws": "^8.18.0",
     "yaml": "^2.9.0"
   },

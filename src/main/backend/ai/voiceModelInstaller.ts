@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { execFile } from 'node:child_process'
 import { createReadStream } from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
@@ -9,6 +8,7 @@ import { preloadZipformer, shutdownZipformerRuntime } from './zipformerRuntime'
 import { downloadVoiceArchive } from './voiceModelDownload'
 import { createVoiceInstallLog, voiceInstallError } from './voiceInstallDiagnostics'
 import { voiceInstallAssets, voiceEngineVersion, zipformerModelName, punctuationModelName } from './voiceZipformerAssets'
+import { extractVoiceArchive } from './voiceArchiveExtraction'
 export { voiceInstallAssets, voiceInstallEnvironment } from './voiceZipformerAssets'
 export { downloadVoiceArchive } from './voiceModelDownload'
 
@@ -17,11 +17,6 @@ const digest = async (path: string) => {
   for await (const chunk of createReadStream(path)) hash.update(chunk)
   return hash.digest('hex')
 }
-const extract = (archive: string, directory: string, strip: boolean, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
-  execFile('tar', ['-xf', archive, '-C', directory, ...(strip ? ['--strip-components', '1'] : [])],
-    { signal, timeout: 120_000, windowsHide: true, maxBuffer: 1024 * 1024 },
-    (error, _stdout, stderr) => error ? reject(new Error(`Voice extraction failed: ${stderr.trim() || error.message}`, { cause: error })) : resolve())
-})
 export type InstalledVoiceModel = Pick<VoiceInputPreferences, 'mode' | 'localEngine' | 'executablePath' | 'modelPath' | 'tokensPath' | 'decoderPath' | 'joinerPath' | 'punctuationPath'>
 const modelFields = ['executablePath', 'modelPath', 'tokensPath', 'decoderPath', 'joinerPath', 'punctuationPath'] as const
 const verify = async (installed: InstalledVoiceModel, signal: AbortSignal) => {
@@ -83,7 +78,7 @@ export const installVoiceModel = async (
       log('info', 'extraction.started', { asset: asset.kind })
       const destination = asset.packageName ? join(staging, 'runtime', 'node_modules', asset.packageName) : staging
       await mkdir(destination, { recursive: true })
-      await extract(archive, destination, Boolean(asset.packageName), signal)
+      await extractVoiceArchive(archive, destination, Boolean(asset.packageName), signal)
       log('info', 'extraction.completed', { asset: asset.kind, elapsedMs: Date.now() - start })
     }
     const installed: InstalledVoiceModel = {
