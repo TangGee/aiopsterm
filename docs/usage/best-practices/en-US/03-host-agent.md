@@ -42,6 +42,8 @@ Recommended flow:
 
 With workspace linking enabled, selecting a terminal chooses an existing Codex conversation bound to it. aiopsterm never creates a new conversation silently when no binding exists.
 
+Running `cd` on the same bound host, including HOME, a parent directory or another directory, updates Codex's directory context while keeping the conversation. Changing the bound host still creates a new session.
+
 ## Scenario 2: Run a Multi-Step Classic Agent Investigation
 
 Classic offers three permission levels:

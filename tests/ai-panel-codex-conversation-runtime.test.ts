@@ -424,12 +424,6 @@ describe('aiPanelCodexConversationRuntime', () => {
       mutatePanel: (panel: TerminalPanel) => {
         panel.status = 'closed'
       }
-    },
-    {
-      name: 'a cwd outside the project root',
-      mutatePanel: (panel: TerminalPanel) => {
-        panel.cwd = '/srv/other'
-      }
     }
   ])('keeps an open Codex tab visible without auto-resume for $name', async ({ mutatePanel }) => {
     const productSession = codexProductSession({
@@ -467,14 +461,14 @@ describe('aiPanelCodexConversationRuntime', () => {
     runtime.dispose()
   })
 
-  it('rejects Codex restore when the reopened terminal is outside the saved project root', async () => {
+  it.each([false, true])('resumes the same thread outside its initial directory (reopen: %s)', async (reopen) => {
     const closedSession = codexProductSession({
       id: 'product-codex-out-of-root-history',
       isOpen: false,
       target: {
         kind: 'ssh',
-        panelId: 'panel-ssh',
-        terminalSessionId: 'terminal-ssh',
+        panelId: reopen ? 'closed-panel' : 'panel-ssh',
+        terminalSessionId: reopen ? 'closed-terminal' : 'terminal-ssh',
         assetId: 'asset-1',
         connectionId: 'conn-1',
         label: 'Production',
@@ -499,13 +493,23 @@ describe('aiPanelCodexConversationRuntime', () => {
     await vi.waitFor(() => expect(runtime.codexSessionHistory.value).toContainEqual(closedSession))
     terminalRuntime.calls.startSession.mockClear()
 
-    await expect(runtime.restoreCodexProductSession(closedSession.id)).resolves.toBe(false)
-    expect(openTerminalForAiHostContext).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'asset-1', kind: 'hosts' }),
-      expect.objectContaining({ cwd: '/srv/app' })
-    )
-    expect(runtime.activeCodexConversation.value).toBeNull()
-    expect(terminalRuntime.calls.startSession).not.toHaveBeenCalled()
+    await expect(runtime.restoreCodexProductSession(closedSession.id)).resolves.toBe(true)
+    if (reopen) {
+      expect(openTerminalForAiHostContext).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'asset-1', kind: 'hosts' }),
+        expect.objectContaining({ cwd: '/srv/app' })
+      )
+    } else {
+      expect(openTerminalForAiHostContext).not.toHaveBeenCalled()
+    }
+    expect(runtime.activeCodexConversation.value).toMatchObject({
+      id: closedSession.id,
+      nativeThreadId: closedSession.nativeBinding?.nativeSessionId,
+      launchMode: 'resume',
+      projectRoot: '/srv/app',
+      boundTarget: expect.objectContaining({ cwd: '/srv/other', sessionId: 'terminal-ssh' })
+    })
+    expect(terminalRuntime.calls.startSession).toHaveBeenCalledWith(runtime.activeCodexConversation.value)
     runtime.dispose()
   })
 
@@ -1070,13 +1074,49 @@ describe('aiPanelCodexConversationRuntime', () => {
   })
 
   it.each([
-    {
-      name: 'cwd leaves the project root',
-      mutateTarget: (panel: TerminalPanel) => {
-        panel.cwd = '/srv/other'
-      },
-      expectedRoot: '/srv/other'
-    },
+    { name: 'SSH directory synchronization', panelIndex: 1, rebind: false },
+    { name: 'SSH explicit rebinding', panelIndex: 1, rebind: true },
+    { name: 'local directory synchronization', panelIndex: 0, rebind: false }
+  ])('preserves the conversation and native thread across $name', async ({ panelIndex, rebind }) => {
+    const { panels, runtime, terminalRuntime } = createHarness()
+    const panel = panels[panelIndex]
+    await runtime.bindTerminalPanelToCodex(panel, 'initial-target')
+    const conversation = runtime.activeCodexConversation.value!
+    const originalRoot = panel.cwd
+    const originalRuntime = conversation.sessionId
+    const nativeThreadId = '0197f123-4567-7890-abcd-ef0123456789'
+    conversation.nativeThreadId = nativeThreadId
+    terminalRuntime.calls.startSession.mockClear()
+    terminalRuntime.calls.syncTargetContext.mockClear()
+    vi.mocked(window.aiops.createProductSession).mockClear()
+    vi.mocked(window.aiops.updateProductSession).mockClear()
+
+    vi.mocked(window.aiops.closeProductSession).mockClear()
+
+    for (const cwd of [`${originalRoot}/logs`, '/srv', '/tmp', '/home/ops', '/', '', originalRoot]) {
+      panel.cwd = cwd
+      if (rebind) await runtime.bindTerminalPanelToCodex(panel, 'same-target')
+      else await runtime.syncActiveCodexTargetContext()
+      expect(runtime.activeCodexConversation.value).toBe(conversation)
+      expect(conversation).toMatchObject({ sessionId: originalRuntime, nativeThreadId, projectRoot: originalRoot })
+      expect(conversation.boundTarget?.cwd).toBe(cwd)
+      expect(runtime.activeCodexBoundTarget.value?.sessionId).toBe(panel.sessionId)
+      if (cwd) expect(window.aiops.updateProductSession).toHaveBeenLastCalledWith(expect.objectContaining({
+        id: conversation.id, lastKnownCwd: cwd, projectRoot: originalRoot
+      }))
+    }
+
+    expect(terminalRuntime.calls.syncTargetContext).toHaveBeenCalledTimes(7)
+    expect(window.aiops.createProductSession).not.toHaveBeenCalled()
+    expect(window.aiops.closeProductSession).not.toHaveBeenCalled()
+    expect(terminalRuntime.calls.stopSession).not.toHaveBeenCalled()
+    expect(terminalRuntime.calls.startSession).not.toHaveBeenCalled()
+    expect(terminalRuntime.calls.disposeConversation).not.toHaveBeenCalled()
+    expect(terminalRuntime.calls.clearConversationOutput).not.toHaveBeenCalled()
+    runtime.dispose()
+  })
+
+  it.each([
     {
       name: 'stable host identity changes',
       mutateTarget: (panel: TerminalPanel) => {

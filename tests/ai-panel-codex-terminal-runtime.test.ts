@@ -273,6 +273,28 @@ describe('aiPanelCodexTerminalRuntime', () => {
     expect(codexTerminalCopyShortcut({ key: 'x', shiftKey: true, ctrlKey: true, metaKey: false, altKey: false })).toBe(false)
   })
 
+  it('sends changed directories to the existing runtime without recreating it', async () => {
+    const { runtime, conversation, clientBundle } = createRuntime()
+    conversation.sessionId = 'codex-session-1'
+    const nativeThreadId = '0197f123-4567-7890-abcd-ef0123456789'
+    conversation.nativeThreadId = nativeThreadId
+    await runtime.syncTargetContext()
+    clientBundle.bridges.setCodexSessionTargetBridge.mockClear()
+
+    for (const cwd of ['/tmp', '/home/ops', '/']) {
+      conversation.boundTarget = { ...target, cwd }
+      await runtime.syncTargetContext()
+      expect(clientBundle.bridges.setCodexSessionTargetBridge).toHaveBeenLastCalledWith(
+        'codex-session-1', { ...target, cwd }
+      )
+      expect(conversation.nativeThreadId).toBe(nativeThreadId)
+    }
+    expect(clientBundle.bridges.setCodexSessionTargetBridge).toHaveBeenCalledTimes(3)
+    expect(clientBundle.bridges.createCodexSessionBridge).not.toHaveBeenCalled()
+    expect(clientBundle.bridges.killCodexSessionBridge).not.toHaveBeenCalled()
+    runtime.disposeSubscriptions()
+  })
+
   it('does not create an idle Codex terminal until a target is bound', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)

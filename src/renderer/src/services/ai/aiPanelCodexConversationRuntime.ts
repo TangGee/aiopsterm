@@ -41,7 +41,6 @@ import type { RuntimeLogLevel } from '@shared/contracts/appRuntime'
 import type { AiContextCatalog, AiContextOption } from '@shared/contracts/aiChat'
 import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
 import type { ProductSessionRecord, ProductSessionTarget } from '@shared/contracts/productSessions'
-import { isProjectCwdWithinRoot } from '@shared/productSessionPathRuntime'
 
 export type AiPanelCodexConversation = AiPanelCodexConversationRuntimeState & AiPanelCodexTerminalConversation
 
@@ -233,7 +232,7 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
 
   const liveCodexTargetForProductSession = (session: ProductSessionRecord): CodexSessionTargetContext | null => {
     const stored = session.target
-    if (!stored || !session.projectRoot) return null
+    if (!stored) return null
     const eligiblePanels = options.panels().filter((candidate) => {
       if (
         !candidate.sessionId ||
@@ -241,8 +240,7 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
         candidate.status === 'error' ||
         !isTerminalWorkspacePanel(candidate)
       ) return false
-      const target = codexTargetContextFromPanel(candidate)
-      return Boolean(target.cwd && isProjectCwdWithinRoot(session.projectRoot!, target.cwd))
+      return true
     })
     const exactPanel = eligiblePanels.find((candidate) =>
       (stored.panelId && candidate.id === stored.panelId) ||
@@ -279,7 +277,6 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     if (!panel?.sessionId || panel.status === 'closed' || panel.status === 'error') return null
     const target = codexTargetContextFromPanel(panel)
     if (stored.kind !== 'local' && !productTargetMatchesLiveTarget(stored, target)) return null
-    if (session.projectRoot && (!target.cwd || !isProjectCwdWithinRoot(session.projectRoot, target.cwd))) return null
     return target
   }
 
@@ -408,16 +405,12 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
   ) => {
     const previous = conversation.boundTarget
     if (!previous) return false
-    const targetChanged = previous.kind !== target.kind ||
+    return previous.kind !== target.kind ||
       (previous.assetId || '') !== (target.assetId || '') ||
       (previous.connectionId || '') !== (target.connectionId || '') ||
       (previous.host || '') !== (target.host || '') ||
       (previous.port || 0) !== (target.port || 0) ||
       (previous.username || '') !== (target.username || '')
-    const root = conversation.projectRoot || previous.cwd || ''
-    const nextCwd = target.cwd || ''
-    const projectChanged = Boolean(root && nextCwd && !isProjectCwdWithinRoot(root, nextCwd))
-    return targetChanged || projectChanged
   }
 
   const candidateBoundCodexTarget = (conversation = activeCodexConversation.value) =>
@@ -428,7 +421,6 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     if (!conversation || !candidate) return null
     if (!codexConversationHasNativeRuntime(conversation)) return candidate
     if (codexStableTargetChanged(conversation, candidate)) return null
-    if (!conversation.projectRoot || !candidate.cwd || !isProjectCwdWithinRoot(conversation.projectRoot, candidate.cwd)) return null
     return candidate
   }
 
