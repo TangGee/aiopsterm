@@ -9844,6 +9844,10 @@ describe('AppShell', () => {
     expect(store.activeSettingsSection).toBe('models')
     expect(store.rightPanelOpen).toBe(false)
 
+    const gatewaySettingsResponse = await invokeControlHandler({ id: 'settings-open-gateway', method: 'settings.open', params: { target: 'im-gateway' } })
+    expect(gatewaySettingsResponse).toMatchObject({ ok: true, data: { target: 'imGateway', activeModule: 'settings' } })
+    expect(store.activeSettingsSection).toBe('imGateway')
+
     const aiSettingsResponse = await invokeControlHandler({ id: 'settings-open-ai', method: 'settings.open', params: { target: 'ai-remote-host-management' } })
     expect(aiSettingsResponse).toEqual(
       expect.objectContaining({
@@ -17458,6 +17462,12 @@ describe('AppShell', () => {
     await workspace.find('.settings-documentation-toolbar .settings-button').trigger('click')
     await workspace.vm.$nextTick()
 
+    await panel.findAll('.settings-nav-item').find(item => item.text().includes('IM 网关'))!.trigger('click')
+    await flushPromises()
+    expect(store.activeSettingsSection).toBe('imGateway')
+    expect(workspace.find('.im-gateway-settings').exists()).toBe(true)
+    await panel.findAll('.settings-nav-item').find(item => item.text() === '通用')!.trigger('click')
+    await flushPromises()
     expect(workspace.text()).toContain('基础设置')
     const generalHelpButton = workspace.find('.settings-page-help-button')
     expect(generalHelpButton.exists()).toBe(true)

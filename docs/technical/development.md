@@ -39,6 +39,7 @@ Use these directories for new backend files:
 - `control`
 - `database`
 - `extensions`
+- `imGateway` (see [IM Gateway](im-gateway.md))
 - `files`
 - `knowledge`
 - `kubernetes`
@@ -63,6 +64,7 @@ Use these directories for new service files:
 - `common`
 - `database`
 - `extensions`
+- `imGateway` (see [IM Gateway](im-gateway.md))
 - `files`
 - `knowledge`
 - `kubernetes`

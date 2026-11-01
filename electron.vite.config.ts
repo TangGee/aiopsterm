@@ -16,7 +16,7 @@ export default defineConfig({
           voiceRuntimeWorker: resolve(__dirname, 'src/main/backend/ai/voiceRuntimeWorker.ts')
         },
         // ws must resolve its optional native accelerators at runtime.
-        external: ['node-pty', 'better-sqlite3', 'ssh2', 'ws']
+        external: ['node-pty', 'better-sqlite3', 'ssh2', 'ws', '@larksuiteoapi/node-sdk']
       }
     }
   },

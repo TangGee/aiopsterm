@@ -17,6 +17,7 @@ The scenario-based guide is available in Chinese and English and is included wit
 
 Detailed reference:
 
+- [Feishu IM Gateway](im-gateway.md)
 - [Assets And Workspace Resources](assets-workspace.md)
 - [AI Sessions](ai-sessions.md)
 - [AI Command Tools](ai-command-tools.md)

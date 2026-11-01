@@ -67,6 +67,7 @@ import { registerSkillsIpc } from './ipc/skills'
 import { registerTerminalSessionsIpc } from './ipc/terminalSessions'
 import { registerTerminalToolsIpc } from './ipc/terminalTools'
 import { registerUserAccountIpc } from './ipc/userAccount'
+import { registerImGatewayIpc } from './ipc/imGateway'
 import { registerVoiceIpc } from './ipc/voice'
 import { registerWindowIpc } from './ipc/window'
 import { registerZmodemIpc } from './ipc/zmodem'
@@ -419,6 +420,7 @@ export const registerMainIpcRuntime = (input: MainIpcRuntimeInput) => {
   registerTerminalToolsIpc(ipcMain)
   registerUserAccountIpc(ipcMain)
   registerVoiceIpc(ipcMain)
+  registerImGatewayIpc(ipcMain)
   registerWindowIpc(ipcMain, {
     createWindow: input.appBootstrapRuntime.createWindow
   })

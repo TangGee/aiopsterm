@@ -35,6 +35,8 @@ files:
   - '!node_modules/node-bin-darwin-*/**'
   - '!node_modules/node-win-*/**'
 extraResources:
+  - from: resources/licenses/larksuite-node-sdk
+    to: licenses/larksuite-node-sdk
   - from: resources/licenses/nerd-fonts
     to: licenses/nerd-fonts
   - from: resources/product-telemetry-worker.js

@@ -1,3 +1,4 @@
+import type { ImGatewayStatus, ImGatewaySaveInput, ImGatewaySettingsResult, ImGatewayTerminalList } from './imGateway'
 import type { VoiceInputPreferences, VoiceInputStatus, VoiceInputTrigger, VoiceStreamChunk, VoiceStreamResult } from './voice'
 import type { TerminalRecoverySnapshot, TerminalRecoveryLoadResult } from './terminalRecovery'
 import type { ImportedTerminalFont } from '../terminalFonts'
@@ -468,6 +469,9 @@ import type {
 } from './kubernetes'
 
 export type AiopsPreloadApi = {
+  getImGatewayStatus: () => Promise<ImGatewayStatus>
+  saveImGatewaySettings: (input: ImGatewaySaveInput) => Promise<ImGatewaySettingsResult>
+  listImGatewayTerminals: () => Promise<ImGatewayTerminalList>
   getPathForFile: (file: File) => string
   runtimeEnv?: () => Record<string, string | undefined>
   platform: () => Promise<string>

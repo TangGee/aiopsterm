@@ -30,6 +30,9 @@ const rendererRuntimeEnv = () =>
   }, {})
 
 const api: AiopsPreloadApi = {
+  getImGatewayStatus: () => ipcRenderer.invoke('im-gateway:status'),
+  saveImGatewaySettings: input => ipcRenderer.invoke('im-gateway:save', input),
+  listImGatewayTerminals: () => ipcRenderer.invoke('im-gateway:terminals'),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   runtimeEnv: rendererRuntimeEnv,
   platform: () => ipcRenderer.invoke('app:platform'),

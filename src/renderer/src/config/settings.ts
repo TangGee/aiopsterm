@@ -19,6 +19,7 @@ export type SettingSectionKey =
   | 'terminal'
   | 'extensions'
   | 'voice'
+  | 'imGateway'
   | 'models'
   | 'billing'
   | 'ai'
@@ -46,6 +47,7 @@ export const settingsNavItems: SettingsNavItem[] = [
   { key: 'general', label: '通用', labelKey: 'settings.nav.general', icon: Settings },
   { key: 'terminal', label: '终端', labelKey: 'settings.nav.terminal', icon: SquareTerminal },
   { key: 'extensions', label: '扩展', labelKey: 'settings.nav.extensions', icon: Box },
+  { key: 'imGateway', label: 'IM Gateway', labelKey: 'imGateway.title', icon: Share2 },
   { key: 'voice', label: 'Voice input', labelKey: 'settings.nav.voice', icon: Mic },
   { key: 'models', label: '模型', labelKey: 'settings.nav.models', icon: Bot },
   { key: 'aiNotifications', label: 'AI 通知', labelKey: 'settings.nav.aiNotifications', icon: Bell },

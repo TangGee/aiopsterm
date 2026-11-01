@@ -2,6 +2,7 @@
 
 For supported third-party boundaries and examples, start with the [Developer Integration Guides](../developer/index.md).
 
+- [IM Gateway](im-gateway.md)
 - [Codex CLI AI Panel](codex-cli-ai-panel.md)
 - [File Transfer Recovery](file-transfer-recovery.md)
 - [Control Socket](control-socket.md)

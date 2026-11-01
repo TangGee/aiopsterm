@@ -33,6 +33,7 @@ const controlSettingsTargetAliases: Record<string, SettingSectionKey> = {
   ai: 'aiRemoteHostManagement',
   'ai-hooks': 'aiNotifications',
   'ai-preferences': 'aiRemoteHostManagement',
+  'im-gateway': 'imGateway',
   'ai-remote-host-management': 'aiRemoteHostManagement',
   aihooks: 'aiNotifications',
   ainotifications: 'aiNotifications',

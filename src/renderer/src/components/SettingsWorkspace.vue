@@ -71,6 +71,10 @@
           <TerminalSettings />
         </section>
 
+        <section v-else-if="workspace.activeSettingsSection === 'imGateway'" class="settings-content-page">
+          <ImGatewaySettings />
+        </section>
+
         <section v-else-if="workspace.activeSettingsSection === 'voice'" class="settings-content-page">
           <VoiceInputSettings />
         </section>
@@ -178,6 +182,7 @@
 </template>
 
 <script setup lang="ts">
+import ImGatewaySettings from './settings/ImGatewaySettings.vue'
 import VoiceInputSettings from './voice/VoiceInputSettings.vue'
 import { computed } from 'vue'
 import type { I18nKey } from '@/i18n'
