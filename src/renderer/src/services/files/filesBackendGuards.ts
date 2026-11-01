@@ -30,8 +30,8 @@ const fileSessionStatuses = new Set(['active', 'idle', 'error'])
 const fileSessionAssetTypes = new Set(['local', 'person', 'organization', 'custom_folder'])
 const fileEntryTypes = new Set(['file', 'directory', 'link'])
 const fileTransferTypes = new Set(['download', 'upload', 'r2r'])
-const fileTransferStatuses = new Set(['running', 'success', 'failed', 'error'])
-const fileTransferStages = new Set(['scanning', 'pending'])
+const fileTransferStatuses = new Set(['running', 'success', 'failed', 'error', 'paused', 'cancelled'])
+const fileTransferStages = new Set(['scanning', 'pending', 'verifying'])
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0
@@ -133,6 +133,10 @@ export const isFileTransferTaskData = (value: unknown): value is FileTransferTas
     (value.isGroup !== undefined && typeof value.isGroup !== 'boolean') ||
     !isOptionalString(value.fromHost) ||
     !isOptionalString(value.toHost) ||
+    !isOptionalString(value.errorCode) ||
+    (value.resumable !== undefined && typeof value.resumable !== 'boolean') ||
+    (value.totalBytes !== undefined && !isNonNegativeFiniteNumber(value.totalBytes)) ||
+    (value.transferredBytes !== undefined && !isNonNegativeFiniteNumber(value.transferredBytes)) ||
     (value.totalFiles !== undefined && !isNonNegativeFiniteNumber(value.totalFiles)) ||
     (value.finishedFiles !== undefined && !isNonNegativeFiniteNumber(value.finishedFiles))
   ) {
@@ -164,7 +168,7 @@ export const isFileEntryMutationDataForRequest = (value: unknown, mutation: File
 
 export const isFileTransferOperationData = (value: unknown): value is FileTransferOperationData =>
   isRecord(value) &&
-  (value.status === 'success' || value.status === 'cancelled' || value.status === 'skipped') &&
+  (value.status === 'success' || value.status === 'cancelled' || value.status === 'skipped' || value.status === 'paused') &&
   isNonEmptyString(value.source) &&
   isNonEmptyString(value.target) &&
   isNonNegativeFiniteNumber(value.bytes) &&

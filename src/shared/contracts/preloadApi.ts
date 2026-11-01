@@ -178,6 +178,8 @@ import type {
   FileTransferOperationResult,
   FileTransferTask,
   FileTransferTaskCancelInput,
+  FileTransferTaskActionInput,
+  FileTransferTaskActionResult,
   FileTransferTaskCancelResult,
   FileTransferTaskEvent,
   FileWriteContentResult
@@ -813,6 +815,7 @@ export type AiopsPreloadApi = {
   writeFileContent: (filePath: string, content: string, options?: FileContentOptions) => Promise<FileWriteContentResult>
   mutateFileEntry: (mutation: FileEntryMutation, options?: FileListOptions) => Promise<FileEntryMutationResult>
   transferFileEntry: (operation: FileTransferOperation, options?: FileListOptions) => Promise<FileTransferOperationResult>
+  controlFileTransferTask: (input: FileTransferTaskActionInput) => Promise<FileTransferTaskActionResult>
   cancelFileTransferTask: (input: FileTransferTaskCancelInput) => Promise<FileTransferTaskCancelResult>
   listFileTransferTasks: () => Promise<FileTransferTask[]>
   onFileTransferTaskEvent: (listener: (event: FileTransferTaskEvent) => void) => () => void

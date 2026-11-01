@@ -5342,6 +5342,31 @@ describe('workspace store', () => {
     expect(store.fileTransferTasks.some((task) => task.id === 'backend-transfer-1')).toBe(false)
   })
 
+  it('controls durable transfers and does not apply stale snapshots over completion or removal', async () => {
+    const store = useWorkspaceStore()
+    const task = { id: 'durable-transfer', type: 'upload' as const, name: 'file.bin', source: '/a', target: '/b', progress: 20, speed: 'paused', status: 'paused' as const, resumable: true }
+    store.pushFileTransferTask(task)
+    vi.mocked(window.aiops.controlFileTransferTask).mockResolvedValueOnce({ ok: true, data: { task: { ...task, status: 'running' } } })
+    vi.mocked(window.aiops.listFileTransferTasks).mockResolvedValueOnce([{ ...task, status: 'running' }])
+    expect(await store.controlFileTransferTask(task.id, 'resume')).toBe(true)
+    expect(window.aiops.controlFileTransferTask).toHaveBeenCalledWith({ id: task.id, action: 'resume' })
+    let release!: (tasks: any[]) => void
+    vi.mocked(window.aiops.listFileTransferTasks).mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    const refresh = store.refreshFileTransferTasks()
+    ;(globalThis as any).__emitFileTransferTaskEventMock({ kind: 'finished', task: { ...task, status: 'success', progress: 100 } })
+    release([{ ...task, status: 'running' }])
+    await refresh
+    expect(store.fileTransferTasks.find(item => item.id === task.id)?.status).toBe('success')
+    await vi.advanceTimersByTimeAsync(8000)
+    expect(store.fileTransferTasks.some(item => item.id === task.id)).toBe(true)
+    vi.mocked(window.aiops.listFileTransferTasks).mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    const stale = store.refreshFileTransferTasks()
+    vi.mocked(window.aiops.controlFileTransferTask).mockResolvedValueOnce({ ok: true, data: { removed: task.id } })
+    expect(await store.controlFileTransferTask(task.id, 'remove')).toBe(true)
+    release([{ ...task, status: 'success' }]); await stale
+    expect(store.fileTransferTasks.some(item => item.id === task.id)).toBe(false)
+  })
+
   it('observes backend-owned file transfer progress while operations are in flight', async () => {
     const store = useWorkspaceStore()
     const runningTask = {

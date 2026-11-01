@@ -442,11 +442,11 @@ export const normalizeFileTransferTask = (value: unknown): FileTransferTask | nu
   const id = typeof value.id === 'string' && value.id.trim() ? value.id.trim() : ''
   if (!id || !type || !name || !source || !target) return null
   const status =
-    value.status === 'running' || value.status === 'success' || value.status === 'failed' || value.status === 'error'
+    value.status === 'running' || value.status === 'success' || value.status === 'failed' || value.status === 'error' || value.status === 'paused' || value.status === 'cancelled'
       ? value.status
       : 'running'
   const progress = typeof value.progress === 'number' && Number.isFinite(value.progress) ? Math.min(100, Math.max(0, Math.round(value.progress))) : 0
-  const stage = value.stage === 'scanning' || value.stage === 'pending' ? value.stage : undefined
+  const stage = value.stage === 'scanning' || value.stage === 'pending' || value.stage === 'verifying' ? value.stage : undefined
   const task: FileTransferTask = {
     id,
     type,
@@ -457,6 +457,10 @@ export const normalizeFileTransferTask = (value: unknown): FileTransferTask | nu
     speed: typeof value.speed === 'string' && value.speed.trim() ? value.speed : status === 'running' ? 'pending' : '',
     status,
     ...(stage ? { stage } : {}),
+    ...(value.resumable === true ? { resumable: true } : {}),
+    ...(typeof value.totalBytes === 'number' && Number.isFinite(value.totalBytes) && value.totalBytes >= 0 ? { totalBytes: value.totalBytes } : {}),
+    ...(typeof value.transferredBytes === 'number' && Number.isFinite(value.transferredBytes) && value.transferredBytes >= 0 ? { transferredBytes: value.transferredBytes } : {}),
+    ...(typeof value.errorCode === 'string' ? { errorCode: value.errorCode } : {}),
     ...(value.isGroup === true ? { isGroup: true } : {}),
     ...(typeof value.fromHost === 'string' && value.fromHost ? { fromHost: value.fromHost } : {}),
     ...(typeof value.toHost === 'string' && value.toHost ? { toHost: value.toHost } : {}),
@@ -482,7 +486,7 @@ export const mergeFileTransferTaskSnapshot = (
   const currentIds = new Set(currentTasks.map((task) => task.id))
   const retained = currentTasks.flatMap((task) => {
     const updated = incoming.get(task.id)
-    return updated ? [updated] : task.status !== 'running' ? [task] : []
+    return updated ? [updated] : task.status !== 'running' && !task.resumable ? [task] : []
   })
   return [...snapshot.filter((task) => !currentIds.has(task.id)), ...retained]
     .map((task) => ({ ...task, children: task.children?.map((child) => ({ ...child })) }))
@@ -492,6 +496,7 @@ export const upsertFileTransferTask = (tasks: FileTransferTask[], task: FileTran
   tasks.some((item) => item.id === task.id) ? tasks.map((item) => (item.id === task.id ? task : item)) : [task, ...tasks]
 
 export const fileTransferTaskRemovalDelay = (task: FileTransferTask) => {
+  if (task.resumable) return null
   if (task.status === 'success') return 2500
   if (task.status === 'failed' || task.status === 'error') return 8000
   return null

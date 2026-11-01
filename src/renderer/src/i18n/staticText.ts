@@ -12,6 +12,21 @@ type StaticTextState = {
 }
 
 const exactEnUS: Record<string, string> = {
+  '暂停传输': 'Pause transfer',
+  '继续传输': 'Resume transfer',
+  '重试未完成文件': 'Retry unfinished files',
+  '移除任务并清理临时文件': 'Remove task and clean up temporary files',
+  '校验中...': 'Verifying...',
+  '校验中': 'Verifying',
+  '检查续传内容': 'Checking partial content',
+  '完成，校验通过': 'Complete, verification passed',
+  '已暂停，点击继续传输': 'Paused, click to resume',
+  '应用已重启，点击继续传输': 'App restarted, click to resume',
+  '正在暂停': 'Pausing',
+  '正在取消': 'Cancelling',
+  '传输已暂停，可在任务列表中继续': 'Transfer paused. Resume it from the task list.',
+  '传输任务控制服务不可用': 'Transfer task control is unavailable',
+  '传输任务操作失败': 'Transfer task action failed',
   '关闭': 'Close',
   '取消': 'Cancel',
   '确定': 'OK',

@@ -257,6 +257,9 @@ export const useFileBrowserRuntime = (props: FileBrowserRuntimeProps, emit: File
   }
 
   watch(() => props.session.id, openSessionDirectory)
+  watch(() => workspace.fileTransferTasks.filter(task => task.resumable && task.status === 'success').map(task => task.id), (ids, previous) => {
+    if (!loading.value && ids.some(id => !previous.includes(id))) void loadEntries(currentPath.value)
+  })
 
   onMounted(() => {
     void openSessionDirectory()

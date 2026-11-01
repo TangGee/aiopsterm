@@ -219,6 +219,7 @@ describe('filesClient', () => {
       mutateFileEntry: undefined as any,
       transferFileEntry: undefined as any,
       cancelFileTransferTask: undefined as any,
+      controlFileTransferTask: undefined as any,
       listFileTransferTasks: undefined as any
     }
     expect(filesClient.listFileSessionCatalog()).toBeUndefined()
@@ -234,6 +235,7 @@ describe('filesClient', () => {
     expect(filesClient.mutateFileEntry()).toBeUndefined()
     expect(filesClient.transferFileEntry()).toBeUndefined()
     expect(filesClient.cancelFileTransferTask()).toBeUndefined()
+    expect(filesClient.controlFileTransferTask()).toBeUndefined()
     expect(filesClient.listFileTransferTasks()).toBeUndefined()
   })
 })

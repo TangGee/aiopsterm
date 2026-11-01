@@ -477,6 +477,15 @@ describe('filesRuntime', () => {
     expect(fileTransferTaskRemovalDelay(running)).toBeNull()
   })
 
+  it('retains durable history until removed and preserves recovery metadata', () => {
+    for (const status of ['paused', 'error', 'cancelled', 'success'] as const) {
+      const durable = { ...task({ id: 'durable', type: 'upload', status, progress: 40 }), resumable: true, stage: 'verifying' as const, totalBytes: 100, transferredBytes: 40, errorCode: 'network' }
+      expect(fileTransferTaskRemovalDelay(durable)).toBeNull()
+      expect(normalizeFileTransferTask(durable)).toMatchObject(durable)
+      expect(mergeFileTransferTaskSnapshot([durable], [])).toEqual([])
+    }
+  })
+
   it('resolves affected task ids and applies cancelled state to grouped tasks', () => {
     const parent: FileTransferTask = {
       ...task({ id: 'parent', type: 'download', status: 'running', progress: 80 }),

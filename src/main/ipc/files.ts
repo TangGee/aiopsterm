@@ -16,6 +16,7 @@ import {
   saveFileSessionFromSftpPayload,
   saveFileSessionFromTerminalContext,
   transferFileEntry,
+  controlFileTransferTask,
   updateFileSession,
   writeFileContent
 } from '../backend/files/files'
@@ -29,6 +30,7 @@ import type {
   FileSessionSftpPayload,
   FileSessionTerminalContext,
   FileTransferOperation,
+  FileTransferTaskActionInput,
   FileTransferTaskCancelInput
 } from '@shared/contracts/files'
 
@@ -58,5 +60,6 @@ export const registerFilesIpc = (ipcMain: IpcMain) => {
     transferFileEntry(operation, options)
   )
   ipcMain.handle('files:transfer-task:cancel', async (_event, input: FileTransferTaskCancelInput) => cancelFileTransferTask(input))
+  ipcMain.handle('files:transfer-task:control', async (_event, input: FileTransferTaskActionInput) => controlFileTransferTask(input))
   ipcMain.handle('files:list-transfer-tasks', async () => listFileTransferTasks())
 }

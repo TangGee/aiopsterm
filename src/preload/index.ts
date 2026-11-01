@@ -466,6 +466,7 @@ const api: AiopsPreloadApi = {
   writeFileContent: (filePath: string, content: string, options) => ipcRenderer.invoke('files:write-content', filePath, content, options),
   mutateFileEntry: (mutation, options) => ipcRenderer.invoke('files:mutate-entry', mutation, options),
   transferFileEntry: (operation, options) => ipcRenderer.invoke('files:transfer-entry', operation, options),
+  controlFileTransferTask: (input) => ipcRenderer.invoke('files:transfer-task:control', input),
   cancelFileTransferTask: (input) => ipcRenderer.invoke('files:transfer-task:cancel', input),
   listFileTransferTasks: () => ipcRenderer.invoke('files:list-transfer-tasks'),
   onFileTransferTaskEvent: (listener) => {

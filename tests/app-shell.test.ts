@@ -11804,6 +11804,12 @@ describe('AppShell', () => {
       expect((right.find('.file-path-input').element as HTMLInputElement).value).toBe('/users/local/builds')
       expect(window.aiops.listFiles).toHaveBeenCalledTimes(listCount)
       expect(window.aiops.resolveFileHomeDirectory).toHaveBeenCalledTimes(homeCount)
+      store.pushFileTransferTask({ id: 'resumed-complete', type: 'upload', name: 'payload.bin', source: '/tmp/payload.bin', target: '/srv/releases/payload.bin', progress: 100, speed: 'complete', status: 'success', resumable: true })
+      await flushPromises()
+      expect(window.aiops.listFiles).toHaveBeenCalledTimes(listCount + 2)
+      expect((left.find('.file-path-input').element as HTMLInputElement).value).toBe('/srv/releases')
+      expect((right.find('.file-path-input').element as HTMLInputElement).value).toBe('/users/local/builds')
+      expect(window.aiops.resolveFileHomeDirectory).toHaveBeenCalledTimes(homeCount)
     } finally {
       wrapper.unmount()
       window.aiops.resolveFileHomeDirectory = originalHome

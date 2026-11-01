@@ -9680,6 +9680,7 @@ Object.defineProperty(window, 'aiops', {
       fileTransferTasksMock = fileTransferTasksMock.filter((item) => !taskIds.includes(item.id))
       return { ok: true, data: { id, taskIds, status: 'aborted' as const } }
     }),
+    controlFileTransferTask: vi.fn(async () => ({ ok: false as const, errorMessage: 'No managed transfer task in test backend' })),
     listFileTransferTasks: vi.fn(async () => fileTransferTasksMock.map((task) => ({ ...task, children: task.children?.map((child: any) => ({ ...child })) }))),
     onFileTransferTaskEvent: vi.fn((listener: (event: FileTransferTaskEvent) => void) => {
       fileTransferTaskEventListeners.add(listener)

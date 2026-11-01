@@ -55,7 +55,7 @@
           <small v-if="group.key === 'r2r'">{{ r2rTitle(task) }}</small>
           <div class="transfer-task-meta">
             <strong :title="task.target || task.source">{{ task.name }}</strong>
-            <em>{{ taskSummary(task) }}</em>
+            <em :title="taskSummary(task)">{{ taskSummary(task) }}</em>
           </div>
           <div class="transfer-task-progress">
             <button
@@ -69,14 +69,31 @@
             <div class="progress">
               <span :style="{ width: `${task.progress}%` }"></span>
             </div>
-            <button
-              v-if="task.status === 'running'"
-              class="danger"
-              title="取消"
-              @click="store.cancelFileTransferTask(task.id)"
-            >
-              <X />
-            </button>
+            <div class="transfer-task-actions">
+              <button
+                v-if="task.resumable && task.status === 'running'"
+                title="暂停传输"
+                @click="store.controlFileTransferTask(task.id, 'pause')"
+              ><Pause /></button>
+              <button
+                v-if="task.resumable && (task.status === 'paused' || task.status === 'error')"
+                :title="resumeTitle(task)"
+                @click="store.controlFileTransferTask(task.id, 'resume')"
+              ><Play /></button>
+              <button
+                v-if="task.resumable && task.status !== 'running'"
+                title="移除任务并清理临时文件"
+                @click="store.controlFileTransferTask(task.id, 'remove')"
+              ><Trash2 /></button>
+              <button
+                v-if="task.status === 'running'"
+                class="danger"
+                title="取消"
+                @click="store.cancelFileTransferTask(task.id)"
+              >
+                <X />
+              </button>
+            </div>
           </div>
           <div
             v-if="task.children?.length && expandedTaskId === task.id"
@@ -108,12 +125,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { ArrowDown, ArrowUp, ChevronsLeftRight, ChevronDown, ChevronRight, Minus, X } from 'lucide-vue-next'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { ArrowDown, ArrowUp, ChevronsLeftRight, ChevronDown, ChevronRight, Minus, X, Pause, Play, Trash2 } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { FileTransferTask } from '@shared/contracts/files'
 
 const store = useWorkspaceStore()
+let stopObserving: (() => void) | undefined
+onMounted(() => { stopObserving = store.observeFileTransferTasks() })
+onUnmounted(() => stopObserving?.())
 const collapsed = ref(false)
 const expandedTaskId = ref('')
 const overall = computed(() => store.transferOverallPercent)
@@ -133,11 +153,14 @@ const fabIcon = computed(() => {
   return ChevronsLeftRight
 })
 
+const resumeTitle = (task: FileTransferTask) => task.status === 'error' ? '重试未完成文件' : '继续传输'
+
 const taskSummary = (task: FileTransferTask) => {
   if (task.status !== 'running') return task.speed || (task.status === 'success' ? '完成' : '失败')
+  if (task.stage === 'verifying') return '校验中...'
   if (task.stage === 'scanning') return '扫描中...'
   if (task.stage === 'pending' || task.speed === 'pending') return '等待中...'
-  if (task.isGroup) return `${task.finishedFiles || 0}/${task.totalFiles || task.children?.length || 0}`
+  if (task.isGroup) return `${task.finishedFiles || 0}/${task.totalFiles || task.children?.length || 0} ${task.speed || ''}`
   return task.speed || '0 KB/s'
 }
 

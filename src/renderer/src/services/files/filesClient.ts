@@ -17,6 +17,7 @@ type FilesBridge = Pick<
   | 'mutateFileEntry'
   | 'transferFileEntry'
   | 'cancelFileTransferTask'
+  | 'controlFileTransferTask'
   | 'listFileTransferTasks'
 >
 
@@ -36,6 +37,7 @@ export const filesClient = {
   writeFileContent: () => bridgeMethod('writeFileContent'),
   mutateFileEntry: () => bridgeMethod('mutateFileEntry'),
   transferFileEntry: () => bridgeMethod('transferFileEntry'),
+  controlFileTransferTask: () => bridgeMethod('controlFileTransferTask'),
   cancelFileTransferTask: () => bridgeMethod('cancelFileTransferTask'),
   listFileTransferTasks: () => bridgeMethod('listFileTransferTasks')
 }

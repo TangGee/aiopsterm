@@ -24,7 +24,15 @@ Use any of three entry points: click **Files** on the module rail for the full w
 
 ## Transfer
 
-Drag a file or directory onto a real directory row on the other side. Blank-space drops use the current directory. Upload-file, upload-directory, and download actions provide picker-based alternatives. Open the transfer panel from the lower-right control to inspect registered, running, completed, failed, and cancellable tasks.
+Drag a file or directory onto a real directory row on the other side. Blank-space drops use the current directory. Upload-file, upload-directory, and download actions provide picker-based alternatives. Open the lower-right transfer panel to inspect scanning, verification, transfer, pause, completion and failure states.
+
+- Pause running uploads, downloads or remote copies, then continue. Failed tasks retain their error and can retry unfinished files.
+- After restarting the app, unfinished tasks wait for explicit continuation. Completed and failed records remain until removed. Remove old records when the 100-task limit is reached.
+- Cancel stops a task permanently. Remove then cleans its unfinished temporary files; remote cleanup may require reconnecting. Completed files and created directories are retained.
+- Resuming verifies the source and transferred prefix. Changed sources, partial files or destinations can prevent continuation. Check the changes before removing the task and starting a new transfer. Avoid modifying source trees or destinations during a transfer.
+- Large files may spend time verifying before and after copying. The original destination is replaced only after verification; an unsupported replacement operation fails without deleting the original.
+
+Directory transfers include empty directories and symbolic links without traversing link targets. Split trees exceeding 10000 entries or 128 levels. Regular files retain existing destination permissions, or source permissions for new files; ownership and ACLs are not copied. See [recovery implementation and tests](../../../technical/file-transfer-recovery.md).
 
 ## Jump Hosts And Relay Limits
 

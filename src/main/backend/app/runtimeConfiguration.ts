@@ -175,6 +175,7 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
     }
   })
   configureFilesBackendRuntime({
+    transferStatePath: join(app.getPath('userData'), 'file-transfer-jobs.json'),
     getConfig: input.getConfig,
     useSeedData: shouldUseFilesSeedData()
   })

@@ -84,6 +84,10 @@ export const createFileBrowserBackendRuntime = (input: {
       setFileNotice(cancelledNotice)
       return false
     }
+    if (data.status === 'paused') {
+      setFileNotice('传输已暂停，可在任务列表中继续')
+      return false
+    }
     if (data.status === 'skipped') {
       setFileNotice(skippedNotice)
       return false

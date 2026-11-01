@@ -405,3 +405,11 @@ export const resetFileTransferRuntimeForTests = () => {
 
 export const listFileTransferTasks = async (): Promise<FileTransferTask[]> =>
   Array.from(activeFileTransferTasks.values()).map(cloneFileTransferTask)
+
+export const publishFileTransferTask = (kind: FileTransferTaskEvent['kind'], task: FileTransferTask) => {
+  if (kind === 'progress') emitFileTransferProgressEvent(task)
+  else {
+    dropPendingFileTransferProgress(task.id)
+    emitFileTransferTaskEvent(kind, task)
+  }
+}

@@ -902,6 +902,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     deleteFileSessionFolder,
     pushFileTransferTask,
     observeFileTransferTasks,
+    controlFileTransferTask,
     cancelFileTransferTask
   } = createWorkspaceFilesController(
     {
@@ -1868,6 +1869,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     deleteFileSessionFolder,
     pushFileTransferTask,
     observeFileTransferTasks,
+    controlFileTransferTask,
     cancelFileTransferTask,
     createSnippetGroup,
     renameSnippetGroup,

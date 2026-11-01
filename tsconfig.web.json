@@ -24,6 +24,8 @@
     "tests/cline-agent-sidecar-runtime.test.ts",
     "tests/local-editor-files-backend.test.ts",
     "tests/files-cross-host-transfer-runtime.test.ts",
+    "tests/files-resumable-transfer.test.ts",
+    "tests/files-transfer-endpoint.test.ts",
     "tests/ssh-terminal-recovery-backend.test.ts",
     "tests/ssh-terminal-relay-shell-backend.test.ts",
     "tests/ssh-terminal-recovery-integration-backend.test.ts",

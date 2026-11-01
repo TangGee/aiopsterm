@@ -123,7 +123,7 @@ export type FileTransferOperation =
   | { kind: 'copy-remote'; remotePath: string; targetPath: string; overwrite?: boolean; sourceOptions?: FileListOptions }
 
 export type FileTransferOperationResult = AiopsMutationResult<{
-  status: 'success' | 'cancelled' | 'skipped'
+  status: 'success' | 'cancelled' | 'skipped' | 'paused'
   source: string
   target: string
   bytes: number
@@ -141,8 +141,12 @@ export type FileTransferTask = {
   target: string
   progress: number
   speed: string
-  status: 'running' | 'success' | 'failed' | 'error'
-  stage?: 'scanning' | 'pending'
+  status: 'running' | 'success' | 'failed' | 'error' | 'paused' | 'cancelled'
+  stage?: 'scanning' | 'pending' | 'verifying'
+  resumable?: boolean
+  transferredBytes?: number
+  totalBytes?: number
+  errorCode?: string
   isGroup?: boolean
   fromHost?: string
   toHost?: string
@@ -167,3 +171,6 @@ export type FileTransferTaskCancelResult = AiopsMutationResult<{
   taskIds: string[]
   status: 'aborted' | 'not_found'
 }>
+
+export type FileTransferTaskActionInput = { id: string; action: 'pause' | 'resume' | 'cancel' | 'remove' }
+export type FileTransferTaskActionResult = AiopsMutationResult<{ task?: FileTransferTask; removed?: string }>

@@ -117,6 +117,13 @@ const ssh2Mock = vi.hoisted(() => {
         }))
       callback(null, rows)
     },
+    lstat(path: string, callback: (error: Error | null, stats?: Record<string, unknown>) => void) {
+      const normalized = normalize(path)
+      calls.push({ method: 'lstat', path: normalized })
+      const node = nodes.get(normalized)
+      if (!node) { callback(missingError(normalized)); return }
+      callback(null, attrsFor(node))
+    },
     stat(path: string, callback: (error: Error | null, stats?: Record<string, unknown>) => void) {
       const normalized = normalize(path)
       calls.push({ method: 'stat', path: normalized })
@@ -533,6 +540,7 @@ let configureFilesBackendRuntime: (config?: {
   useSeedData?: boolean
   forceFallbackStore?: boolean
   sftpPoolIdleTtlMs?: number
+  transferStatePath?: string
 }) => void
 let configureAssetBackendRuntime: (config?: { useSeedData?: boolean; forceFallbackStore?: boolean }) => void
 let resetMockStores: (() => void) | undefined
@@ -973,6 +981,23 @@ describe('files backend content boundary', () => {
       else process.env.SSH_AUTH_SOCK = originalAgent
       if (originalFilesAgent === undefined) delete process.env.AIOPSTERM_FILES_SFTP_AGENT
       else process.env.AIOPSTERM_FILES_SFTP_AGENT = originalFilesAgent
+    }
+  })
+
+  it('routes production transfers through the durable backend and reloads completed history', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-durable-routing-'))
+    try {
+      const sessionId = saveSftpAsset()
+      const transferStatePath = join(root, 'jobs.json')
+      configureFilesBackendRuntime({ transferStatePath })
+      const result = await transferFileEntry({ kind: 'download-file', remotePath: '/srv/note.txt', localPath: join(root, 'note.txt') }, { kind: 'remote', sessionId })
+      expect(result, JSON.stringify(result)).toMatchObject({ ok: true, data: { status: 'success', task: { resumable: true } } })
+      expect(await readFile(join(root, 'note.txt'), 'utf8')).toBeTruthy()
+      configureFilesBackendRuntime({ transferStatePath })
+      expect(await listFileTransferTasks()).toEqual([expect.objectContaining({ id: result.data.task.id, resumable: true, status: 'success' })])
+    } finally {
+      configureFilesBackendRuntime()
+      await rm(root, { recursive: true, force: true })
     }
   })
 

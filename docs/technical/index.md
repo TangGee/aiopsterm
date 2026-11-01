@@ -3,6 +3,7 @@
 For supported third-party boundaries and examples, start with the [Developer Integration Guides](../developer/index.md).
 
 - [Codex CLI AI Panel](codex-cli-ai-panel.md)
+- [File Transfer Recovery](file-transfer-recovery.md)
 - [Control Socket](control-socket.md)
 - [External Codex MCP Host Gateway](external-codex-mcp.md)
 - [Database MCP](database-mcp.md)

@@ -61,10 +61,21 @@ import {
 } from './filesSftpRuntime'
 import { mutationTask, resetFileTransferRuntimeForTests, writeContentTask } from './filesTransferRuntime'
 export { getRemoteSftpPoolSnapshotForTests as __getRemoteSftpPoolSnapshotForTests } from './filesSftpRuntime'
-export { cancelFileTransferTask, listFileTransferTasks } from './filesTransferRuntime'
+import { cancelFileTransferTask as cancelLegacyTransfer, listFileTransferTasks as listLegacyTransfers } from './filesTransferRuntime'
+import { configureFileTransferJobs, submitResumableFileTransfer, listResumableFileTransfers, hasResumableFileTransfer, controlResumableFileTransfer } from './filesTransferJobs'
+import type { FileTransferTaskCancelInput, FileTransferTaskCancelResult } from '@shared/contracts/files'
+export { controlResumableFileTransfer as controlFileTransferTask } from './filesTransferJobs'
+let resumableTransfersEnabled = false
+export const listFileTransferTasks = async () => [...await listLegacyTransfers(), ...(resumableTransfersEnabled ? listResumableFileTransfers() : [])]
+export const cancelFileTransferTask = async (input: FileTransferTaskCancelInput): Promise<FileTransferTaskCancelResult> => {
+  if (!hasResumableFileTransfer(input.id)) return cancelLegacyTransfer(input)
+  const result = await controlResumableFileTransfer({ id: input.id, action: 'cancel' })
+  return result.ok ? { ok: true, data: { id: input.id, taskIds: [input.id], status: 'aborted' } } : result
+}
 
 type FilesBackendRuntimeConfig = {
   getConfig?: () => Pick<UserConfig, 'sshProxyConfigs' | 'sshAgentKeys' | 'terminal'>
+  transferStatePath?: string
   databasePath?: string
   useSeedData?: boolean
   forceFallbackStore?: boolean
@@ -73,6 +84,8 @@ type FilesBackendRuntimeConfig = {
 }
 
 export const configureFilesBackendRuntime = (config: FilesBackendRuntimeConfig = {}) => {
+  resumableTransfersEnabled = Boolean(config.transferStatePath)
+  configureFileTransferJobs(config.transferStatePath)
   clearRemoteSftpPool()
   configureFilesSftpRuntime({ getConfig: config.getConfig, sftpPoolIdleTtlMs: config.sftpPoolIdleTtlMs })
   configureFilesSessionCatalogRuntime(config)
@@ -455,6 +468,7 @@ export const resolveFileHomeDirectory = async (options: FileListOptions = {}): P
 }
 
 export const transferFileEntry = async (operation: FileTransferOperation, options: FileListOptions = {}): Promise<FileTransferOperationResult> => {
+  if (resumableTransfersEnabled) return submitResumableFileTransfer(operation, options)
   try {
     if (operation.kind === 'copy-remote') {
       const source = normalizeRemotePath(operation.remotePath)

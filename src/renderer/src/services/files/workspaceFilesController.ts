@@ -78,6 +78,10 @@ export const createWorkspaceFilesController = (state: WorkspaceFilesControllerSt
   const { setTopNotice, setActiveModule } = deps
 
   const fileTransferTaskRemovalTimers = new Map<string, number>()
+  let fileTransferTaskRevision = 0
+  let fileTransferSnapshotRequest = 0
+  let fileTransferSnapshotPending = false
+  const fileTransferTaskRevisions = new Map<string, number>()
   let fileTransferTaskObserverCount = 0
   let stopFileTransferTaskEvents: (() => void) | null = null
 
@@ -119,19 +123,28 @@ export const createWorkspaceFilesController = (state: WorkspaceFilesControllerSt
       setTopNotice('文件传输任务加载服务不可用')
       return false
     }
+    const request = ++fileTransferSnapshotRequest
+    fileTransferSnapshotPending = true
+    fileTransferTaskRevisions.clear()
+    const revision = fileTransferTaskRevision
     try {
       const tasks = await listFileTransferTasksBridge()
+      if (request !== fileTransferSnapshotRequest) return true
       if (!Array.isArray(tasks)) {
         setTopNotice(malformedFilesBackendResultMessage)
         return false
       }
       const snapshot = normalizedFileTransferTaskSnapshot(tasks)
       if (!snapshot) return false
-      mergeFileTransferTaskSnapshot(snapshot, options)
+      const changed = new Set([...fileTransferTaskRevisions].filter(([, value]) => value > revision).map(([id]) => id))
+      const current = fileTransferTasks.value.filter(task => changed.has(task.id))
+      mergeFileTransferTaskSnapshot([...snapshot.filter(task => !changed.has(task.id)), ...current], options)
       return true
     } catch {
       setTopNotice('文件传输任务加载失败')
       return false
+    } finally {
+      if (request === fileTransferSnapshotRequest) { fileTransferSnapshotPending = false; fileTransferTaskRevisions.clear() }
     }
   }
 
@@ -299,6 +312,7 @@ export const createWorkspaceFilesController = (state: WorkspaceFilesControllerSt
   }
 
   const applyFileTransferTaskEvent = (event: FileTransferTaskEvent) => {
+    if (fileTransferSnapshotPending) fileTransferTaskRevisions.set(event.task.id, ++fileTransferTaskRevision)
     // 主进程异常中止的任务不会再推送终态，收到 running 态的 finished 事件时直接移除残留项
     if (event.kind === 'finished' && event.task.status === 'running') {
       clearFileTransferTaskRemovalTimer(event.task.id)
@@ -475,7 +489,30 @@ export const createWorkspaceFilesController = (state: WorkspaceFilesControllerSt
     fileTransferTasks.value.filter((task) => taskIds.has(task.id)).forEach((task) => scheduleFileTransferTaskRemoval(task.id, 800))
   }
 
+  const controlFileTransferTask = async (id: string, action: 'pause' | 'resume' | 'cancel' | 'remove') => {
+    const bridge = filesClient.controlFileTransferTask()
+    if (!bridge) { setTopNotice('传输任务控制服务不可用'); return false }
+    startFileTransferTaskEvents()
+    try {
+      const result = await bridge({ id, action })
+      if (!result?.ok || !result.data) { setTopNotice(result?.errorMessage || '传输任务操作失败'); return false }
+      if (result.data.removed === id) {
+        if (fileTransferSnapshotPending) fileTransferTaskRevisions.set(id, ++fileTransferTaskRevision)
+        clearFileTransferTaskRemovalTimer(id)
+        fileTransferTasks.value = fileTransferTasks.value.filter(task => task.id !== id)
+      } else if (isFileTransferTaskData(result.data.task) && result.data.task.id === id) {
+        // Query after acknowledgement so a late IPC reply cannot overwrite a newer terminal event.
+        await refreshFileTransferTasks()
+      } else { setTopNotice(malformedFilesBackendResultMessage); return false }
+      return true
+    } catch (error) {
+      setTopNotice(error instanceof Error ? error.message : '传输任务操作失败')
+      return false
+    } finally { stopFileTransferTaskEventsIfIdle() }
+  }
+
   const cancelFileTransferTask = async (id: string) => {
+    if (fileTransferTasks.value.some(task => task.id === id && task.resumable)) return controlFileTransferTask(id, 'cancel')
     const cancelFileTransferTaskBridge = filesClient.cancelFileTransferTask()
     if (!cancelFileTransferTaskBridge) {
       setTopNotice('取消传输任务服务不可用')
@@ -527,6 +564,7 @@ export const createWorkspaceFilesController = (state: WorkspaceFilesControllerSt
     deleteFileSessionFolder,
     pushFileTransferTask,
     observeFileTransferTasks,
+    controlFileTransferTask,
     cancelFileTransferTask
   }
 }
