@@ -222,7 +222,7 @@ describe('RecentWorkspacePanels', () => {
     expect(workspace.recentPanelsOpen).toBe(false)
   })
 
-  it('rejects repeated Enter while connecting and does not steal focus after dismissal', async () => {
+  it('opens the tab immediately and does not steal focus when the connection finishes', async () => {
     const workspace = useWorkspaceStore()
     const previous = terminalPanel('previous', 'Existing')
     workspace.panels = [previous]
@@ -235,36 +235,47 @@ describe('RecentWorkspacePanels', () => {
     workspace.openRecentPanels()
     await flushPromises()
     await wrapper.get('input').setValue('slow')
-    await wrapper.get('input').trigger('keydown', { key: 'Enter' })
-    await wrapper.get('input').trigger('keydown', { key: 'Enter' })
+    const search = wrapper.get('input')
+    await search.trigger('keydown', { key: 'Enter' })
+    expect(workspace.recentPanelsOpen).toBe(false)
+    expect(workspace.activePanelId).not.toBe(previous.id)
+    expect(workspace.panels).toHaveLength(2)
+    await search.trigger('keydown', { key: 'Enter' })
     expect(window.aiops.createTerminal).toHaveBeenCalledTimes(1)
-    expect(workspace.activePanelId).toBe(previous.id)
-    await wrapper.get('input').trigger('keydown', { key: 'Escape' })
+    workspace.activatePanelSurface(previous.id, { cause: 'pointer' })
+    const focusRequest = workspace.panelFocusRequest
     resolveConnection(await originalCreateTerminal({ kind: 'ssh', assetId: host.id }))
     await flushPromises()
     expect(workspace.recentPanelsOpen).toBe(false)
     expect(workspace.activePanelId).toBe(previous.id)
-    expect(workspace.panelFocusRequest).toBeNull()
+    expect(workspace.panelFocusRequest).toEqual(focusRequest)
     expect(workspace.panels).toHaveLength(2)
   })
 
-  it('removes a failed connection tab and leaves the host available to retry', async () => {
+  it.each(['ssh', 'local'] as const)('keeps the new %s tab after a connection failure', async (kind) => {
     const workspace = useWorkspaceStore()
-    const previous = terminalPanel('previous', 'Existing')
+    const previous: TerminalPanel = {
+      ...terminalPanel('previous', 'Existing'),
+      sshSession: { assetId: 'previous-host', assetName: 'Existing', host: '10.0.0.1', port: 22, username: 'ops' }
+    }
     workspace.panels = [previous]
     workspace.selectPanelForLifecycle(previous.id)
-    window.aiops.listAssets = vi.fn(async () => ({ assets: [hostAsset('failed')], folders: [] }))
+    window.aiops.listAssets = vi.fn(async () => ({ assets: [hostAsset('failed', { isLocalShell: kind === 'local' })], folders: [] }))
     window.aiops.createTerminal = vi.fn(async () => { throw new Error('Authentication failed') })
     const wrapper = mount(RecentWorkspacePanels)
     workspace.openRecentPanels()
     await flushPromises()
     await wrapper.get('[data-asset-id="failed"]').trigger('click')
     await flushPromises()
-    expect(wrapper.get('[role="alert"]').text()).toBe('Authentication failed')
-    expect(workspace.panels.map((panel) => panel.id)).toEqual(['previous'])
-    expect(workspace.activePanelId).toBe('previous')
-    expect(workspace.recentPanelsOpen).toBe(true)
-    expect(wrapper.get('[data-asset-id="failed"]').attributes('disabled')).toBeUndefined()
+    expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind }))
+    expect(workspace.panels).toHaveLength(2)
+    expect(workspace.panels[0].id).toBe('previous')
+    const opened = workspace.panels.find((panel) => panel.id === workspace.activePanelId)!
+    expect(opened.id).not.toBe('previous')
+    expect(opened.title).toBe('failed')
+    if (kind === 'ssh') expect(opened.sshSession?.assetId).toBe('failed')
+    expect(workspace.recentPanelsOpen).toBe(false)
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
   })
 
   it.each(['rejected', 'malformed', 'unavailable'])('keeps open panels usable when host loading is %s', async (failure) => {

@@ -30,7 +30,7 @@
           :placeholder="t('workspace.recentPanels.searchPlaceholder')"
         />
       </label>
-      <div class="recent-workspace-panels-list" role="listbox" :aria-busy="loading || connecting">
+      <div class="recent-workspace-panels-list" role="listbox" :aria-busy="loading">
         <div v-if="notice" class="recent-workspace-panels-empty" role="alert">{{ notice }}</div>
         <div v-if="loading" class="recent-workspace-panels-empty" role="status">
           {{ t('workspace.recentPanels.loading') }}
@@ -44,7 +44,6 @@
           :aria-selected="index === selectedIndex"
           :data-panel-id="entry.type === 'panel' ? entry.panel.id : undefined"
           :data-asset-id="entry.type === 'host' ? entry.asset.id : undefined"
-          :disabled="connecting"
           role="option"
           @mouseenter="selectedIndex = index"
           @click="activate(entry, 'pointer')"
@@ -88,7 +87,7 @@ import { terminalPanelSwitchTelemetry } from '@/services/terminal/terminalPanelS
 
 const workspace = useWorkspaceStore()
 const { t } = useI18n()
-const { assets, loading, connecting, notice, activateHost } = useRecentWorkspaceHosts(workspace, t)
+const { assets, loading, notice, activateHost } = useRecentWorkspaceHosts(workspace, t)
 const query = ref('')
 const selectedIndex = ref(-1)
 const searchInput = ref<HTMLInputElement | null>(null)
@@ -114,7 +113,7 @@ const focusSearch = () => {
 const close = () => workspace.closeRecentPanels()
 
 const activate = (entry: RecentWorkspaceEntry, cause: UiFocusCause) => {
-  if (connecting.value) return
+  if (!workspace.recentPanelsOpen) return
   if (entry.type === 'host') void activateHost(entry.asset, cause)
   else workspace.activateRecentPanel(entry.panel.id, cause)
 }

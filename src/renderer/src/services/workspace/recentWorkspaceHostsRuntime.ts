@@ -1,4 +1,4 @@
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { AiopsAssetRecord } from '@shared/contracts/assets'
 import { managedAssetDisplayName, managedAssetEndpoint } from '@shared/assetDisplayRuntime'
 import type { useWorkspaceStore, TerminalPanel } from '@/stores/workspace'
@@ -6,7 +6,7 @@ import type { I18nKey } from '@/i18n'
 import type { UiFocusCause } from '@/services/app/uiFocusCoordinator'
 import { assetsClient } from '@/services/assets/assetsClient'
 import { isAiopsAssetSnapshot } from '@/services/assets/assetBackendGuards'
-import { openLocalTerminalLaunch, openSshTerminalLaunch } from '@/services/terminal/terminalLaunchRuntime'
+import { createTerminalWorkspaceSessionRuntime } from '@/services/terminal/terminalWorkspaceSessionRuntime'
 import { matchesWorkspacePanelQuery } from './workspacePanelNavigationRuntime'
 
 export type RecentWorkspaceEntry =
@@ -60,7 +60,6 @@ export const useRecentWorkspaceHosts = (
 ) => {
   const assets = ref<AiopsAssetRecord[]>([])
   const loading = ref(false)
-  const connecting = ref(false)
   const notice = ref('')
   let generation = 0
 
@@ -87,41 +86,24 @@ export const useRecentWorkspaceHosts = (
     }
   }, { immediate: true })
 
-  const activateHost = async (asset: AiopsAssetRecord, cause: UiFocusCause) => {
-    if (connecting.value) return
+  const terminalSessions = createTerminalWorkspaceSessionRuntime({
+    workspace,
+    terminalViewSize: () => ({ cols: 100, rows: 30 }),
+    afterDomUpdate: () => nextTick()
+  })
+
+  const activateHost = (asset: AiopsAssetRecord, cause: UiFocusCause) => {
+    if (!workspace.recentPanelsOpen) return
     const existing = findOpenHostPanel(workspace.recentWorkspacePanels, asset)
     if (existing) return workspace.activateRecentPanel(existing.id, cause)
-    connecting.value = true
-    notice.value = ''
-    const currentGeneration = generation
-    const previousPanelId = workspace.activePanelId
-    const panelId = workspace.createPanel({ activation: 'preserve' }).id
-    const title = managedAssetDisplayName(asset)
-    workspace.renamePanel(panelId, title, 'auto')
-    workspace.replaceTerminalOutput(panelId, '')
-    const context = {
-      panelId,
-      terminalType: workspace.terminalSettings.terminalType,
-      discardPendingPanel: () => workspace.discardPendingTerminalPanel(panelId, previousPanelId),
-      setNotice: (message: string) => {
-        if (currentGeneration === generation) notice.value = message
-      },
-      applyLocalTerminalSession: workspace.applyLocalTerminalSession,
-      applySshTerminalSession: workspace.applySshTerminalSession,
-      registerSshSession: workspace.registerSshSession,
-      renamePanel: workspace.renamePanel
-    }
-    try {
-      const panel = asset.isLocalShell
-        ? await openLocalTerminalLaunch(context, { title })
-        : await openSshTerminalLaunch(context, asset, { title })
-      if (panel && workspace.recentPanelsOpen && currentGeneration === generation) {
-        workspace.activateRecentPanel(panelId, cause)
-      }
-    } finally {
-      connecting.value = false
-    }
+    const panel = workspace.createPanel({ activation: 'preserve' })
+    workspace.renamePanel(panel.id, managedAssetDisplayName(asset), 'auto')
+    workspace.replaceTerminalOutput(panel.id, '')
+    if (!asset.isLocalShell) workspace.registerSshSession(panel.id, asset)
+    workspace.activateRecentPanel(panel.id, cause)
+    if (asset.isLocalShell) void terminalSessions.startLocalTerminalForPanel(panel)
+    else void terminalSessions.startSshTerminalForPanel(panel)
   }
 
-  return { assets: computed(() => assets.value), loading, connecting, notice, activateHost }
+  return { assets: computed(() => assets.value), loading, notice, activateHost }
 }
