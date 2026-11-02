@@ -4,9 +4,12 @@ import { toTraditionalChineseMessages } from '../traditionalChinese'
 
 export const zhTW = completeLocaleMessages({
   'module.workspace': '工作區',
-  'workspace.recentPanels.title': '最近開啟的面板',
+  'workspace.recentPanels.title': '面板和主機',
   'workspace.recentPanels.searchPlaceholder': '搜尋面板、路徑、主機或工作階段',
-  'workspace.recentPanels.empty': '沒有符合的已開啟面板',
+  'workspace.recentPanels.empty': '沒有符合的面板或主機',
+  'workspace.recentPanels.unopenedHost': '未開啟的主機',
+  'workspace.recentPanels.loading': '正在載入主機',
+  'workspace.recentPanels.loadFailed': '主機清單載入失敗',
   'workspace.recentPanels.current': '目前',
   'workspace.recentPanels.terminal': '終端機',
   'workspace.recentPanels.ssh': 'SSH 終端機',

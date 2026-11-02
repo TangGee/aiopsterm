@@ -15,7 +15,7 @@ Click the **Settings gear** at the lower-left corner, then select **Shortcuts** 
 | `Ctrl+Shift+T` | New local terminal | Configurable; inherits the current cwd when opened from a local terminal |
 | `Ctrl+Shift+Y` | Fork the current SSH channel | Available only when the current terminal is a forkable SSH channel |
 | `Ctrl+Shift+W` | Close the current panel | Configurable |
-| `Ctrl+Tab` | Open Recent Panels | Searches terminals, knowledge documents, AI sessions, and project files |
+| `Ctrl+Tab` | Open Recent Panels | Searches open panels and hosts; selecting an unopened host creates a terminal tab |
 | `Ctrl+Shift+A` | Show or hide the AI sidebar | Configurable |
 | `Ctrl+Shift+P` | Open Quick Commands | Opens user-configured commands and macros |
 | `Ctrl+Shift+K` | Open inline AI Command | Generates a command for the current terminal |
@@ -43,6 +43,8 @@ The actions below can be remapped under **Settings -> Shortcuts**. The Settings 
 | Go forward through activation history | `Ctrl+Right` | `Cmd+]` |
 | Switch to the panel on the left by tab order | `Ctrl+Shift+Left` | `Ctrl+Shift+Left` |
 | Switch to the panel on the right by tab order | `Ctrl+Shift+Right` | `Ctrl+Shift+Right` |
+
+The recent-panel picker searches open terminals, knowledge documents, AI sessions, project files, and hosts from the asset catalog. Open panels retain their most-recently-used order at the top; unopened hosts follow with an Unopened host label. A host with an existing terminal is not listed again as an unopened host. Host search accepts names, addresses, usernames, ports, groups, tags, and comments, with space-separated terms. Select a result with the arrow keys and `Enter`, or click it: a panel result activates its existing tab, while an unopened host creates and connects a new terminal tab. Connection failures show an error and remove the failed new tab, preserving existing panels. The host catalog reloads each time the picker opens; the actual shortcut follows your current Settings binding.
 
 ## Terminal Shortcuts
 

@@ -30,36 +30,44 @@
           :placeholder="t('workspace.recentPanels.searchPlaceholder')"
         />
       </label>
-      <div class="recent-workspace-panels-list" role="listbox">
+      <div class="recent-workspace-panels-list" role="listbox" :aria-busy="loading || connecting">
+        <div v-if="notice" class="recent-workspace-panels-empty" role="alert">{{ notice }}</div>
+        <div v-if="loading" class="recent-workspace-panels-empty" role="status">
+          {{ t('workspace.recentPanels.loading') }}
+        </div>
         <button
-          v-for="(panel, index) in filteredPanels"
-          :key="panel.id"
+          v-for="(entry, index) in filteredEntries"
+          :key="entry.key"
           type="button"
           class="recent-workspace-panels-row"
           :class="{ 'is-selected': index === selectedIndex }"
           :aria-selected="index === selectedIndex"
-          :data-panel-id="panel.id"
+          :data-panel-id="entry.type === 'panel' ? entry.panel.id : undefined"
+          :data-asset-id="entry.type === 'host' ? entry.asset.id : undefined"
+          :disabled="connecting"
           role="option"
           @mouseenter="selectedIndex = index"
-          @click="activate(panel.id, 'pointer')"
+          @click="activate(entry, 'pointer')"
         >
           <span class="recent-workspace-panels-icon" aria-hidden="true">
-            <FileCode2 v-if="panel.kind === 'project-file' || panel.kind === 'local-file'" />
-            <BookOpenText v-else-if="panel.kind === 'knowledge'" />
-            <Bot v-else-if="panel.kind === 'managed-ai-session'" />
-            <Server v-else-if="panel.sshSession" />
+            <Server v-if="entry.type === 'host' && !entry.asset.isLocalShell" />
+            <Terminal v-else-if="entry.type === 'host'" />
+            <FileCode2 v-else-if="entry.panel.kind === 'project-file' || entry.panel.kind === 'local-file'" />
+            <BookOpenText v-else-if="entry.panel.kind === 'knowledge'" />
+            <Bot v-else-if="entry.panel.kind === 'managed-ai-session'" />
+            <Server v-else-if="entry.panel.sshSession" />
             <Terminal v-else />
           </span>
           <span class="recent-workspace-panels-content">
             <span class="recent-workspace-panels-title">
-              <strong>{{ panel.title }}</strong>
-              <span v-if="panel.id === workspace.activePanelId">{{ t('workspace.recentPanels.current') }}</span>
+              <strong>{{ entry.type === 'panel' ? entry.panel.title : managedAssetDisplayName(entry.asset) }}</strong>
+              <span v-if="entry.type === 'panel' && entry.panel.id === workspace.activePanelId">{{ t('workspace.recentPanels.current') }}</span>
             </span>
-            <small>{{ panelSecondaryText(panel) }}</small>
+            <small>{{ entry.type === 'panel' ? panelSecondaryText(entry.panel) : hostSecondaryText(entry.asset) }}</small>
           </span>
-          <span class="recent-workspace-panels-kind">{{ panelKindLabel(panel) }}</span>
+          <span class="recent-workspace-panels-kind">{{ entry.type === 'panel' ? panelKindLabel(entry.panel) : t('workspace.recentPanels.unopenedHost') }}</span>
         </button>
-        <div v-if="!filteredPanels.length" class="recent-workspace-panels-empty">
+        <div v-if="!filteredEntries.length && !loading" class="recent-workspace-panels-empty">
           {{ t('workspace.recentPanels.empty') }}
         </div>
       </div>
@@ -72,25 +80,28 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { BookOpenText, Bot, FileCode2, Search, Server, Terminal, X } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 import { useWorkspaceStore, type TerminalPanel } from '@/stores/workspace'
-import { matchesWorkspacePanelQuery } from '@/services/workspace/workspacePanelNavigationRuntime'
+import type { AiopsAssetRecord } from '@shared/contracts/assets'
+import { managedAssetDisplayName, managedAssetEndpoint } from '@shared/assetDisplayRuntime'
+import { filterRecentWorkspaceEntries, useRecentWorkspaceHosts, type RecentWorkspaceEntry } from '@/services/workspace/recentWorkspaceHostsRuntime'
 import { captureUiFocus, restoreUiFocus, type UiFocusCause } from '@/services/app/uiFocusCoordinator'
 import { terminalPanelSwitchTelemetry } from '@/services/terminal/terminalPanelSwitchTelemetry'
 
 const workspace = useWorkspaceStore()
 const { t } = useI18n()
+const { assets, loading, connecting, notice, activateHost } = useRecentWorkspaceHosts(workspace, t)
 const query = ref('')
 const selectedIndex = ref(-1)
 const searchInput = ref<HTMLInputElement | null>(null)
 const dialogElement = ref<HTMLElement | null>(null)
 let focusSnapshot: ReturnType<typeof captureUiFocus> | null = null
 
-const filteredPanels = computed(() =>
-  workspace.recentWorkspacePanels.filter((panel) => matchesWorkspacePanelQuery(panel, query.value))
+const filteredEntries = computed(() =>
+  filterRecentWorkspaceEntries(workspace.recentWorkspacePanels, assets.value, query.value)
 )
 
 const resetSelection = () => {
-  selectedIndex.value = filteredPanels.value.findIndex((panel) => panel.id !== workspace.activePanelId)
-  if (selectedIndex.value < 0 && filteredPanels.value.length) selectedIndex.value = 0
+  selectedIndex.value = filteredEntries.value.findIndex((entry) => entry.type === 'host' || entry.panel.id !== workspace.activePanelId)
+  if (selectedIndex.value < 0 && filteredEntries.value.length) selectedIndex.value = 0
 }
 
 const focusSearch = () => {
@@ -102,10 +113,18 @@ const focusSearch = () => {
 
 const close = () => workspace.closeRecentPanels()
 
-const activate = (panelId: string, cause: UiFocusCause) => workspace.activateRecentPanel(panelId, cause)
+const activate = (entry: RecentWorkspaceEntry, cause: UiFocusCause) => {
+  if (connecting.value) return
+  if (entry.type === 'host') void activateHost(entry.asset, cause)
+  else workspace.activateRecentPanel(entry.panel.id, cause)
+}
+
+const hostSecondaryText = (asset: AiopsAssetRecord) => asset.isLocalShell
+  ? managedAssetEndpoint(asset)
+  : `${asset.username || 'root'}@${managedAssetEndpoint(asset)}:${asset.port || 22}`
 
 const moveSelection = (offset: number) => {
-  const count = filteredPanels.value.length
+  const count = filteredEntries.value.length
   if (!count) return
   selectedIndex.value = (selectedIndex.value + offset + count) % count
   nextTick(() => {
@@ -133,19 +152,19 @@ const handleDialogKeydown = (event: KeyboardEvent) => {
   }
   if (event.key === 'Home') {
     event.preventDefault()
-    selectedIndex.value = filteredPanels.value.length ? 0 : -1
+    selectedIndex.value = filteredEntries.value.length ? 0 : -1
     return
   }
   if (event.key === 'End') {
     event.preventDefault()
-    selectedIndex.value = filteredPanels.value.length - 1
+    selectedIndex.value = filteredEntries.value.length - 1
     return
   }
   if (event.key === 'Enter') {
-    const panel = filteredPanels.value[selectedIndex.value]
-    if (!panel) return
+    const entry = filteredEntries.value[selectedIndex.value]
+    if (!entry) return
     event.preventDefault()
-    activate(panel.id, 'keyboard')
+    activate(entry, 'keyboard')
   }
 }
 
@@ -171,12 +190,16 @@ const panelSecondaryText = (panel: TerminalPanel) => {
   return panel.cwd
 }
 
-watch(query, resetSelection)
-
-watch(
-  () => workspace.recentWorkspacePanels.map((panel) => panel.id).join('|'),
-  resetSelection
-)
+watch([query, filteredEntries], ([nextQuery, entries], [previousQuery, previous]) => {
+  if (nextQuery !== previousQuery) {
+    resetSelection()
+    return
+  }
+  const selectedKey = previous[selectedIndex.value]?.key
+  const nextIndex = entries.findIndex((entry) => entry.key === selectedKey)
+  if (nextIndex >= 0) selectedIndex.value = nextIndex
+  else resetSelection()
+})
 
 watch(
   () => workspace.recentPanelsFocusRequest,
@@ -198,7 +221,7 @@ watch(
         window.requestAnimationFrame(() => {
           window.requestAnimationFrame(() => {
             terminalPanelSwitchTelemetry.pickerReady(pickerSequence, {
-              panelCount: filteredPanels.value.length,
+              panelCount: filteredEntries.value.length,
               searchFocused: document.activeElement === searchInput.value
             })
           })
