@@ -122,6 +122,54 @@ describe('threadedTerminalCoreWorker', () => {
     expect(next.cursorX).toBe(4)
   })
 
+  it.each(['workspace', 'codex'] as const)('keeps the ConPTY cursor row when a small %s viewport grows', async (surface) => {
+    const options = { ...createOptions(), surface }
+    send({ type: 'create', options })
+    await waitFor(() => messages.some((message) => message.type === 'created'))
+    send({ type: 'settings', terminalId: options.terminalId, theme: options.theme,
+      settings: { ...options.settings, windowsPty: { backend: 'conpty', buildNumber: 26100 } } })
+    send({ type: 'data', terminalId: options.terminalId,
+      data: Array.from({ length: 10 }, (_, index) => `line${index}`).join('\r\n') })
+    const before = await waitFor(() => {
+      const snapshot = latestScreen(messages)
+      return snapshot?.lines.some((line) => line.text.includes('line9')) ? snapshot : undefined
+    })
+    expect(before.cursorY).toBe(4)
+    expect(before.baseY).toBe(5)
+    send({ type: 'resize', terminalId: options.terminalId, cols: 40, rows: 10 })
+    const grown = await waitFor(() => {
+      const snapshot = latestScreen(messages)
+      return snapshot?.rows === 10 ? snapshot : undefined
+    })
+    expect(grown.cursorY).toBe(4)
+    expect(grown.baseY).toBe(5)
+    expect(grown.lines.find((line) => line.y === 4)?.text.trimEnd()).toBe('line9')
+    expect(grown.lines.filter((line) => line.y >= 5).every((line) => !line.text.trim())).toBe(true)
+    send({ type: 'data', terminalId: options.terminalId, data: '\x1b[10;35HEDGE\x1b[6n' })
+    const redrawn = await waitFor(() => {
+      const snapshot = latestScreen(messages)
+      return snapshot?.lines.some((line) => line.text.includes('EDGE')) ? snapshot : undefined
+    })
+    expect(redrawn.cursorY).toBe(9)
+    expect(redrawn.cursorX).toBe(38)
+    expect(messages).toContainEqual({ type: 'data', terminalId: options.terminalId, data: '\x1b[10;39R' })
+  })
+
+  it('retains Unix scrollback reflow when the viewport grows', async () => {
+    await createTerminal()
+    const terminalId = createOptions().terminalId
+    send({ type: 'data', terminalId, data: Array.from({ length: 10 }, (_, index) => `line${index}`).join('\r\n') })
+    await waitFor(() => latestScreen(messages)?.lines.some((line) => line.text.includes('line9')))
+    send({ type: 'resize', terminalId, cols: 40, rows: 10 })
+    const grown = await waitFor(() => {
+      const snapshot = latestScreen(messages)
+      return snapshot?.rows === 10 ? snapshot : undefined
+    })
+    expect(grown.cursorY).toBe(9)
+    expect(grown.baseY).toBe(0)
+    expect(grown.lines[0].text.trimEnd()).toBe('line0')
+  })
+
   it('publishes cursor visibility for redraws and cursor-only mode changes', async () => {
     await createTerminal()
     const terminalId = createOptions().terminalId

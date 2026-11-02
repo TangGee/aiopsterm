@@ -949,6 +949,7 @@ const createRecord = (options: ThreadedTerminalCreateOptions): CoreTerminalRecor
     rows: options.rows,
     // PTYs own line endings. Bare LF must retain the cursor column.
     convertEol: false,
+    windowsPty: options.settings.windowsPty,
     cursorBlink: options.settings.cursorBlink,
     cursorStyle: options.settings.cursorStyle,
     scrollback: options.settings.scrollBack
@@ -1000,6 +1001,7 @@ const applySettings = (record: CoreTerminalRecord, settings: ThreadedTerminalSet
   record.terminal.options.cursorBlink = settings.cursorBlink
   record.terminal.options.cursorStyle = settings.cursorStyle
   record.terminal.options.scrollback = settings.scrollBack
+  record.terminal.options.windowsPty = settings.windowsPty || {}
   record.pendingFullSnapshot = true
   record.pendingFullSnapshotReason = 'settings'
   scheduleSnapshot(record, true, 'settings')

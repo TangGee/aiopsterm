@@ -326,7 +326,8 @@ const normalizeSettings = (settings: ThreadedTerminalSettings): ThreadedTerminal
   lineHeight: settings.lineHeight || DEFAULT_TERMINAL_LINE_HEIGHT,
   cursorBlink: settings.cursorBlink,
   cursorStyle: settings.cursorStyle || 'block',
-  scrollBack: settings.scrollBack || 1000
+  scrollBack: settings.scrollBack || 1000,
+  windowsPty: settings.windowsPty ? { ...settings.windowsPty } : undefined
 })
 
 const clonePlain = <T>(value: T): T => {
@@ -364,6 +365,8 @@ const settingsSignatureFor = (settings: ThreadedTerminalSettings, theme: Threade
     settings.cursorBlink ? '1' : '0',
     settings.cursorStyle || 'block',
     settings.scrollBack || 1000,
+    settings.windowsPty?.backend || '',
+    settings.windowsPty?.buildNumber || '',
     theme.background,
     theme.contrastBackground || '',
     theme.foreground,
@@ -1660,11 +1663,12 @@ export class ThreadedTerminalHost {
     this.options.scrollBack = normalized.scrollBack
     this.options.scrollback = normalized.scrollBack
     this.options.termName = normalized.terminalType
+    this.options.windowsPty = normalized.windowsPty
+    if (this.coreCreated) postCore(this.coreHandle, { type: 'settings', terminalId: this.terminalId, settings: normalized, theme: this.theme })
     this.loadFont()
     this.fit({ allowUnstable: true, forceMetrics: true })
     if (this.visible && !this.surfaceAttached && this.host) this.ensureSurfaceAttached({ forceGeometry: true })
     if (!this.coreCreated) return
-    postCore(this.coreHandle, { type: 'settings', terminalId: this.terminalId, settings: normalized, theme: this.theme })
     if (this.surfaceAttached && this.geometry) {
       postRender({
         type: 'settings',

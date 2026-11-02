@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, writeFileSync, statSync, readlinkSync } from 'fs'
 import { tmpdir } from 'os'
 import { basename, delimiter, join } from 'path'
 import type { TerminalCreateOptions, TerminalDisconnectReason, TerminalLifecycleEvent } from '@shared/contracts/terminalSessions'
+import { windowsPtyForPlatform } from './windowsPtyRuntime'
 import { defaultShellForPlatform, localShellArgsForPlatform } from '../app/platformRuntime'
 import { createTerminalErrorLifecycleEvent, createTerminalLifecycleEvent } from './terminal'
 import type { TerminalBackgroundCommandOptions, TerminalBackgroundCommandResult } from './terminal'
@@ -49,6 +50,7 @@ type LocalTerminalRuntimeConfig = {
   getJsRuntimeExecutable?: () => string
   getControlHelperScriptPath?: () => string
   getPlatform?: () => NodeJS.Platform
+  getOsRelease?: () => string
   loadPty?: () => LocalPtyRuntime | null
   processRuntime?: LocalProcessRuntime
 }
@@ -94,6 +96,7 @@ export const configureLocalTerminalBackendRuntime = (config: LocalTerminalRuntim
   runtimeConfig.getJsRuntimeExecutable = config.getJsRuntimeExecutable
   runtimeConfig.getControlHelperScriptPath = config.getControlHelperScriptPath
   runtimeConfig.getPlatform = config.getPlatform
+  runtimeConfig.getOsRelease = config.getOsRelease
   runtimeConfig.loadPty = config.loadPty
   runtimeConfig.processRuntime = config.processRuntime
 }
@@ -407,7 +410,10 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
   const terminalType = getTerminalType(options)
   const env = { ...managedLocalTerminalEnvironment(id, options), TERM: terminalType }
   const terminalArgs = localShellArgs(terminalShell, env)
+  const ptyRuntime = getPtyRuntime()
+  const windowsPty = ptyRuntime ? windowsPtyForPlatform(getPlatform(), runtimeConfig.getOsRelease?.()) : undefined
   const lifecycleBase = {
+    ...(windowsPty ? { windowsPty } : {}),
     kind: 'local' as const,
     shell: terminalShell,
     cwd
@@ -446,7 +452,6 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
     sink.exit(lifecycle, code)
   }
 
-  const ptyRuntime = getPtyRuntime()
   if (ptyRuntime) {
     let screenRows = options.rows || 30
     let preserveRecoveredHistory = getPlatform() === 'win32' && options.restoreFromRecovery === true

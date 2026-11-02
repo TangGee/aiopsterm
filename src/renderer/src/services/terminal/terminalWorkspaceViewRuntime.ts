@@ -645,6 +645,7 @@ export const createTerminalWorkspaceViewRuntime = ({
       surface: 'workspace',
       settings: {
         ...workspace.terminalSettings,
+        windowsPty: panel.sshSession ? undefined : panel.terminalLifecycle?.windowsPty,
         fontSize: terminalFontSizeForPanel(panel.id)
       },
       theme,
@@ -997,6 +998,7 @@ export const createTerminalWorkspaceViewRuntime = ({
         const element = terminalElements.get(panelId)
         if (!view || !element?.isConnected) return
         if (!isTerminalPanelRenderable(panelId)) return
+        applyTerminalSettingsToView(panelId, view, workspace.terminalSettings, { refit: false })
         if (options.forceGeometry) resetTerminalHostGeometry(element)
         view.fit.fit()
         view.terminal.ensureSurfaceAttached?.({ forceGeometry: options.forceGeometry })
@@ -1051,6 +1053,9 @@ export const createTerminalWorkspaceViewRuntime = ({
     options: { preservePaneFontSize?: boolean; refit?: boolean } = {}
   ) => {
     const preservePaneFontSize = options.preservePaneFontSize ?? true
+    const panel = workspace.panels.find((item) => item.id === panelId)
+    const windowsPty = panel?.sshSession ? undefined : panel?.terminalLifecycle?.windowsPty
+    view.terminal.options.windowsPty = windowsPty || {}
     setXtermTermName(view.terminal, settings.terminalType)
     view.terminal.options.fontFamily = isThreadedTerminalHost(view.terminal)
       ? settings.fontFamily || TERMINAL_FONT_FAMILY
@@ -1067,6 +1072,7 @@ export const createTerminalWorkspaceViewRuntime = ({
       view.terminal.updateSettings(
         {
           ...settings,
+          windowsPty,
           fontSize: Number(view.terminal.options.fontSize || settings.fontSize || defaultTerminalFontSize())
         },
         theme
@@ -1087,6 +1093,11 @@ export const createTerminalWorkspaceViewRuntime = ({
   const applyTerminalSettingsToAll = () => {
     terminalViews.forEach((view, panelId) => applyTerminalSettingsToView(panelId, view))
     syncThreadedKeywordHighlight()
+  }
+
+  const applyTerminalSettingsToPanel = (panelId: string) => {
+    const view = terminalViews.get(panelId)
+    if (view) applyTerminalSettingsToView(panelId, view, workspace.terminalSettings, { refit: false })
   }
 
   const syncTerminalView = (panel: TerminalPanel, options: { suppressInputReplies?: boolean; refit?: boolean } = {}) => {
@@ -1473,6 +1484,7 @@ export const createTerminalWorkspaceViewRuntime = ({
   return {
     activeView,
     applyTerminalSettingsToAll,
+    applyTerminalSettingsToPanel,
     cancelPendingTerminalFocus,
     dispose,
     estimateTerminalCellSize,

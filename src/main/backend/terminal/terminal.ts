@@ -235,6 +235,7 @@ export const createTerminalLifecycleEvent = (
     id: sessionId,
     ...(cleanOptional(event.panelId) ? { panelId: cleanOptional(event.panelId) } : {}),
     kind: event.kind,
+    ...(event.kind === 'local' && event.windowsPty ? { windowsPty: { ...event.windowsPty } } : {}),
     stage: event.stage,
     at: Number.isFinite(event.at) ? Number(event.at) : at,
     ...(cleanPositiveInteger(event.processId) ? { processId: cleanPositiveInteger(event.processId) } : {}),

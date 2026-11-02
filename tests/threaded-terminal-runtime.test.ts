@@ -285,6 +285,28 @@ describe('threadedTerminalRuntime', () => {
     expect(threadedTerminalPriorityFor('panel-2', 'panel-1', false)).toBe('background')
   })
 
+  it('passes Windows PTY metadata to the worker before a fit can resize it', async () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    const element = createHostElement()
+    host.open(element)
+    const before = (await workerMessages()).core.length
+    setHostElementSize(element, 850, 450)
+    const windowsPty = { backend: 'conpty' as const, buildNumber: 26100 }
+    host.updateSettings({ ...host.options, scrollBack: 2000, windowsPty })
+    expect(host.options.windowsPty).toEqual(windowsPty)
+    const messages = await workerMessages()
+    expect(messages.core).toContainEqual(expect.objectContaining({
+      type: 'settings', terminalId: 'panel-1', settings: expect.objectContaining({ windowsPty })
+    }))
+    const updates = messages.core.slice(before)
+    const settingsIndex = updates.findIndex((message: { type: string }) => message.type === 'settings')
+    const resizeIndex = updates.findIndex((message: { type: string }) => message.type === 'resize')
+    expect(settingsIndex).toBeGreaterThanOrEqual(0)
+    expect(resizeIndex).toBeGreaterThan(settingsIndex)
+    host.dispose()
+  })
+
   it('opens a canvas host and sends create, resize, data, visibility, and dispose messages', async () => {
     installOffscreenCanvasSupport()
     const hostElement = createHostElement()

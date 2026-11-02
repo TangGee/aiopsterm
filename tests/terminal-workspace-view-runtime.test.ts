@@ -821,6 +821,37 @@ describe('terminalWorkspaceViewRuntime', () => {
     expect(terminal.output).toBe('fresh')
   })
 
+  it.each([false, true])('applies late Windows PTY metadata before fitting with threaded=%s', async (threaded) => {
+    threadedTerminalMocks.threadedEnabled = threaded
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    panel.sessionId = 'terminal-1'
+    const { runtime } = createRuntime(panel, undefined, { threaded })
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(3)
+    panel.terminalLifecycle = {
+      id: panel.sessionId, kind: 'local', stage: 'shell-ready', at: 1,
+      windowsPty: { backend: 'conpty', buildNumber: 26100 }
+    }
+    runtime.applyTerminalSettingsToPanel(panel.id)
+    expect(runtime.terminalViews.get(panel.id)!.terminal.options.windowsPty)
+      .toEqual({ backend: 'conpty', buildNumber: 26100 })
+    runtime.scheduleTerminalFit(panel.id, { frames: 1 })
+    await flushFrames(1)
+    const terminal = runtime.terminalViews.get(panel.id)!.terminal
+    expect(terminal.options.windowsPty).toEqual({ backend: 'conpty', buildNumber: 26100 })
+    if (threaded) expect(threadedTerminalMocks.FakeThreadedTerminal.instances.at(-1)?.updateSettings)
+      .toHaveBeenLastCalledWith(expect.objectContaining({ windowsPty: { backend: 'conpty', buildNumber: 26100 } }), expect.anything())
+
+    panel.sshSession = { host: 'server', username: 'ops', port: 22, assetName: 'Remote' }
+    runtime.scheduleTerminalFit(panel.id, { frames: 1 })
+    await flushFrames(1)
+    expect(terminal.options.windowsPty).toEqual({})
+    if (threaded) expect(threadedTerminalMocks.FakeThreadedTerminal.instances.at(-1)?.updateSettings)
+      .toHaveBeenLastCalledWith(expect.objectContaining({ windowsPty: undefined }), expect.anything())
+  })
+
   it('resizes the backend only from scheduled fit notifications', async () => {
     const panel = createEmptyTerminalPanel('panel-1', 'Local')
     panel.sessionId = 'terminal-1'

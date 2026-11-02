@@ -1,6 +1,11 @@
 import type { AiopsMutationResult } from './common'
 import type { ClineAgentHostTarget } from './clineAgent'
 
+export type WindowsPtyInfo = {
+  backend: 'conpty' | 'winpty'
+  buildNumber?: number
+}
+
 export type TerminalCreateOptions = {
   cwd?: string
   restoreFromRecovery?: boolean
@@ -82,6 +87,7 @@ export type TerminalLifecycleStage = 'starting' | 'connecting' | 'proxy-opening'
 export type TerminalDisconnectReason = 'manual' | 'network' | 'process' | 'error' | 'unknown'
 
 export type TerminalLifecycleEvent = {
+  windowsPty?: WindowsPtyInfo
   id: string
   panelId?: string
   kind: 'local' | 'ssh'

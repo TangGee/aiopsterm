@@ -522,6 +522,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   const {
     activeView,
     applyTerminalSettingsToAll,
+    applyTerminalSettingsToPanel,
     cancelPendingTerminalFocus,
     dispose: disposeTerminalViews,
     estimateTerminalCellSize,
@@ -954,6 +955,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     })
     offLifecycle = terminalClient.onTerminalLifecycle()?.((event) => {
       const panel = workspace.applyTerminalLifecycle(event)
+      if (panel) applyTerminalSettingsToPanel(panel.id)
       if (panel && event.stage === 'error') writeTerminalNotice(panel.id, terminalLifecycleErrorNotice(event))
     }) || null
     offExit = terminalClient.onTerminalExit()?.((event) => {

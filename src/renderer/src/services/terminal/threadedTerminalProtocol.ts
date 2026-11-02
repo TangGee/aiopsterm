@@ -1,3 +1,4 @@
+import type { WindowsPtyInfo } from '@shared/contracts/terminalSessions'
 import type { TerminalSettings } from '@/stores/workspace'
 import type { KeywordHighlightUserConfig } from '@shared/contracts/appRuntime'
 import type { TerminalProgress } from '@/services/terminal/terminalOscRuntime'
@@ -30,7 +31,7 @@ export type ThreadedTerminalAnsiPalette = {
 export type ThreadedTerminalSettings = Pick<
   TerminalSettings,
   'terminalType' | 'fontFamily' | 'fontSize' | 'lineHeight' | 'cursorBlink' | 'cursorStyle' | 'scrollBack'
->
+> & { windowsPty?: WindowsPtyInfo }
 
 export type ThreadedTerminalTheme = {
   background: string

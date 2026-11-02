@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { Terminal } from '@xterm/headless'
 
 type TerminalLifecycleEvent = {
+  windowsPty?: { backend: 'conpty' | 'winpty'; buildNumber?: number }
   id: string
   kind: 'local' | 'ssh'
   stage: 'starting' | 'connecting' | 'proxy-opening' | 'connected' | 'shell-ready' | 'error' | 'closed'
@@ -35,6 +36,7 @@ type LocalTerminalBackend = {
     getJsRuntimeExecutable?: () => string
     getControlHelperScriptPath?: () => string
     getPlatform?: () => NodeJS.Platform
+    getOsRelease?: () => string
     loadPty?: () => { spawn: (shell: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: NodeJS.ProcessEnv; useConpty?: boolean }) => MockPtyProcess } | null
     processRuntime?: {
       spawn: (shell: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv; shell: false }) => MockChildProcess
@@ -602,6 +604,7 @@ describe('local terminal backend runtime', () => {
     const result = backend.createLocalTerminalSession('local-win-1', { kind: 'local' }, createSink(events))
 
     expect(result.runtimeKind).toBe('process')
+    expect(events.lifecycle.every((event) => event.windowsPty === undefined)).toBe(true)
     expect(spawnCalls).toEqual([
       expect.objectContaining({
         shell: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
@@ -609,6 +612,18 @@ describe('local terminal backend runtime', () => {
         options: expect.objectContaining({ cwd: 'C:\\Users\\ops', shell: false })
       })
     ])
+  })
+
+  it('uses the native Windows build for compatibility and leaves other PTYs unchanged', async () => {
+    const modulePath = '../src/main/backend/terminal/windowsPtyRuntime'
+    const { windowsPtyForPlatform } = await import(modulePath)
+    expect(windowsPtyForPlatform('win32', '10.0.26100')).toEqual({ backend: 'conpty', buildNumber: 26100 })
+    expect(windowsPtyForPlatform('win32', '10.0.19045')).toEqual({ backend: 'conpty', buildNumber: 19045 })
+    expect(windowsPtyForPlatform('win32', '10.0.17763')).toEqual({ backend: 'winpty', buildNumber: 17763 })
+    expect(windowsPtyForPlatform('win32', '10.0.18309')).toEqual({ backend: 'conpty', buildNumber: 18309 })
+    expect(windowsPtyForPlatform('win32', 'unknown')).toEqual({ backend: 'conpty' })
+    expect(windowsPtyForPlatform('linux', '6.8.0')).toBeUndefined()
+    expect(windowsPtyForPlatform('darwin', '24.0.0')).toBeUndefined()
   })
 
   it('uses ConPTY for Windows local terminals', async () => {
@@ -620,6 +635,7 @@ describe('local terminal backend runtime', () => {
       getDefaultCwd: () => 'C:\\Users\\ops',
       getEnv: () => ({ PATH: 'C:\\Windows\\System32' }),
       getPlatform: () => 'win32',
+      getOsRelease: () => '10.0.26100',
       loadPty: () => ({
         spawn: (shell, args, options) => {
           spawnCalls.push({ shell, args, options })
@@ -628,7 +644,8 @@ describe('local terminal backend runtime', () => {
       })
     })
 
-    backend.createLocalTerminalSession('local-conpty-1', { kind: 'local' }, createSink(createRecorder()))
+    const result = backend.createLocalTerminalSession('local-conpty-1', { kind: 'local' }, createSink(createRecorder()))
+    expect(result.lifecycle.windowsPty).toEqual({ backend: 'conpty', buildNumber: 26100 })
 
     expect(spawnCalls).toEqual([
       expect.objectContaining({
