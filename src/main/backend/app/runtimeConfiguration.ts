@@ -191,7 +191,8 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
     getAgentSocketPath: getAiAgentSessionSocketPath,
     getAgentHookScriptPath: agentHookScriptPath,
     getControlSocketPath,
-    getJsRuntimeExecutable: jsRuntimeExecutablePath,
+    // Session-scoped helpers must bypass AppRun's GUI-only sandbox arguments.
+    getJsRuntimeExecutable: () => process.execPath,
     getControlHelperScriptPath: controlHelperScriptPath
   })
   configureControlSocketRuntime({
