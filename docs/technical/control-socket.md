@@ -2,6 +2,10 @@
 
 aiopsterm exposes a local newline-delimited JSON control socket for automation that needs to operate on terminal panels opened by aiopsterm. This is the compatibility automation layer: scripts talk to a socket, the main process handles routing, and renderer windows provide UI-only state such as terminal panels and xterm screen text.
 
+网关创建本机终端使用 `surface.create` 的 `autoConnect: true`，创建 tab 后启动对应本机 PTY；默认不传该参数时保留只建面板的行为。
+
+网关按授权资产新建 SSH 终端时使用 `asset.ssh.connect`，传入 `assetId`、`exactAssetId: true`、`reuse: false`。`exactAssetId` 强制只匹配资产 ID，不回退到名称、前缀或主机地址匹配；资产已删除时返回 `ASSET_TARGET_NOT_FOUND`。
+
 ## Scope
 
 The first control-socket slice supports these terminal primitives:

@@ -1,5 +1,6 @@
 import { completeLocaleMessages } from './complete'
 export const deDE = completeLocaleMessages({
+  'imGateway.allTerminals': "all-Modus: Alle lokalen Terminals und gespeicherten SSH-Hosts erlauben, auch künftig hinzugefügte",
   'imGateway.title': "IM-Gateway",
   'imGateway.description': "Steuern Sie autorisierte aiopsterm-Terminals über Feishu. Standardmäßig deaktiviert; die Desktop-App muss geöffnet bleiben.",
   'imGateway.connection': "Verbindung",
@@ -19,10 +20,10 @@ export const deDE = completeLocaleMessages({
   'imGateway.assetId': "Asset-ID",
   'imGateway.help': "Feishu einrichten und verwenden",
   'imGateway.setup1': "Erstellen Sie eine interne Unternehmens-App auf der Feishu Open Platform, aktivieren Sie den Bot und kopieren Sie App ID und App Secret.",
-  'imGateway.setup2': "Erlauben Sie den Empfang von Direktnachrichten und bei Bedarf Gruppen-Erwähnungen sowie das Senden als Bot. Abonnieren Sie im.message.receive_v1.",
+  'imGateway.setup2': "Aktivieren Sie Direktnachrichten, bei Bedarf Gruppen-Erwähnungen und das Senden von Nachrichten. Abonnieren Sie im.message.receive_v1 und card.action.trigger über eine dauerhafte Verbindung.",
   'imGateway.setup3': "Tragen Sie autorisierte open_ids und Asset-IDs ein, aktivieren und speichern Sie. Wählen Sie nach dem Verbindungsaufbau die dauerhafte Verbindung in den Feishu-Ereigniseinstellungen und veröffentlichen Sie die App.",
-  'imGateway.setup4': "Öffnen Sie zuerst das Host-Terminal in aiopsterm. Senden Sie /sessions in Feishu und anschließend /bind mit der angezeigten sessionId.",
-  'imGateway.behavior': "Nur explizite Slash-Befehle werden verarbeitet. /run gibt eine Zeile ein und drückt Enter; /read liefert die letzten 40 Bildschirmzeilen, ohne den Abschluss zu bestätigen. Nach einer Neuverbindung oder einem App-Neustart kann eine erneute Bindung nötig sein.",
+  'imGateway.setup4': "Senden Sie /sessions in Feishu und wählen Sie ein Terminal auf der Karte. Neues Terminal öffnet ein lokales Terminal oder einen autorisierten SSH-Host und bindet es automatisch.",
+  'imGateway.behavior': "Nach dem Binden werden normale Nachrichten mit Enter eingegeben und Ausgaben gebündelt weitergeleitet. /send tippt nur, /interrupt unterbricht und /unbind löst die Bindung. Terminal-Slash-Befehle mit /run senden. TUI-Updates zeigen den aktuellen Bildschirm; übermäßige Ausgabe wird mit Hinweis gekürzt.",
   'imGateway.keychainError': "Die Systemverschlüsselung für Zugangsdaten ist nicht verfügbar. Aktivieren Sie den Schlüsselbund; das App Secret wird nicht im Klartext gespeichert.",
   'imGateway.authorizationError': "Geben Sie eine App ID, mindestens einen autorisierten Benutzer und autorisierte Hosts an oder erlauben Sie lokale Terminals.",
   'imGateway.secretError': "Geben Sie vor dem Aktivieren das App Secret ein.",

@@ -27,6 +27,7 @@ export const createTerminalControlSurfaceRuntime = ({
   isWelcomePlaceholderPanel,
   terminalViewSize,
   startSshTerminalForPanel,
+  startLocalTerminalForPanel,
   disconnectTerminalPanel,
   scheduleVisibleTerminalFit,
   focusTerminalPanel
@@ -89,6 +90,7 @@ export const createTerminalControlSurfaceRuntime = ({
 
   const paneControlHandlers = createTerminalControlSurfacePaneHandlers({
     workspace,
+    startLocalTerminalForPanel,
     terminalViews,
     controlSurfaceTelemetry: state.controlSurfaceTelemetry,
     controlWorkspaceEnvironment: state.controlWorkspaceEnvironment,

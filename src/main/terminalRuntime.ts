@@ -1,3 +1,4 @@
+import { publishTerminalOutput } from './backend/terminal/terminalOutputEvents'
 import { BrowserWindow, ipcMain, type IpcMainEvent } from 'electron'
 import {
   appendCodexTerminalBridgeData,
@@ -280,6 +281,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
     if (!session) return
     appendCodexTerminalBridgeDisplayData(flush.id, flush.chunk)
     const payload = terminalDataPayload(flush.id, flush.chunk)
+    publishTerminalOutput(flush.id, payload.data)
     // 投递失败(窗口已销毁)时不计入未确认字节,避免给不到 ack 的数据触发暂停。
     const delivered = sendWindowEvent(session.window, 'terminal:data', payload)
     if (delivered) trackTerminalFlowSend(flush.id, Buffer.byteLength(payload.data, 'utf8'))
@@ -312,6 +314,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
       if (session?.window !== owner) {
         appendCodexTerminalBridgeDisplayData(id, displayChunk)
         const payload = terminalDataPayload(id, displayChunk)
+        publishTerminalOutput(id, payload.data)
         const delivered = sendWindowEvent(owner, 'terminal:data', payload)
         if (delivered) trackTerminalFlowSend(id, Buffer.byteLength(payload.data, 'utf8'))
         return

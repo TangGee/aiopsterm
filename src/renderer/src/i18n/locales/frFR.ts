@@ -1,5 +1,6 @@
 import { completeLocaleMessages } from './complete'
 export const frFR = completeLocaleMessages({
+  'imGateway.allTerminals': "Mode all : autoriser tous les terminaux locaux et hôtes SSH enregistrés, y compris les futurs ajouts",
   'imGateway.title': "Passerelle IM",
   'imGateway.description': "Contrôlez les terminaux aiopsterm autorisés depuis Feishu. Désactivée par défaut ; l’application de bureau doit rester ouverte.",
   'imGateway.connection': "Connexion",
@@ -19,10 +20,10 @@ export const frFR = completeLocaleMessages({
   'imGateway.assetId': "ID de ressource",
   'imGateway.help': "Configuration et utilisation de Feishu",
   'imGateway.setup1': "Créez une application interne sur Feishu Open Platform, activez sa fonction bot et copiez son App ID et son App Secret.",
-  'imGateway.setup2': "Autorisez la réception des messages privés, des mentions de groupe si nécessaire et l’envoi en tant que bot. Abonnez-vous à im.message.receive_v1.",
+  'imGateway.setup2': "Activez les messages directs, les mentions de groupe si nécessaire et l’envoi de messages. Abonnez-vous à im.message.receive_v1 et au rappel card.action.trigger via une connexion persistante.",
   'imGateway.setup3': "Saisissez les open_id et les ID des ressources autorisés, activez puis enregistrez. Une fois connecté, choisissez la connexion persistante dans les événements Feishu et publiez l’application.",
-  'imGateway.setup4': "Ouvrez d’abord le terminal de l’hôte dans aiopsterm. Envoyez /sessions dans Feishu, puis /bind avec le sessionId retourné.",
-  'imGateway.behavior': "Seules les commandes explicites avec barre oblique sont traitées. /run saisit une ligne et appuie sur Entrée ; /read renvoie les 40 dernières lignes sans confirmer la fin de la commande. Une reconnexion ou un redémarrage peut nécessiter une nouvelle liaison.",
+  'imGateway.setup4': "Envoyez /sessions dans Feishu et choisissez un terminal sur la carte. Nouveau terminal ouvre un terminal local ou un hôte SSH autorisé et le lie automatiquement.",
+  'imGateway.behavior': "Après liaison, les messages ordinaires sont saisis avec Entrée et les sorties sont regroupées et transférées. /send saisit seulement, /interrupt interrompt et /unbind détache. Utilisez /run pour les commandes à barre oblique du terminal. Les TUI transmettent l’écran récent ; les sorties excessives sont tronquées avec un avis.",
   'imGateway.keychainError': "Le chiffrement système des identifiants est indisponible. Activez le trousseau système ; le secret ne sera pas enregistré en clair.",
   'imGateway.authorizationError': "Saisissez un App ID, au moins un utilisateur autorisé et des hôtes autorisés, ou autorisez les terminaux locaux.",
   'imGateway.secretError': "Saisissez le secret avant l’activation.",

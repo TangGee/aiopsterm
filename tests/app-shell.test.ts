@@ -9565,6 +9565,24 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('starts a real local session when surface.create requests autoConnect for the IM gateway', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    let controlHandler: ((request: any) => Promise<any> | any) | null = null
+    vi.mocked(window.aiops.onControlRequest).mockImplementationOnce((handler: any) => { controlHandler = handler; return () => { controlHandler = null } })
+    const wrapper = mount(TerminalWorkspace, { attachTo: document.body, global: { plugins: [pinia] } })
+    try {
+      await flushPromises()
+      const invoke = controlHandler as unknown as (request: any) => Promise<any>
+      const store = useWorkspaceStore()
+      vi.mocked(window.aiops.createTerminal).mockClear()
+      const response = await invoke({ id: 'gateway-create', method: 'surface.create', params: { type: 'local', focus: true, autoConnect: true } })
+      expect(response).toMatchObject({ ok: true, data: { connected: true, surfaceId: expect.any(String) } })
+      expect(store.panels.find(panel => panel.id === response.data.surfaceId)?.sessionId).toBeTruthy()
+      expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local', panelId: response.data.surfaceId }))
+    } finally { wrapper.unmount() }
+  })
+
   it('tracks surface telemetry and surface create/focus primitives through the control socket', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

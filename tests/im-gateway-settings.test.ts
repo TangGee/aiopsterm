@@ -26,6 +26,16 @@ describe('IM gateway settings', () => {
     expect((wrapper.get('[data-testid="gateway-secret"]').element as HTMLInputElement).value).toBe('')
     expect(wrapper.text()).toContain('imGateway.saved')
   })
+  it('saves all terminal authorization while retaining the explicit user allowlist', async () => {
+    wrapper = mount(ImGatewaySettings); await flushPromises()
+    await wrapper.get('[data-testid="gateway-users"]').setValue('ou_self')
+    await wrapper.get('[data-testid="gateway-all"]').setValue(true)
+    expect((wrapper.get('[data-testid="gateway-assets"]').element as HTMLTextAreaElement).disabled).toBe(true)
+    await wrapper.findAll('button').find(button => button.text() === 'imGateway.save')!.trigger('click'); await flushPromises()
+    expect(api.save).toHaveBeenCalledWith({ config: expect.objectContaining({ allowedAssetIds: ['all'], allowedUserIds: ['ou_self'] }) })
+    await wrapper.get('[data-testid="gateway-all"]').setValue(false)
+    expect((wrapper.get('[data-testid="gateway-assets"]').element as HTMLTextAreaElement).value).toBe('')
+  })
   it('polls status without overwriting edits and stops polling after unmount', async () => {
     wrapper = mount(ImGatewaySettings); await flushPromises()
     await wrapper.get('[data-testid="gateway-users"]').setValue('ou_draft')

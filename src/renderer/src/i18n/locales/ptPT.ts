@@ -1,5 +1,6 @@
 import { completeLocaleMessages } from './complete'
 export const ptPT = completeLocaleMessages({
+  'imGateway.allTerminals': "Modo all: permitir todos os terminais locais e anfitriões SSH guardados, incluindo os adicionados no futuro",
   'imGateway.title': "Gateway IM",
   'imGateway.description': "Controle terminais aiopsterm autorizados através do Feishu. Desativado por predefinição; a aplicação de ambiente de trabalho tem de continuar aberta.",
   'imGateway.connection': "Ligação",
@@ -19,10 +20,10 @@ export const ptPT = completeLocaleMessages({
   'imGateway.assetId': "ID do recurso",
   'imGateway.help': "Configuração e utilização do Feishu",
   'imGateway.setup1': "Crie uma aplicação empresarial interna na Feishu Open Platform, ative o bot e copie o App ID e o App Secret.",
-  'imGateway.setup2': "Permita a receção de mensagens diretas, de menções em grupos se necessário e o envio como bot. Subscreva im.message.receive_v1.",
+  'imGateway.setup2': "Ative mensagens diretas, menções em grupo se necessário e envio de mensagens. Subscreva im.message.receive_v1 e o callback card.action.trigger através de uma ligação persistente.",
   'imGateway.setup3': "Introduza os open_id e IDs de recursos autorizados, ative e guarde. Após ligar, escolha a ligação persistente nos eventos do Feishu e publique a aplicação.",
-  'imGateway.setup4': "Abra primeiro o terminal do anfitrião no aiopsterm. Envie /sessions no Feishu e depois /bind com o sessionId apresentado.",
-  'imGateway.behavior': "Apenas são processados comandos explícitos com barra. /run escreve uma linha e prime Enter; /read devolve as últimas 40 linhas sem confirmar a conclusão do comando. Após voltar a ligar ou reiniciar, poderá ser necessário associar novamente.",
+  'imGateway.setup4': "Envie /sessions no Feishu e escolha um terminal no cartão. Novo terminal abre um terminal local ou um anfitrião SSH autorizado e associa-o automaticamente.",
+  'imGateway.behavior': "Após a associação, as mensagens normais são introduzidas com Enter e a saída é enviada em blocos. /send apenas escreve, /interrupt interrompe e /unbind desassocia. Use /run para comandos do terminal com barra. As TUI enviam o ecrã recente; saída excessiva é truncada com aviso.",
   'imGateway.keychainError': "A encriptação de credenciais do sistema não está disponível. Ative o porta-chaves; o App Secret não será guardado em texto simples.",
   'imGateway.authorizationError': "Introduza um App ID, pelo menos um utilizador autorizado e anfitriões autorizados, ou permita terminais locais.",
   'imGateway.secretError': "Introduza o App Secret antes de ativar.",

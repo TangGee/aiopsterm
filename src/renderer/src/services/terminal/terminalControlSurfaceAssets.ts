@@ -305,7 +305,10 @@ export const createTerminalControlSurfaceAssetHandlers = ({
     const target = controlText(params.target || params.query || params.asset || params.assetId || params.asset_id || params.name || params.host)
     if (!target) return controlFail('ASSET_TARGET_REQUIRED', 'aiossh requires a managed host name.')
     const assets = snapshot.assets.filter(isConnectableAsset)
-    const resolved = resolveAssetTarget(assets, target)
+    const exact = params.exactAssetId === true ? assets.find(asset => asset.id === target) : undefined
+    const resolved: AssetResolveResult = params.exactAssetId === true
+      ? exact ? { status: 'matched', asset: exact } : { status: 'missing' }
+      : resolveAssetTarget(assets, target)
     if (resolved.status === 'missing') return controlFail('ASSET_TARGET_NOT_FOUND', 'Managed host was not found.', { target })
     if (resolved.status === 'ambiguous') {
       return controlFail('ASSET_TARGET_AMBIGUOUS', 'Managed host name is ambiguous.', {

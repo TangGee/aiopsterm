@@ -1,5 +1,6 @@
 import { completeLocaleMessages } from './complete'
 export const jaJP = completeLocaleMessages({
+  'imGateway.allTerminals': "all モード: すべてのローカル端末と保存済み SSH ホストを許可（今後追加するホストを含む）",
   'imGateway.title': "IM ゲートウェイ",
   'imGateway.description': "飛書から許可された aiopsterm 端末を操作します。既定では無効です。デスクトップアプリを起動したままにしてください。",
   'imGateway.connection': "接続",
@@ -19,10 +20,10 @@ export const jaJP = completeLocaleMessages({
   'imGateway.assetId': "資産 ID",
   'imGateway.help': "飛書の設定と使用方法",
   'imGateway.setup1': "飛書オープンプラットフォームで企業内アプリを作成し、ボット機能を有効にして App ID と App Secret を取得します。",
-  'imGateway.setup2': "個別メッセージ受信、必要ならグループ内メンション受信、ボットとしての送信を許可し、im.message.receive_v1 を購読します。",
+  'imGateway.setup2': "ダイレクトメッセージ、必要に応じてグループのメンション、送信権限を有効にし、長接続で im.message.receive_v1 と card.action.trigger を購読してください。",
   'imGateway.setup3': "許可する open_id と資産 ID を入力して有効化・保存します。接続後、飛書のイベント設定で長時間接続を選択し、アプリを公開します。",
-  'imGateway.setup4': "先に aiopsterm で対象ホストの端末を開きます。飛書で /sessions を送り、表示された sessionId を /bind に指定します。",
-  'imGateway.behavior': "明示的なスラッシュコマンドのみ処理します。/run は 1 行を入力して Enter を送信し、/read は画面の末尾 40 行を返します。実行完了の保証はありません。端末再接続やアプリ再起動後は再バインドが必要になる場合があります。",
+  'imGateway.setup4': "Feishu で /sessions を送信し、カードから端末を選択します。新規端末からローカル端末または許可済み SSH ホストを開くと自動的に接続先になります。",
+  'imGateway.behavior': "紐付け後は通常のメッセージを端末に入力して Enter を送り、出力をまとめて転送します。/send は入力のみ、/interrupt は中断、/unbind は解除です。端末のスラッシュコマンドには /run を使います。TUI は最新画面を転送し、大量出力は通知付きで省略します。",
   'imGateway.keychainError': "システムの資格情報暗号化が利用できません。キーチェーンを有効にしてください。App Secret は平文で保存しません。",
   'imGateway.authorizationError': "App ID、許可するユーザー 1 人以上、許可するホストまたはローカル端末の許可を設定してください。",
   'imGateway.secretError': "有効にする前に App Secret を入力してください。",

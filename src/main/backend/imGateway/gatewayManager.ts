@@ -67,7 +67,7 @@ export class GatewayManager {
     } })
     if (revision !== this.revision || this.closed) { adapter.stop(); return }
     this.adapter = adapter
-    this.core = new GatewayCore({ policy: () => this.config, state: this.options.state, terminal: this.options.terminal, reply: (message, text) => adapter.reply(message, text), audit: this.options.audit })
+    this.core = new GatewayCore({ policy: () => this.config, state: this.options.state, terminal: this.options.terminal, reply: (message, text) => adapter.reply(message, text), send: adapter.send?.bind(adapter), audit: this.options.audit })
     const core = this.core
     await adapter.start(message => message.provider === this.config.provider && message.accountId === this.config.accountId ? core.receive(message) : Promise.resolve())
   }

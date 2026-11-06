@@ -15,7 +15,7 @@ const harness = async () => {
   const { configureLocalTerminalBackendRuntime } = await import(localModule)
   let exit: (event: { exitCode: number }) => void = () => undefined
   const process = {
-    pid: 12345, write: vi.fn(), resize: vi.fn(), kill: vi.fn(), onData: vi.fn(),
+    pid: 12345, write: vi.fn(), resize: vi.fn(), kill: vi.fn(), onData: vi.fn((_listener: (data: string) => void) => {}),
     onExit: (listener: typeof exit) => { exit = listener }
   }
   configureLocalTerminalBackendRuntime({
@@ -35,6 +35,25 @@ const harness = async () => {
 }
 
 describe('terminal process cleanup during application shutdown', () => {
+  it('publishes coalesced PTY output to subscribers without interfering with renderer delivery', async () => {
+    const outputModule = '../src/main/backend/terminal/terminalOutputEvents'
+    const { subscribeTerminalOutput } = await import(outputModule)
+    const { runtime, open, process, send } = await harness()
+    const receive = vi.fn()
+    const unsubscribe = subscribeTerminalOutput('gateway-output', receive)
+    const unsubscribeThrowing = subscribeTerminalOutput('gateway-output', () => { throw new Error('consumer failed') })
+    try {
+      open('gateway-output')
+      process.onData.mock.calls[0][0]('terminal output')
+      await vi.waitFor(() => expect(receive).toHaveBeenCalledWith('terminal output'))
+      expect(send).toHaveBeenCalledWith('terminal:data', expect.objectContaining({ id: 'gateway-output', data: 'terminal output' }))
+      unsubscribe()
+      process.onData.mock.calls[0][0]('later output')
+      await vi.waitFor(() => expect(send).toHaveBeenCalledWith('terminal:data', expect.objectContaining({ data: 'later output' })))
+      expect(receive).toHaveBeenCalledOnce()
+    } finally { unsubscribe(); unsubscribeThrowing(); runtime.killAllSessions() }
+  })
+
   it('kills owned processes without telling the renderer that the user closed recoverable tabs', async () => {
     const { runtime, open, send, process } = await harness()
     open('recover-after-restart')

@@ -1,5 +1,6 @@
 import { completeLocaleMessages } from './complete'
 export const arAR = completeLocaleMessages({
+  'imGateway.allTerminals': "وضع all: السماح بكل الطرفيات المحلية ومضيفي SSH المحفوظين، بما في ذلك المضافون لاحقًا",
   'imGateway.title': "بوابة IM",
   'imGateway.description': "تحكم في طرفيات aiopsterm المصرح بها عبر Feishu. البوابة معطلة افتراضياً ويجب إبقاء تطبيق سطح المكتب قيد التشغيل.",
   'imGateway.connection': "الاتصال",
@@ -19,10 +20,10 @@ export const arAR = completeLocaleMessages({
   'imGateway.assetId': "معرّف الأصل",
   'imGateway.help': "إعداد Feishu واستخدامه",
   'imGateway.setup1': "أنشئ تطبيقاً داخلياً للمؤسسة على Feishu Open Platform، وفعّل البوت، وانسخ App ID وApp Secret.",
-  'imGateway.setup2': "امنح أذونات استقبال الرسائل الخاصة وإشارات البوت في المجموعات عند الحاجة والإرسال باسم البوت. اشترك في im.message.receive_v1.",
+  'imGateway.setup2': "فعّل الرسائل الخاصة وإشارات المجموعات عند الحاجة وإرسال الرسائل. اشترك في im.message.receive_v1 والاستدعاء card.action.trigger عبر اتصال دائم.",
   'imGateway.setup3': "أدخل معرّفات open_id والأصول المصرح بها، ثم فعّل واحفظ. بعد الاتصال اختر الاتصال المستمر في إعدادات أحداث Feishu وانشر التطبيق.",
-  'imGateway.setup4': "افتح طرفية المضيف المطلوب في aiopsterm أولاً. أرسل /sessions في Feishu ثم /bind مع sessionId المعروض.",
-  'imGateway.behavior': "تُعالج الأوامر الصريحة التي تبدأ بشرطة مائلة فقط. يكتب /run سطراً ويضغط Enter؛ ويعيد /read آخر 40 سطراً من الشاشة دون تأكيد اكتمال الأمر. قد تحتاج إلى إعادة الربط بعد إعادة الاتصال أو تشغيل التطبيق.",
+  'imGateway.setup4': "أرسل /sessions في Feishu واختر طرفية من البطاقة. خيار طرفية جديدة يفتح طرفية محلية أو مضيف SSH مصرحًا به ويربطه تلقائيًا.",
+  'imGateway.behavior': "بعد الربط، تُكتب الرسائل العادية مع Enter ويُرسل الخرج على دفعات. /send للكتابة فقط و/interrupt للمقاطعة و/unbind لفك الربط. استخدم /run لأوامر الطرفية التي تبدأ بشرطة مائلة. تُرسل الشاشة الأخيرة لواجهات TUI ويُختصر الخرج الزائد مع تنبيه.",
   'imGateway.keychainError': "تشفير بيانات الاعتماد في النظام غير متاح. فعّل سلسلة مفاتيح النظام؛ لن يُحفظ App Secret كنص صريح.",
   'imGateway.authorizationError': "أدخل App ID ومستخدماً مصرحاً له واحداً على الأقل ومضيفين مصرحاً بهم، أو اسمح بالطرفيات المحلية.",
   'imGateway.secretError': "أدخل App Secret قبل التفعيل.",

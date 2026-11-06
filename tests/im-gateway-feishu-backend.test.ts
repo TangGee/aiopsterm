@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 const sdk = vi.hoisted(() => ({
   options: null as any, dispatcher: null as any, httpOptions: null as any,
-  request: vi.fn(), reply: vi.fn(), close: vi.fn(), start: vi.fn()
+  request: vi.fn(), create: vi.fn(), reply: vi.fn(), close: vi.fn(), start: vi.fn()
 }))
 vi.mock('@larksuiteoapi/node-sdk', () => ({
   Domain: { Feishu: 0 }, AppType: { SelfBuild: 0 },
   defaultHttpInstance: { create: (options: any) => { sdk.httpOptions = options; return { interceptors: { response: { use: vi.fn() } } } } },
-  Client: class { request = sdk.request; im = { message: { reply: sdk.reply } } },
+  Client: class { request = sdk.request; im = { message: { reply: sdk.reply, create: sdk.create } } },
   WSClient: class {
     constructor(options: any) { sdk.options = options }
     start = async (options: any) => { sdk.dispatcher = options.eventDispatcher; sdk.start() }
@@ -20,7 +20,7 @@ vi.mock('@larksuiteoapi/node-sdk', () => ({
 import { createFeishuAdapter, normalizeFeishuMessage } from '../src/main/backend/imGateway/feishuAdapter'
 const appId = 'cli_1234567890abcdef'
 const event = (patch: any = {}) => ({ app_id: appId, tenant_key: 'tenant', sender: { sender_type: 'user', sender_id: { open_id: 'ou_user' } }, message: { chat_id: 'oc_chat', message_id: 'om_message', message_type: 'text', chat_type: 'p2p', create_time: '1800000000000', content: '{"text":"/sessions"}' }, ...patch })
-beforeEach(() => { vi.clearAllMocks(); sdk.request.mockResolvedValue({ code: 0, bot: { open_id: 'ou_bot' } }); sdk.reply.mockResolvedValue({ code: 0 }) })
+beforeEach(() => { vi.clearAllMocks(); sdk.request.mockResolvedValue({ code: 0, bot: { open_id: 'ou_bot' } }); sdk.reply.mockResolvedValue({ code: 0 }); sdk.create.mockResolvedValue({ code: 0 }) })
 describe('Feishu adapter', () => {
   it('normalizes text identity and ignores bot, other-app and malformed messages', () => {
     expect(normalizeFeishuMessage(event(), appId)).toMatchObject({ provider: 'feishu', accountId: appId, tenantId: 'tenant', senderId: 'ou_user', conversationId: 'oc_chat', messageId: 'om_message', text: '/sessions' })
@@ -38,7 +38,7 @@ describe('Feishu adapter', () => {
     expect(normalizeFeishuMessage(data, appId, 'ou_bot')?.text).toBe('/send keep @_user_1')
   })
   it('waits for a real SDK readiness callback and cleans up on stop', async () => {
-    const connection = vi.fn(); const receive = vi.fn(async () => {})
+    const connection = vi.fn(); const receive = vi.fn(async (_message: any) => {})
     const adapter = await createFeishuAdapter({ accountId: appId, secret: 'private-secret', connection })
     await adapter.start(receive)
     expect(connection).toHaveBeenLastCalledWith('connecting')
@@ -61,6 +61,38 @@ describe('Feishu adapter', () => {
     expect(sdk.reply).toHaveBeenCalledTimes(2)
     expect(sdk.reply.mock.calls[0][0]).toEqual(sdk.reply.mock.calls[1][0])
     expect(sdk.reply.mock.calls[0][0]).toMatchObject({ path: { message_id: 'om_message' }, data: { content: '{"text":"reply text"}', msg_type: 'text' } })
+    adapter.stop()
+  })
+  it('sends interactive choices and scopes callbacks to the original user, tenant and chat', async () => {
+    const receive = vi.fn(async (_message: any) => {})
+    const adapter = await createFeishuAdapter({ accountId: appId, secret: 'secret', connection: vi.fn() })
+    await adapter.start(receive)
+    const message = normalizeFeishuMessage(event(), appId)!
+    await adapter.reply(message, { title: '选择终端', text: '请选择', buttons: [{ label: 'Server', token: 'choice' }] })
+    const sent = sdk.reply.mock.calls[0][0]
+    expect(sent.data.msg_type).toBe('interactive')
+    expect(JSON.parse(sent.data.content).elements[1].actions[0]).toMatchObject({ text: { content: 'Server' }, value: { gateway_token: 'choice' } })
+    const callback = { operator: { open_id: 'ou_user', tenant_key: 'tenant' }, context: { open_chat_id: 'oc_chat', open_message_id: 'om_card' }, action: { value: { gateway_token: 'choice' } } }
+    for (const patch of [{ operator: { open_id: 'intruder' } }, { context: { open_chat_id: 'other', open_message_id: 'om_card' } }, { operator: { open_id: 'ou_user', tenant_key: 'other' } }, { action: { value: { gateway_token: 'forged' } } }]) {
+      expect(await sdk.dispatcher.handles['card.action.trigger']({ ...callback, ...patch })).toMatchObject({ toast: { type: 'error' } })
+    }
+    expect(receive).not.toHaveBeenCalled()
+    await sdk.dispatcher.handles['card.action.trigger'](callback)
+    expect(receive).toHaveBeenCalledWith(expect.objectContaining({ senderId: 'ou_user', conversationType: 'direct', actionToken: 'choice', messageId: 'card:choice', replyToMessageId: 'om_card' }))
+    await adapter.reply(receive.mock.calls[0][0], '已绑定')
+    expect(sdk.reply).toHaveBeenLastCalledWith(expect.objectContaining({ path: { message_id: 'om_card' } }))
+    adapter.stop()
+    expect(await sdk.dispatcher.handles['card.action.trigger'](callback)).toMatchObject({ toast: { type: 'error' } })
+  })
+  it('pushes successive output batches to the bound chat with separate stable retry IDs', async () => {
+    const adapter = await createFeishuAdapter({ accountId: appId, secret: 'secret', connection: vi.fn() })
+    sdk.create.mockRejectedValueOnce(new Error('offline'))
+    const message = normalizeFeishuMessage(event(), appId)!
+    await adapter.send!(message, 'output'); await adapter.send!(message, 'output')
+    expect(sdk.create).toHaveBeenCalledTimes(3)
+    expect(sdk.create.mock.calls[0][0]).toEqual(sdk.create.mock.calls[1][0])
+    expect(sdk.create.mock.calls[2][0].data.uuid).not.toBe(sdk.create.mock.calls[0][0].data.uuid)
+    expect(sdk.create.mock.calls[0][0]).toMatchObject({ params: { receive_id_type: 'chat_id' }, data: { receive_id: 'oc_chat', content: '{"text":"output"}' } })
     adapter.stop()
   })
   it('rejects bot identity lookup failures and suppresses credential-bearing SDK logs', async () => {

@@ -1,0 +1,112 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { GatewayOutputRelay, GatewayTextDecoder } from '../src/main/backend/imGateway/gatewayOutputRelay'
+import { GatewayCore } from '../src/main/backend/imGateway/gatewayCore'
+import { GatewayStateStore } from '../src/main/backend/imGateway/gatewayState'
+import { publishTerminalOutput, subscribeTerminalOutput } from '../src/main/backend/terminal/terminalOutputEvents'
+import type { GatewayMessage, GatewayPolicy, GatewayTerminalPort } from '../src/main/backend/imGateway/gatewayTypes'
+
+const message: GatewayMessage = { provider: 'feishu', accountId: 'app', tenantId: 'tenant', senderId: 'user', conversationId: 'chat', conversationType: 'direct', messageId: 'bind', createdAt: 1800000000000, text: '/bind session' }
+const binding = { panelId: 'panel', sessionId: 'session' }
+let relay: GatewayOutputRelay | undefined
+let core: GatewayCore | undefined
+beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(message.createdAt) })
+afterEach(async () => { relay?.stop(); core?.stop(); await relay?.drain(); await core?.drain(); vi.useRealTimers() })
+const fixture = () => {
+  const terminal: GatewayTerminalPort = {
+    list: vi.fn(async () => [{ ...binding, title: 'Host', kind: 'ssh' as const, connected: true, assetId: 'asset', active: false }]),
+    read: vi.fn(async () => '$ prompt'), write: vi.fn(async () => {}),
+    subscribe: (target, receive) => subscribeTerminalOutput(target.sessionId, receive)
+  }
+  const send = vi.fn(async (_message: GatewayMessage, _text: string) => {}); const valid = vi.fn(async () => true); const failed = vi.fn()
+  relay = new GatewayOutputRelay({ terminal, binding, message, send, valid, failed })
+  return { terminal, send, valid, failed }
+}
+describe('gateway terminal output', () => {
+  it('sends an initial screen then batches exact-session output without requiring /read', async () => {
+    const { send } = fixture()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(send).toHaveBeenLastCalledWith(message, '$ prompt')
+    publishTerminalOutput('other-session', 'private')
+    publishTerminalOutput('session', 'hello '); publishTerminalOutput('session', 'world\r\n')
+    expect(send).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(send).toHaveBeenLastCalledWith(message, 'hello world\n')
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(send).toHaveBeenCalledTimes(2)
+    relay!.stop(); publishTerminalOutput('session', 'after stop')
+    await vi.advanceTimersByTimeAsync(1000); expect(send).toHaveBeenCalledTimes(2)
+  })
+  it('decodes split ANSI sequences and uses changed screens for cursor-addressed TUI output', async () => {
+    const decoder = new GatewayTextDecoder()
+    expect(decoder.push('a\x1b[')).toBe('a')
+    expect(decoder.push('31mb\x1b]52;secret')).toBe('b')
+    expect(decoder.push('clipboard\x1b')).toBe('')
+    expect(decoder.push('\\<at user_id="all">')).toBe('< at user_id="all">')
+    expect(decoder.push('\x1b(Btext\x9dprivate\x9c')).toBe('text')
+    const { send, terminal } = fixture()
+    await vi.advanceTimersByTimeAsync(1000)
+    vi.mocked(terminal.read).mockResolvedValue('model\nresponse')
+    publishTerminalOutput('session', '\x1b[2J\x1b[Hraw redraw')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(send).toHaveBeenLastCalledWith(message, 'model\nresponse')
+    publishTerminalOutput('session', '\x1b[Hsame redraw')
+    await vi.advanceTimersByTimeAsync(1000); expect(send).toHaveBeenCalledTimes(2)
+  })
+  it('splits ordinary output into bounded batches and reports overflow', async () => {
+    const { send } = fixture()
+    await vi.advanceTimersByTimeAsync(1000)
+    publishTerminalOutput('session', 'a'.repeat(7000))
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(send.mock.calls.slice(1).map(call => call[1]).join('')).toBe('a'.repeat(7000))
+    publishTerminalOutput('session', 'x'.repeat(70000))
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(send).toHaveBeenLastCalledWith(message, expect.stringContaining('部分内容已省略'))
+  })
+  it('stops output when authorization is revoked or delivery fails', async () => {
+    const { send, valid, failed } = fixture()
+    valid.mockResolvedValue(false)
+    publishTerminalOutput('session', 'private')
+    await vi.advanceTimersByTimeAsync(1000); expect(send).not.toHaveBeenCalled()
+    relay!.stop()
+    const next = fixture(); next.send.mockRejectedValue(new Error('offline'))
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(next.failed).toHaveBeenCalledOnce()
+    publishTerminalOutput('session', 'not retried'); await vi.advanceTimersByTimeAsync(2000)
+    expect(next.send).toHaveBeenCalledOnce(); expect(failed).not.toHaveBeenCalled()
+  })
+  it('rechecks identity and permission after a slow read before sending', async () => {
+    const { terminal, send, valid } = fixture()
+    let finish!: (text: string) => void
+    vi.mocked(terminal.read).mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    await vi.advanceTimersByTimeAsync(1000)
+    valid.mockResolvedValue(false); finish('secret screen')
+    await relay!.drain(); expect(send).not.toHaveBeenCalled()
+  })
+  it('integrates binding, input and output, then stops on unbind, rebind and terminal restart', async () => {
+    const terminal: GatewayTerminalPort = {
+      list: vi.fn(async () => [{ ...binding, title: 'Host', kind: 'ssh' as const, connected: true, assetId: 'asset', active: false }]),
+      read: vi.fn(async () => ''), write: vi.fn(async () => {}),
+      subscribe: (target, receive) => subscribeTerminalOutput(target.sessionId, receive)
+    }
+    const policy: GatewayPolicy = { allowedUserIds: ['user'], allowedGroupIds: [], allowedAssetIds: ['asset'], allowLocalTerminal: false }
+    const send = vi.fn(async (_message: GatewayMessage, _text: string) => {})
+    core = new GatewayCore({ policy: () => policy, terminal, state: new GatewayStateStore(), send, reply: vi.fn(async () => {}), audit: vi.fn() })
+    await core.receive(message); await core.drain(); await vi.advanceTimersByTimeAsync(1000)
+    await core.receive({ ...message, messageId: 'input', text: 'pwd' }); await core.drain()
+    expect(terminal.write).toHaveBeenCalledWith(binding, 'pwd\r')
+    publishTerminalOutput('session', '/home/user\n'); await vi.advanceTimersByTimeAsync(1000)
+    expect(send).toHaveBeenLastCalledWith(message, '/home/user\n')
+    await core.receive({ ...message, messageId: 'unbind', text: '/unbind' }); await core.drain()
+    publishTerminalOutput('session', 'after unbind'); await vi.advanceTimersByTimeAsync(1000)
+    expect(send).toHaveBeenCalledOnce()
+    await core.receive({ ...message, messageId: 'rebind' }); await core.drain()
+    vi.mocked(terminal.list).mockResolvedValue([{ ...binding, sessionId: 'restarted', title: 'Host', kind: 'ssh' as const, connected: true, assetId: 'asset', active: false }])
+    publishTerminalOutput('session', 'late'); await vi.advanceTimersByTimeAsync(1000)
+    expect(send).toHaveBeenCalledOnce()
+    vi.mocked(terminal.list).mockResolvedValue([{ ...binding, title: 'Host', kind: 'ssh' as const, connected: true, assetId: 'asset', active: false }])
+    await core.receive({ ...message, messageId: 'bind-after-restart' }); await core.drain()
+    policy.allowedAssetIds = []
+    publishTerminalOutput('session', 'revoked'); await vi.advanceTimersByTimeAsync(1000)
+    expect(send).toHaveBeenCalledOnce()
+  })
+})

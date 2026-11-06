@@ -27,6 +27,7 @@ import type { TerminalFocusReason } from '@/services/terminal/terminalWorkspaceV
 
 type TerminalControlSurfacePaneDependencies = {
   workspace: WorkspaceStore
+  startLocalTerminalForPanel: (panel: TerminalPanel) => Promise<boolean>
   terminalViews: Map<string, TerminalControlSurfaceView>
   controlSurfaceTelemetry: { value: Record<string, ControlSurfaceTelemetryState> }
   controlWorkspaceEnvironment: { value: ControlWorkspaceEnvironmentState }
@@ -49,6 +50,7 @@ type TerminalControlSurfacePaneDependencies = {
 
 export const createTerminalControlSurfacePaneHandlers = ({
   workspace,
+  startLocalTerminalForPanel,
   terminalViews,
   controlSurfaceTelemetry,
   controlWorkspaceEnvironment,
@@ -316,8 +318,12 @@ export const createTerminalControlSurfacePaneHandlers = ({
       if (cwd) panel.cwd = cwd
       if (focus) workspace.revealPanelSurface(panel.id, { cause: 'external' })
       await nextTick()
+      const autoConnect = controlBool(params.autoConnect ?? params.auto_connect, false)
+      const connected = autoConnect ? await startLocalTerminalForPanel(panel) : Boolean(panel.sessionId)
+      if (autoConnect && title) workspace.renamePanel(panel.id, title)
       if (focus) requestExternalTerminalFocus(panel.id)
       return managementPanelPayload(panel, 'surface.create', 'createdPane', {
+        connected,
         workspaceId: 'main',
         workspace_id: 'main',
         workspaceRef: 'workspace:1',

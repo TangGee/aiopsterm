@@ -1,6 +1,7 @@
 import type { LocaleMessages } from '../messages'
 
 export const enUS: LocaleMessages = {
+  'imGateway.allTerminals': "all mode: allow all local terminals and saved SSH hosts, including future hosts",
   'imGateway.title': "IM gateway",
   'imGateway.description': "Control authorized aiopsterm terminals from Feishu. The gateway is off by default and requires the desktop app to stay running.",
   'imGateway.connection': "Connection",
@@ -20,10 +21,10 @@ export const enUS: LocaleMessages = {
   'imGateway.assetId': "Asset ID",
   'imGateway.help': "Feishu setup and usage",
   'imGateway.setup1': "Create an enterprise custom app on Feishu Open Platform, enable its bot capability, and copy its App ID and App Secret.",
-  'imGateway.setup2': "Grant direct-message reception, group bot-mention reception if needed, and send-as-bot permissions. Subscribe to im.message.receive_v1.",
+  'imGateway.setup2': "Enable direct messages, group mentions if needed, and sending messages. Subscribe to im.message.receive_v1 events and card.action.trigger callbacks over a persistent connection.",
   'imGateway.setup3': "Enter authorized user open_ids and host asset IDs, enable and save. Once connected, select persistent connection in Feishu event settings and publish the app.",
-  'imGateway.setup4': "Open the target host terminal in aiopsterm first. Send /sessions in Feishu, then /bind with the returned sessionId.",
-  'imGateway.behavior': "Only explicit slash commands are handled. /run types one line and presses Enter; /read returns the last 40 screen lines, without claiming command completion. Reconnecting a terminal or restarting the app may require rebinding.",
+  'imGateway.setup4': "Send /sessions in Feishu and select a terminal card. New terminal opens a local terminal or authorized SSH host and binds it automatically.",
+  'imGateway.behavior': "After binding, ordinary messages are entered with Return and output is forwarded in batches. /send types without Return, /interrupt interrupts, and /unbind leaves. Use /run for terminal slash commands. TUI updates send recent screens; excessive output is truncated with a notice.",
   'imGateway.keychainError': "System credential encryption is unavailable. Enable the system keychain first; the app secret will not be stored as plaintext.",
   'imGateway.authorizationError': "Enter an App ID, at least one authorized user, and authorized hosts or permission for local terminals.",
   'imGateway.secretError': "Enter the app secret before enabling.",

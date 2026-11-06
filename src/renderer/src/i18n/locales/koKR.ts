@@ -1,5 +1,6 @@
 import { completeLocaleMessages } from './complete'
 export const koKR = completeLocaleMessages({
+  'imGateway.allTerminals': "all 모드: 모든 로컬 터미널과 저장된 SSH 호스트 허용(이후 추가되는 호스트 포함)",
   'imGateway.title': "IM 게이트웨이",
   'imGateway.description': "Feishu에서 허용된 aiopsterm 터미널을 제어합니다. 기본적으로 꺼져 있으며 데스크톱 앱이 계속 실행 중이어야 합니다.",
   'imGateway.connection': "연결",
@@ -19,10 +20,10 @@ export const koKR = completeLocaleMessages({
   'imGateway.assetId': "자산 ID",
   'imGateway.help': "Feishu 설정 및 사용법",
   'imGateway.setup1': "Feishu 오픈 플랫폼에서 기업용 자체 앱을 만들고 봇 기능을 활성화한 후 App ID와 App Secret을 복사하세요.",
-  'imGateway.setup2': "개인 메시지 수신, 필요한 경우 그룹 봇 멘션 수신, 봇 메시지 전송 권한을 부여하고 im.message.receive_v1을 구독하세요.",
+  'imGateway.setup2': "개인 메시지, 필요한 그룹 멘션, 메시지 전송 권한을 활성화하고 지속 연결로 im.message.receive_v1 이벤트와 card.action.trigger 콜백을 구독하세요.",
   'imGateway.setup3': "허용된 open_id와 자산 ID를 입력하고 활성화하여 저장하세요. 연결 후 Feishu 이벤트 설정에서 지속 연결을 선택하고 앱을 게시하세요.",
-  'imGateway.setup4': "aiopsterm에서 대상 호스트 터미널을 먼저 여세요. Feishu에서 /sessions를 보내고 반환된 sessionId로 /bind를 실행하세요.",
-  'imGateway.behavior': "명시적인 슬래시 명령만 처리합니다. /run은 한 줄을 입력하고 Enter를 보내며 /read는 화면의 마지막 40줄을 반환합니다. 명령 완료를 보장하지 않습니다. 터미널 재연결이나 앱 재시작 후 다시 연결해야 할 수 있습니다.",
+  'imGateway.setup4': "Feishu에서 /sessions를 보내고 카드에서 터미널을 선택하세요. 새 터미널을 선택하면 로컬 터미널 또는 허용된 SSH 호스트를 열고 자동 연결합니다.",
+  'imGateway.behavior': "연결 후 일반 메시지를 터미널에 입력하고 Enter를 보내며 출력을 묶어서 전달합니다. /send는 입력만, /interrupt는 중단, /unbind는 연결 해제입니다. 터미널 슬래시 명령은 /run으로 보내세요. TUI는 최근 화면을 전달하고 과도한 출력은 알림과 함께 생략합니다.",
   'imGateway.keychainError': "시스템 자격 증명 암호화를 사용할 수 없습니다. 시스템 키체인을 활성화하세요. App Secret은 일반 텍스트로 저장하지 않습니다.",
   'imGateway.authorizationError': "App ID, 허용된 사용자 한 명 이상, 허용된 호스트 또는 로컬 터미널 권한을 입력하세요.",
   'imGateway.secretError': "활성화하기 전에 App Secret을 입력하세요.",

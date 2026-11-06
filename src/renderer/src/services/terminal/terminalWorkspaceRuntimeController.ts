@@ -792,6 +792,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     visibleTerminalPanels,
     isWelcomePlaceholderPanel,
     terminalViewSize,
+    startLocalTerminalForPanel,
     startSshTerminalForPanel,
     disconnectTerminalPanel,
     scheduleVisibleTerminalFit,

@@ -12,8 +12,9 @@
       <label>{{ t('imGateway.users') }}<textarea v-model="users" rows="3" placeholder="ou_..." data-testid="gateway-users"></textarea></label>
       <label>{{ t('imGateway.groups') }}<textarea v-model="groups" rows="2" placeholder="oc_..."></textarea></label>
       <p>{{ t('imGateway.groupHelp') }}</p>
-      <label>{{ t('imGateway.assets') }}<textarea v-model="assets" rows="3" data-testid="gateway-assets"></textarea></label>
-      <label><input v-model="draft.allowLocalTerminal" type="checkbox" data-testid="gateway-local">{{ t('imGateway.allowLocal') }}</label>
+      <label><input v-model="allTerminals" type="checkbox" data-testid="gateway-all">{{ t('imGateway.allTerminals') }}</label>
+      <label>{{ t('imGateway.assets') }}<textarea v-model="assets" :disabled="allTerminals" rows="3" data-testid="gateway-assets"></textarea></label>
+      <label><input v-model="draft.allowLocalTerminal" :disabled="allTerminals" type="checkbox" data-testid="gateway-local">{{ t('imGateway.allowLocal') }}</label>
       <div class="gateway-buttons">
         <button @click="save">{{ t('imGateway.save') }}</button>
         <button @click="refreshTerminals">{{ t('imGateway.refreshTerminals') }}</button>
@@ -27,7 +28,7 @@
       <summary>{{ t('imGateway.help') }}</summary>
       <ol><li>{{ t('imGateway.setup1') }}</li><li>{{ t('imGateway.setup2') }}</li><li>{{ t('imGateway.setup3') }}</li><li>{{ t('imGateway.setup4') }}</li></ol>
       <pre>/sessions
-/bind &lt;sessionId&gt;
+/new
 /run pwd
 /read
 /send text
@@ -49,6 +50,7 @@ const { t } = useI18n()
 const status = ref<ImGatewayStatus>()
 const draft = ref(structuredClone(defaultImGatewayConfig))
 const users = ref(''); const groups = ref(''); const assets = ref(''); const secret = ref(''); const clearSecret = ref(false)
+const allTerminals = computed({ get: () => assets.value.split(/[\s,]+/).includes('all'), set: (value: boolean) => { assets.value = value ? 'all' : '' } })
 const loaded = ref(false); const busy = ref(false); const notice = ref(''); const terminals = ref<ControlTerminalSummary[]>([])
 let disposed = false; let polling = false; let timer: ReturnType<typeof setInterval> | undefined
 const connectionLabel = computed(() => t(`imGateway.state.${status.value?.connection || 'disabled'}`))

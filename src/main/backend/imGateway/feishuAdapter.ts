@@ -1,7 +1,7 @@
-import { createHash } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { setTimeout as delay } from 'timers/promises'
 import { Client, WSClient, EventDispatcher, Domain, AppType, defaultHttpInstance, type EventHandles } from '@larksuiteoapi/node-sdk'
-import type { GatewayAdapterFactory, GatewayMessage } from './gatewayTypes'
+import type { GatewayAdapterFactory, GatewayCard, GatewayMessage, GatewayReply } from './gatewayTypes'
 
 type FeishuEvent = Parameters<NonNullable<EventHandles['im.message.receive_v1']>>[0]
 export const normalizeFeishuMessage = (event: FeishuEvent, appId: string, botOpenId?: string): GatewayMessage | null => {
@@ -25,6 +25,21 @@ export const normalizeFeishuMessage = (event: FeishuEvent, appId: string, botOpe
   } catch { return null }
 }
 
+export const feishuGatewayCard = (card: GatewayCard) => ({
+  config: { wide_screen_mode: true },
+  header: { title: { tag: 'plain_text', content: card.title } },
+  elements: [
+    { tag: 'div', text: { tag: 'plain_text', content: card.text } },
+    ...card.buttons.map(button => ({ tag: 'action', actions: [{ tag: 'button', text: { tag: 'plain_text', content: button.label }, value: { gateway_token: button.token }, type: 'default' }] }))
+  ]
+})
+type CardAction = {
+  app_id?: string
+  operator?: { open_id?: string; tenant_key?: string }
+  context?: { open_message_id?: string; open_chat_id?: string }
+  action?: { value?: { gateway_token?: string } }
+}
+
 // Never pass SDK request/response objects to application logs: they can contain credentials and message bodies.
 const quietLogger = { error() {}, warn() {}, info() {}, debug() {}, trace() {} }
 export const createFeishuAdapter: GatewayAdapterFactory = ({ accountId, secret, connection }) => {
@@ -41,6 +56,34 @@ export const createFeishuAdapter: GatewayAdapterFactory = ({ accountId, secret, 
   })
   let replyQueue = Promise.resolve()
   let lastReplyAt = 0
+  const cards = new Map<string, { message: GatewayMessage; expires: number }>()
+  const send = (message: GatewayMessage, content: GatewayReply, push = false) => {
+    const uuid = push ? randomUUID().replace(/-/g, '') : createHash('sha256').update(`${accountId}:${message.messageId}`).digest('hex').slice(0, 32)
+    if (typeof content !== 'string') {
+      for (const [token, card] of cards) if (card.expires < Date.now()) cards.delete(token)
+      while (cards.size + content.buttons.length > 2000) cards.delete(cards.keys().next().value!)
+      for (const button of content.buttons) cards.set(button.token, { message, expires: Date.now() + 600000 })
+    }
+    const data = { msg_type: typeof content === 'string' ? 'text' : 'interactive', content: JSON.stringify(typeof content === 'string' ? { text: content } : feishuGatewayCard(content)), uuid }
+    const sending = replyQueue.catch(() => {}).then(async () => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await delay(Math.max(0, 250 - (Date.now() - lastReplyAt)), undefined, { signal: abort.signal })
+        lastReplyAt = Date.now()
+        try {
+          const result = push
+            ? await client.im.message.create({ params: { receive_id_type: 'chat_id' }, data: { ...data, receive_id: message.conversationId } })
+            : await client.im.message.reply({ path: { message_id: message.replyToMessageId || message.messageId }, data })
+          if (result.code !== 0) throw new Error('FEISHU_REPLY_FAILED')
+          return
+        } catch {
+          if (abort.signal.aborted || attempt === 2) throw new Error('FEISHU_REPLY_FAILED')
+          await delay(500 * (attempt + 1), undefined, { signal: abort.signal })
+        }
+      }
+    })
+    replyQueue = sending
+    return sending
+  }
   return {
     start: async receive => {
       connection('connecting')
@@ -49,6 +92,17 @@ export const createFeishuAdapter: GatewayAdapterFactory = ({ accountId, secret, 
       if (identity.code !== 0 || !identity.bot?.open_id) throw new Error('FEISHU_BOT_UNAVAILABLE')
       const botOpenId = identity.bot.open_id
       await ws.start({ eventDispatcher: new EventDispatcher({ logger: quietLogger }).register({
+        'card.action.trigger': async (event: CardAction) => {
+          const token = event.action?.value?.gateway_token
+          const card = typeof token === 'string' ? cards.get(token) : undefined
+          if (abort.signal.aborted || !card || card.expires < Date.now() || event.app_id && event.app_id !== accountId ||
+            event.operator?.open_id !== card.message.senderId || event.context?.open_chat_id !== card.message.conversationId ||
+            event.operator?.tenant_key && event.operator.tenant_key !== card.message.tenantId || !event.context?.open_message_id) {
+            return { toast: { type: 'error', content: '卡片已过期或不属于你，请发送 /sessions。' } }
+          }
+          await receive({ ...card.message, messageId: `card:${token}`, replyToMessageId: event.context.open_message_id, createdAt: Date.now(), text: '', actionToken: token })
+          return { toast: { type: 'info', content: '已接收，请查看机器人回复。' } }
+        },
         'im.message.receive_v1': async event => {
           if (abort.signal.aborted) return
           const message = normalizeFeishuMessage(event, accountId, botOpenId)
@@ -56,25 +110,8 @@ export const createFeishuAdapter: GatewayAdapterFactory = ({ accountId, secret, 
         }
       }) })
     },
-    stop: () => { abort.abort(); ws.close({ force: true }) },
-    reply: (message, text) => {
-      const sending = replyQueue.catch(() => {}).then(async () => {
-        const uuid = createHash('sha256').update(`${accountId}:${message.messageId}`).digest('hex').slice(0, 32)
-        for (let attempt = 0; attempt < 3; attempt++) {
-          await delay(Math.max(0, 250 - (Date.now() - lastReplyAt)), undefined, { signal: abort.signal })
-          lastReplyAt = Date.now()
-          try {
-            const result = await client.im.message.reply({ path: { message_id: message.messageId }, data: { msg_type: 'text', content: JSON.stringify({ text }), uuid } })
-            if (result.code !== 0) throw new Error('FEISHU_REPLY_FAILED')
-            return
-          } catch {
-            if (abort.signal.aborted || attempt === 2) throw new Error('FEISHU_REPLY_FAILED')
-            await delay(500 * (attempt + 1), undefined, { signal: abort.signal })
-          }
-        }
-      })
-      replyQueue = sending
-      return sending
-    }
+    stop: () => { abort.abort(); cards.clear(); ws.close({ force: true }) },
+    reply: (message, content) => send(message, content),
+    send: (message, text) => send(message, text, true)
   }
 }

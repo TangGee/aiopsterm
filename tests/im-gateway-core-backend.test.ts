@@ -4,7 +4,7 @@ import { join } from 'path'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { GatewayCore, gatewayOutput } from '../src/main/backend/imGateway/gatewayCore'
 import { GatewayStateStore, gatewayConversationKey } from '../src/main/backend/imGateway/gatewayState'
-import type { GatewayMessage, GatewayPolicy, GatewayTerminalPort } from '../src/main/backend/imGateway/gatewayTypes'
+import type { GatewayCard, GatewayMessage, GatewayPolicy, GatewayReply, GatewayTerminalPort } from '../src/main/backend/imGateway/gatewayTypes'
 import type { ControlTerminalSummary } from '../src/shared/contracts/control'
 
 const now = 1800000000000
@@ -15,10 +15,10 @@ let policy: GatewayPolicy
 let terminals: ControlTerminalSummary[]
 let port: GatewayTerminalPort
 let state: GatewayStateStore
-let replies: string[]
+let replies: GatewayReply[]
 let core: GatewayCore
 const create = () => new GatewayCore({ policy: () => policy, state, terminal: port, now: () => now, reply: async (_message, text) => { replies.push(text) }, audit: vi.fn() })
-const receive = async (text: string, patch: Partial<GatewayMessage> = {}) => { await core.receive(message(text, patch)); await core.drain(); return replies.at(-1) }
+const receive = async (text: string, patch: Partial<GatewayMessage> = {}) => { await core.receive(message(text, patch)); await core.drain(); const reply = replies.at(-1); return typeof reply === 'string' ? reply : JSON.stringify(reply) }
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'im-gateway-test-'))
   state = new GatewayStateStore(join(directory, 'state.json'))
@@ -30,7 +30,7 @@ beforeEach(async () => {
 afterEach(async () => { core.stop(); await core.drain(); await rm(directory, { recursive: true, force: true }) })
 describe('IM gateway core', () => {
   it('binds an authorized terminal, writes explicit commands, reads and interrupts', async () => {
-    expect(await receive('/sessions')).toContain('session | Host')
+    expect(await receive('/sessions')).toContain('Host (Local)')
     await receive('/bind session')
     expect(await receive('/run pwd')).toContain('不代表命令执行完成')
     expect(port.write).toHaveBeenCalledWith({ sessionId: 'session', panelId: 'panel' }, 'pwd\r')
@@ -50,7 +50,7 @@ describe('IM gateway core', () => {
     await receive('/bind hidden'); await receive('/run ls')
     expect(port.write).not.toHaveBeenCalled()
     policy.allowLocalTerminal = true
-    expect(await receive('/sessions')).toContain('local | Local')
+    expect(await receive('/sessions')).toContain('Local (Local)')
   })
   it('isolates bindings by provider, account, tenant, conversation and sender', async () => {
     await receive('/bind session')
@@ -96,9 +96,9 @@ describe('IM gateway core', () => {
     core = create(); policy.allowedAssetIds = []
     await receive('/run revoked'); expect(port.write).not.toHaveBeenCalled()
   })
-  it('rejects multiline/control input and treats ordinary chat as help', async () => {
+  it('rejects multiline/control input without writing it', async () => {
     await receive('/bind session')
-    for (const text of ['delete files', '/run ls\nrm file', '/send hi\x1b[31m', '/run ' + 'x'.repeat(2049)]) await receive(text)
+    for (const text of ['/run ls\nrm file', '/send hi\x1b[31m', '/run ' + 'x'.repeat(2049)]) await receive(text)
     expect(port.write).not.toHaveBeenCalled()
   })
   it('limits pending messages and serializes shared terminal access', async () => {
@@ -128,6 +128,96 @@ describe('IM gateway core', () => {
     await receive('/confidentialtoken')
     expect(audit).toHaveBeenCalledWith('accepted', expect.anything(), 'unknown')
     expect(port.write).not.toHaveBeenCalled()
+  })
+  it('forwards ordinary chat with Return only after binding, including spaces', async () => {
+    await receive('pwd'); expect(port.write).not.toHaveBeenCalled()
+    await receive('/bind session')
+    const before = replies.length
+    await receive('  echo hello  ')
+    expect(port.write).toHaveBeenLastCalledWith({ sessionId: 'session', panelId: 'panel' }, '  echo hello  \r')
+    expect(replies).toHaveLength(before)
+    await receive('/run /model'); expect(port.write).toHaveBeenLastCalledWith(expect.anything(), '/model\r')
+    await receive('/unbind'); await receive('ignored'); expect(port.write).toHaveBeenCalledTimes(2)
+  })
+  it('pastes multiline conversation input while rejecting embedded terminal controls', async () => {
+    await receive('/bind session')
+    await receive('first line\r\nsecond\tline')
+    expect(port.write).toHaveBeenLastCalledWith(expect.anything(), '\x1b[200~first line\nsecond\tline\x1b[201~\r')
+    await receive('text\x1b[201~command'); await receive('text\x03')
+    expect(port.write).toHaveBeenCalledOnce()
+  })
+  it('expires choices after ten minutes even if the message itself is fresh', async () => {
+    let time = now
+    core.stop()
+    core = new GatewayCore({ policy: () => policy, state, terminal: port, now: () => time, reply: async (_message, text) => { replies.push(text) }, audit: vi.fn() })
+    await receive('/sessions')
+    const token = (replies.at(-1) as GatewayCard).buttons[0].token
+    time += 600001
+    expect(await receive('', { actionToken: token, createdAt: time })).toContain('过期')
+    expect(state.bindingCount).toBe(0)
+  })
+  it('uses private one-use card choices without displaying session IDs and rechecks permissions', async () => {
+    await receive('/sessions')
+    const card = replies.at(-1) as GatewayCard
+    expect(card.title).toBe('选择终端')
+    expect(JSON.stringify(card)).not.toContain('session')
+    const token = card.buttons[0].token
+    await receive('', { actionToken: token, senderId: 'user2' })
+    expect(state.binding(gatewayConversationKey(message('', { senderId: 'user2' })))).toBeUndefined()
+    await receive('', { actionToken: token })
+    expect(await receive('/status')).toContain('Host')
+    await receive('/unbind')
+    await receive('', { actionToken: token }); await receive('ignored')
+    expect(port.write).not.toHaveBeenCalled()
+    await receive('/sessions'); const revoked = (replies.at(-1) as GatewayCard).buttons[0].token
+    policy.allowedAssetIds = []
+    await receive('', { actionToken: revoked }); await receive('ignored')
+    expect(port.write).not.toHaveBeenCalled()
+  })
+  it('paginates choices and rejects stale or cross-conversation cards', async () => {
+    terminals = Array.from({ length: 10 }, (_, index) => ({ ...terminals[0], sessionId: `s-${index}`, title: `Host ${index}` }))
+    await receive('/sessions')
+    const card = replies.at(-1) as GatewayCard
+    expect(card.buttons).toHaveLength(10)
+    await receive('', { actionToken: card.buttons[0].token, conversationId: 'another' })
+    expect(await receive('pwd', { conversationId: 'another' })).toContain('没有可用')
+    await receive('', { actionToken: card.buttons.find(button => button.label === '下一页')!.token })
+    expect((replies.at(-1) as GatewayCard).buttons[0].label).toContain('Host 8')
+    core.stop(); core = create()
+    expect(await receive('', { actionToken: card.buttons[0].token })).toContain('过期')
+  })
+  it('authorizes all local and saved SSH terminals without allowing unknown users or groups', async () => {
+    policy.allowedAssetIds = ['all']
+    terminals.push({ ...terminals[0], sessionId: 'local', kind: 'local', title: 'Local' }, { ...terminals[0], sessionId: 'new-host', assetId: 'future', title: 'Future' })
+    expect(await receive('/sessions')).toContain('Future')
+    await receive('/bind local'); await receive('pwd')
+    expect(port.write).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'local' }), 'pwd\r')
+    const count = replies.length
+    await receive('/sessions', { senderId: 'unknown' }); await receive('/sessions', { conversationType: 'group', conversationId: 'unknown' })
+    expect(replies).toHaveLength(count)
+  })
+  it('creates and automatically binds local or authorized SSH terminals from cards exactly once', async () => {
+    policy.allowedAssetIds = ['all']
+    port.hosts = vi.fn(async () => [{ id: 'asset', name: 'Host', host: 'server' }])
+    port.create = vi.fn(async assetId => ({ ...terminals[0], sessionId: 'new', panelId: 'new-panel', kind: assetId ? 'ssh' as const : 'local' as const, assetId }))
+    await receive('/new')
+    const card = replies.at(-1) as GatewayCard
+    const local = message('', { actionToken: card.buttons[0].token })
+    await core.receive(local); await core.receive(local); await core.drain()
+    expect(port.create).toHaveBeenCalledOnce(); expect(port.create).toHaveBeenCalledWith(undefined, expect.any(Function))
+    expect(state.binding(gatewayConversationKey(local))).toEqual({ sessionId: 'new', panelId: 'new-panel' })
+    await receive('', { actionToken: card.buttons[1].token })
+    expect(port.create).toHaveBeenLastCalledWith('asset', expect.any(Function))
+    expect(port.create).toHaveBeenCalledTimes(2)
+    policy.allowedAssetIds = []
+    await receive('/new open:asset:asset'); await receive('/new open:local')
+    expect(port.create).toHaveBeenCalledTimes(2)
+  })
+  it('keeps the old binding when creation fails and does not claim a failed connection succeeded', async () => {
+    await receive('/bind session'); policy.allowLocalTerminal = true
+    port.create = vi.fn(async () => { throw new Error('offline') })
+    expect(await receive('/new open:local')).toContain('tab 会保留')
+    expect(state.binding(gatewayConversationKey(message('')))?.sessionId).toBe('session')
   })
   it('bounds output and strips terminal controls and mention markup', () => {
     expect(gatewayOutput('\x1b[31mhello\x00 <at user_id="all">all</at>')).toBe('hello < at user_id="all">all</at>')

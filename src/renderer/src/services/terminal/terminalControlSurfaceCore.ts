@@ -34,6 +34,7 @@ export type TerminalControlSurfaceDependencies = {
   visibleTerminalPanels: Readonly<{ value: TerminalPanel[] }>
   isWelcomePlaceholderPanel: (panel?: TerminalPanel | null) => boolean
   terminalViewSize: (panelId: string) => { cols: number; rows: number }
+  startLocalTerminalForPanel: (panel: TerminalPanel) => Promise<boolean>
   startSshTerminalForPanel: (panel: TerminalPanel) => Promise<boolean>
   disconnectTerminalPanel: (panel: TerminalPanel) => Promise<boolean>
   scheduleVisibleTerminalFit: (options?: TerminalFitOptions) => void
