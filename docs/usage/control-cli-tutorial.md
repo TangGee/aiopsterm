@@ -11,6 +11,7 @@ aiopsterm 创建的本地终端会自动把这些命令加入 `PATH`：
 - `aiopsterm-control`：长兼容别名。
 - `aiopen`：在 aiopsterm 主工作区文件编辑器中打开本地文本文件。
 - `aiossh`：快速连接已管理主机，等价于 `aio ssh <host>`。
+- `aiswitch`：切换到已打开的主机终端，等价于 `aio host switch <host>`。
 - `aioic`：按工作区空闲清理设置关闭符合条件的面板。
 - `aiobc`：立即关闭后台面板，只保留当前面板。
 
@@ -26,6 +27,8 @@ aiobc
 ```
 
 底层 helper 文件仍然是 `resources/aiopsterm-control.js`，但不需要手动输入 Electron runtime 启动串。`aio` 包装命令会在内部使用 aiopsterm 自带的 JavaScript runtime，不依赖系统 `node`。
+
+Linux AppImage 中的这些控制命令直接使用当前应用内的运行时，兼容用户命名空间检查成功、被限制或检查工具不可用的情况，不要求调整系统安全设置。如果旧版本出现 `bad option: --no-sandbox`，请使用包含该修复的新构建，重启 aiopsterm 后重新打开本地终端，让命令获得新的运行时路径。
 
 ## Where It Works
 
