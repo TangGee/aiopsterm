@@ -3,7 +3,7 @@ import { GatewayOutputRelay, GatewayTextDecoder } from '../src/main/backend/imGa
 import { GatewayCore } from '../src/main/backend/imGateway/gatewayCore'
 import { GatewayStateStore } from '../src/main/backend/imGateway/gatewayState'
 import { publishTerminalOutput, subscribeTerminalOutput } from '../src/main/backend/terminal/terminalOutputEvents'
-import type { GatewayMessage, GatewayPolicy, GatewayTerminalPort } from '../src/main/backend/imGateway/gatewayTypes'
+import type { GatewayCard, GatewayMessage, GatewayPolicy, GatewayReply, GatewayTerminalPort } from '../src/main/backend/imGateway/gatewayTypes'
 
 const message: GatewayMessage = { provider: 'feishu', accountId: 'app', tenantId: 'tenant', senderId: 'user', conversationId: 'chat', conversationType: 'direct', messageId: 'bind', createdAt: 1800000000000, text: '/bind session' }
 const binding = { panelId: 'panel', sessionId: 'session' }
@@ -81,6 +81,56 @@ describe('gateway terminal output', () => {
     await vi.advanceTimersByTimeAsync(1000)
     valid.mockResolvedValue(false); finish('secret screen')
     await relay!.drain(); expect(send).not.toHaveBeenCalled()
+  })
+  it.each(['bind', 'card', 'create'] as const)('implicitly replaces the old binding through %s without requiring unbind', async mode => {
+    const second = { panelId: 'panel-b', sessionId: 'session-b' }
+    const terminals = [binding, second].map(target => ({ ...target, title: target.panelId, kind: 'ssh' as const, connected: true, assetId: 'asset', active: false }))
+    const terminal: GatewayTerminalPort = {
+      list: vi.fn(async () => terminals), read: vi.fn(async () => ''), write: vi.fn(async () => {}),
+      create: vi.fn(async () => terminals[1]),
+      subscribe: (target, receive) => subscribeTerminalOutput(target.sessionId, receive)
+    }
+    const policy: GatewayPolicy = { allowedUserIds: ['user'], allowedGroupIds: [], allowedAssetIds: ['asset'], allowLocalTerminal: false }
+    const state = new GatewayStateStore()
+    const send = vi.fn(async (_message: GatewayMessage, _text: string) => {})
+    const replies: GatewayReply[] = []
+    core = new GatewayCore({ policy: () => policy, terminal, state, send, reply: async (_message, reply) => { replies.push(reply) }, audit: vi.fn() })
+    await core.receive(message); await core.drain(); await vi.advanceTimersByTimeAsync(1000)
+    publishTerminalOutput('session', 'old buffered output')
+    if (mode === 'card') {
+      await core.receive({ ...message, messageId: 'choices', text: '/sessions' }); await core.drain()
+      const card = replies.at(-1) as GatewayCard
+      await core.receive({ ...message, messageId: 'switch', text: '', actionToken: card.buttons[1].token })
+    } else {
+      await core.receive({ ...message, messageId: 'switch', text: mode === 'bind' ? '/bind session-b' : '/new open:asset:asset' })
+    }
+    await core.drain(); await vi.advanceTimersByTimeAsync(1000)
+    expect(state.bindingCount).toBe(1)
+    expect(send).not.toHaveBeenCalled()
+    await core.receive({ ...message, messageId: 'new-input', text: 'pwd' }); await core.drain()
+    expect(terminal.write).toHaveBeenCalledOnce()
+    expect(terminal.write).toHaveBeenCalledWith(second, 'pwd\r')
+    publishTerminalOutput('session', 'old late output')
+    publishTerminalOutput('session-b', 'new output')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(send).toHaveBeenCalledOnce()
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ conversationId: 'chat' }), 'new output')
+  })
+  it('retains the current binding and output when the requested replacement is unavailable', async () => {
+    const terminal: GatewayTerminalPort = {
+      list: vi.fn(async () => [{ ...binding, title: 'Host', kind: 'ssh' as const, connected: true, assetId: 'asset', active: false }]),
+      read: vi.fn(async () => ''), write: vi.fn(async () => {}),
+      subscribe: (target, receive) => subscribeTerminalOutput(target.sessionId, receive)
+    }
+    const policy: GatewayPolicy = { allowedUserIds: ['user'], allowedGroupIds: [], allowedAssetIds: ['asset'], allowLocalTerminal: false }
+    const send = vi.fn(async (_message: GatewayMessage, _text: string) => {})
+    core = new GatewayCore({ policy: () => policy, terminal, state: new GatewayStateStore(), send, reply: vi.fn(async () => {}), audit: vi.fn() })
+    await core.receive(message); await core.drain(); await vi.advanceTimersByTimeAsync(1000)
+    await core.receive({ ...message, messageId: 'invalid-switch', text: '/bind unavailable' }); await core.drain()
+    await core.receive({ ...message, messageId: 'still-input', text: 'pwd' }); await core.drain()
+    expect(terminal.write).toHaveBeenCalledWith(binding, 'pwd\r')
+    publishTerminalOutput('session', 'still connected'); await vi.advanceTimersByTimeAsync(1000)
+    expect(send).toHaveBeenCalledWith(message, 'still connected')
   })
   it('integrates binding, input and output, then stops on unbind, rebind and terminal restart', async () => {
     const terminal: GatewayTerminalPort = {
