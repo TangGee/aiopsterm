@@ -31,6 +31,19 @@ describe('settings external action backend boundary', () => {
     backend = (await import(modulePath)) as SettingsExternalActionsBackend
   })
 
+  it.each(['zh-CN', 'en-US', 'zh-TW'])('opens the shipped IM gateway guide and its reference link for %s', async (locale) => {
+    const opened: string[] = []
+    const runtime = makeRuntime(process.cwd(), opened)
+    const guide = await backend.openSettingsDocumentation(runtime, { page: 'imGateway', locale })
+    const fileLocale = locale === 'zh-TW' ? 'zh-CN' : locale
+    expect(guide.path).toBe(join(process.cwd(), 'docs/usage/settings', fileLocale, 'im-gateway.md'))
+    expect(guide.content).toContain('/sessions')
+    expect(guide.content).toContain('card.action.trigger')
+    const reference = await backend.openSettingsDocumentation(runtime, { documentPath: '../../im-gateway.md', basePath: guide.path })
+    expect(reference.path).toBe(join(process.cwd(), 'docs/usage/im-gateway.md'))
+    expect(opened).toEqual([])
+  })
+
   it('reads the self-owned local documentation entry instead of requiring a placeholder URL or OS opener', async () => {
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-settings-docs-'))
     try {

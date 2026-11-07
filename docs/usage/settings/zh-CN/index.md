@@ -4,6 +4,7 @@
 
 - [通用设置](general.md)
 - [终端设置](terminal.md)
+- [IM 网关与飞书终端对话](im-gateway.md)
 - [扩展设置](extensions.md)
 - [模型设置](models.md)
 - [计费概览](billing.md)

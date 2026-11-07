@@ -59,7 +59,8 @@ SDK 日志关闭，避免请求对象、token 和消息正文进入日志。应�
 | `tests/im-gateway-host-creation.test.ts` | 按精确资产 ID 创建、同名冲突/资产删除不回退、新建失败保留面板 |
 | `tests/im-gateway-output-backend.test.ts` | 输出分批、ANSI 跨块过滤、TUI 屏幕、缓冲超限、权限撤销、断线/解除绑定、慢读屏和发送失败 |
 | `tests/im-gateway-ipc.test.ts` | IPC 到配置/加密/管理器组装、不可用密钥环、退出停止 |
-| `tests/im-gateway-settings.test.ts` | all/指定范围授权设置、保存后清空 Secret、轮询保留草稿、卸载停止轮询、错误提示 |
+| `tests/im-gateway-settings.test.ts` | all/指定范围授权设置、保存后清空 Secret、轮询保留草稿、卸载停止轮询、错误提示、本页帮助入口不触发保存 |
+| `tests/settings-external-actions-backend.test.ts`、`tests/app-runtime-ipc.test.ts` | IM 网关帮助页路由、中英文文档与繁体回退、相对链接仍在项目文档目录内 |
 | `tests/app-shell.test.ts` | surface.create 显式启动本机 PTY，同时保留原面板创建与 SSH 连接回归 |
 | `tests/main-terminal-shutdown-backend.test.ts` | 真实主进程 PTY 数据路径同时投递到渲染器和内存订阅，订阅异常不影响终端 |
 

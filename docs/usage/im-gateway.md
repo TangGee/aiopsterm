@@ -1,5 +1,7 @@
 # 飞书 IM 网关
 
+设置字段与首次对话流程见 [设置页帮助](settings/zh-CN/im-gateway.md)（[English](settings/en-US/im-gateway.md)），也可在 **设置 > IM 网关** 点击标题旁的问号，在应用内阅读。本文集中维护完整业务规则与排障说明。
+
 IM 网关把飞书消息接到 aiopsterm 终端，支持选择已有终端和新建本机、SSH 终端。当前支持飞书企业自建应用，通过长连接接收消息，不需要公网回调地址。入口是 **设置 > IM 网关**，默认关闭。桌面应用和目标终端必须保持运行；关闭窗口后终端不可用时，网关不能独立执行命令。
 
 绑定后普通聊天直接写入所选终端并回车，终端输出自动发回该聊天。网关本身不调用大模型；如果终端正在运行 Codex 等交互程序，消息就输入该程序。未来渠道可通过适配器接入，当前只能配置一个飞书应用。技术边界见 [IM 网关架构](../technical/im-gateway.md)。
@@ -14,6 +16,12 @@ IM 网关把飞书消息接到 aiopsterm 终端，支持选择已有终端和新
 6. 单聊机器人发送 `/sessions`，点击卡片中的终端名称绑定，不必复制 sessionId。点击“新建终端”（或发送 `/new`），选择本机或授权 SSH 主机，创建新的桌面 tab 并自动绑定。绑定后直接发 `pwd` 等文字即可输入终端。
 
 官方参考：[事件处理与长连接](https://open.feishu.cn/document/server-side-sdk/nodejs-sdk/handling-events)、[接收消息事件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message/events/receive)、[长连接接收卡片回调](https://open.feishu.cn/document/event-subscription-guide/callback-subscription/receive-and-handle-callbacks)、[官方 Node SDK](https://github.com/larksuite/node-sdk)。
+
+## 配置生效与升级
+
+点击“保存并应用”会重新建立网关连接并立即应用配置，不需要重启整个软件。新增或修改飞书事件、卡片回调、权限后，还需要在飞书后台发布应用配置。升级 aiopsterm 的功能代码需要启动包含这些功能的新版本；仅重启旧安装包不会获得新功能。
+
+重启后发送新的 `/sessions` 卡片并重新选择终端。旧卡片会失效，原绑定的 sessionId 也可能因终端恢复而变化。真实消息与卡片操作是否成功，需要在已发布的飞书应用中验证，不能仅凭设置页显示“已连接”判断。
 
 ## 命令
 

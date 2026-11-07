@@ -14,6 +14,13 @@ beforeEach(() => {
 })
 afterEach(() => { wrapper?.unmount(); vi.useRealTimers() })
 describe('IM gateway settings', () => {
+  it('opens page documentation without saving settings or exposing credentials', async () => {
+    wrapper = mount(ImGatewaySettings); await flushPromises()
+    await wrapper.get('.settings-page-help-button').trigger('click')
+    expect(wrapper.emitted('open-documentation')).toEqual([[]])
+    expect(api.save).not.toHaveBeenCalled()
+    expect(wrapper.get('.settings-page-help-button').attributes('aria-label')).toBe('settings.help.open')
+  })
   it('saves explicit permissions and new credentials, then clears the secret field', async () => {
     wrapper = mount(ImGatewaySettings); await flushPromises()
     await wrapper.get('[data-testid="gateway-app-id"]').setValue('cli_1234567890abcdef')

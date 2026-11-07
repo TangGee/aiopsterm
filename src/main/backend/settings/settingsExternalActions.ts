@@ -41,6 +41,7 @@ const uniquePaths = (paths: Array<string | undefined>) => {
 }
 
 const settingsDocumentationFiles: Record<SettingsDocumentationPage, string> = {
+  imGateway: 'im-gateway.md',
   general: 'general.md',
   terminal: 'terminal.md',
   extensions: 'extensions.md',

@@ -72,7 +72,7 @@
         </section>
 
         <section v-else-if="workspace.activeSettingsSection === 'imGateway'" class="settings-content-page">
-          <ImGatewaySettings />
+          <ImGatewaySettings @open-documentation="workspace.openSettingsPageDocumentation('imGateway')" />
         </section>
 
         <section v-else-if="workspace.activeSettingsSection === 'voice'" class="settings-content-page">

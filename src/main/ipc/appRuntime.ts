@@ -34,6 +34,7 @@ type RegisterAppRuntimeIpcInput = {
 }
 
 const settingsDocumentationPages = new Set<SettingsDocumentationPage>([
+  'imGateway',
   'general',
   'terminal',
   'extensions',

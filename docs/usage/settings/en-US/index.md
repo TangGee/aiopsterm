@@ -4,6 +4,7 @@ The question-mark button next to each settings page title opens the detailed doc
 
 - [General Settings](general.md)
 - [Terminal Settings](terminal.md)
+- [IM Gateway And Feishu Terminal Conversations](im-gateway.md)
 - [Extension Settings](extensions.md)
 - [Model Settings](models.md)
 - [Billing Overview](billing.md)

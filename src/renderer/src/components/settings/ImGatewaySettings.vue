@@ -1,6 +1,11 @@
 <template>
   <div class="im-gateway-settings">
-    <h3>{{ t('imGateway.title') }}</h3>
+    <div class="settings-page-title-row">
+      <h3>{{ t('imGateway.title') }}</h3>
+      <div class="settings-page-help">
+        <button type="button" class="settings-page-help-button" :title="t('settings.help.open')" :aria-label="t('settings.help.open')" @click="emit('open-documentation')"><CircleHelp /></button>
+      </div>
+    </div>
     <p>{{ t('imGateway.description') }}</p>
     <div role="status" class="gateway-status">{{ t('imGateway.connection') }}: {{ connectionLabel }} | {{ t('imGateway.pending') }}: {{ status?.pending || 0 }}</div>
     <p v-if="notice" role="alert">{{ notice }}</p>
@@ -29,7 +34,8 @@
       <ol><li>{{ t('imGateway.setup1') }}</li><li>{{ t('imGateway.setup2') }}</li><li>{{ t('imGateway.setup3') }}</li><li>{{ t('imGateway.setup4') }}</li></ol>
       <pre>/sessions
 /new
-/run pwd
+pwd
+/run /model
 /read
 /send text
 /interrupt
@@ -42,11 +48,13 @@
 </template>
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { CircleHelp } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 import { imGatewayClient } from '@/services/imGateway/imGatewayClient'
 import { defaultImGatewayConfig, type ImGatewayStatus } from '@shared/contracts/imGateway'
 import type { ControlTerminalSummary } from '@shared/contracts/control'
 const { t } = useI18n()
+const emit = defineEmits<{ 'open-documentation': [] }>()
 const status = ref<ImGatewayStatus>()
 const draft = ref(structuredClone(defaultImGatewayConfig))
 const users = ref(''); const groups = ref(''); const assets = ref(''); const secret = ref(''); const clearSecret = ref(false)
@@ -112,8 +120,8 @@ label { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 input:not([type=checkbox]), textarea { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--theme-module-active-border); border-radius: 8px; background: var(--theme-module-active-input-bg); color: var(--theme-module-active-text); font: inherit; }
 input:focus-visible, textarea:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--theme-accent, #4faabb); outline-offset: 2px; }
 input[type=checkbox] { accent-color: var(--theme-accent, #4faabb); }
-button { padding: 9px 14px; border: 1px solid var(--theme-module-active-border); border-radius: 8px; background: var(--theme-module-active-card-bg); color: var(--theme-module-active-text); font: inherit; cursor: pointer; }
-button:hover { filter: brightness(1.15); }
+button:not(.settings-page-help-button) { padding: 9px 14px; border: 1px solid var(--theme-module-active-border); border-radius: 8px; background: var(--theme-module-active-card-bg); color: var(--theme-module-active-text); font: inherit; cursor: pointer; }
+button:not(.settings-page-help-button):hover { filter: brightness(1.15); }
 fieldset:disabled { opacity: 0.6; }
 fieldset:disabled button { cursor: default; }
 summary { cursor: pointer; }

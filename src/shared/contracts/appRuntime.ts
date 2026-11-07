@@ -381,6 +381,7 @@ export type OpenPathResult = {
 }
 
 export type SettingsDocumentationPage =
+  | 'imGateway'
   | 'general'
   | 'terminal'
   | 'extensions'
