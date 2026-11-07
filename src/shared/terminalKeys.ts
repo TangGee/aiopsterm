@@ -90,7 +90,7 @@ export const keyDataForTerminal = (value: unknown): { key: string; data: string 
   else if (!shift && ctrl && char === '\x7f') data = (alt ? '\x1b' : '') + '\x08'
   else if (!shift && ctrl && /[@-_a-z?]/.test(char)) {
     data = (alt ? '\x1b' : '') + (char === '?' ? '\x7f' : String.fromCharCode(char.toUpperCase().charCodeAt(0) - 64))
-  } else if (ctrl || shift && char < ' ' || shift && char === '\x7f') {
+  } else if (ctrl || shift && char <= ' ' || shift && char === '\x7f') {
     data = `\x1b[${char.toLowerCase().charCodeAt(0)};${modifier}u`
   } else {
     const unshifted = "`1234567890-=[]\\;',./"

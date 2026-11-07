@@ -9,7 +9,8 @@ describe('explicit terminal keys', () => {
     ['ctrl shift f1', '\x1b[1;6P'], ['ctrl shift home', '\x1b[1;6H'], ['ctrl shift page-down', '\x1b[6;6~'],
     ['ctrl shift tab', '\x1b[9;6u'], ['ctrl shift enter', '\x1b[13;6u'], ['shift tab', '\x1b[Z'],
     ['ctrl c', '\x03'], ['ctrl+c', '\x03'], ['^C', '\x03'], ['ctrl+?', '\x7f'], ['ctrl space', '\x00'],
-    ['alt enter', '\x1b\r'], ['alt shift 1', '\x1b!'], ['esc', '\x1b'], ['enter', '\r'], ['up', '\x1b[A']
+    ['alt enter', '\x1b\r'], ['alt shift 1', '\x1b!'], ['alt shift space', '\x1b[32;4u'],
+    ['esc', '\x1b'], ['enter', '\r'], ['up', '\x1b[A']
   ])('encodes %s without adding a separate Return', (key, data) => {
     expect(keyDataForTerminal(key)).toEqual({ key, data })
   })
