@@ -33,7 +33,7 @@ Handle SSH passwords, MFA, and connection failures on the desktop; the new tab i
 
 ## Key reference and screenshots
 
-`/help` lists commands and key mappings; `/help key` shows only the key reference, even before binding. Supported names include `esc`/`escape`, `enter`/`return`/`cr`, `tab`, `space`, `backspace`/`bs`, `delete`/`del`, `insert`/`ins`, `up`/`arrowup` (also down/left/right), `home`, `end`, `pageup`/`pgup`, `pagedown`/`pgdn`, and `f1` through `f12`. A single character such as `/key y` is also supported.
+`/help` lists commands and key mappings; `/keymap` or `/help key` shows the complete key reference, even before binding. Arguments such as `/keymap ctrl c` still return the full reference and never send terminal input. Supported names include `esc`/`escape`, `enter`/`return`/`cr`, `tab`, `space`, `backspace`/`bs`, `delete`/`del`, `insert`/`ins`, `up`/`arrowup` (also down/left/right), `home`, `end`, `pageup`/`pgup`, `pagedown`/`pgdn`, and `f1` through `f12`. A single character such as `/key y` is also supported.
 
 Combine `ctrl` (aliases `control`, `c`), `alt`, and `shift` using spaces, plus signs or hyphens, in any order or case. Examples: `/key ctrl c`, `/key shift tab`, `/key ctrl shift c`, `/key ctrl alt c`, `/key ctrl shift up`. Send one key per message; repeated modifiers, unknown names and key sequences are rejected. Extended combinations depend on the terminal program's keyboard protocol and do not trigger desktop shortcuts.
 

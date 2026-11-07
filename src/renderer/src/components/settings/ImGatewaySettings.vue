@@ -38,6 +38,7 @@ pwd
 /run /model
 /read
 /send text
+/keymap
 /help key
 /screenshot
 /key ctrl c

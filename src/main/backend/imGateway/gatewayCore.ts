@@ -6,7 +6,7 @@ import type { ControlTerminalSummary } from '@shared/contracts/control'
 import { gatewayConversationKey, GatewayStateStore } from './gatewayState'
 import type { GatewayBinding, GatewayCard, GatewayMessage, GatewayPolicy, GatewayReply, GatewayScreenSender, GatewayTerminalPort } from './gatewayTypes'
 
-const gatewayActions = new Set(['/help', '/sessions', '/new', '/bind', '/unbind', '/run', '/send', '/key', '/screenshot', '/read', '/interrupt', '/status', '/binding'])
+const gatewayActions = new Set(['/help', '/keymap', '/sessions', '/new', '/bind', '/unbind', '/run', '/send', '/key', '/screenshot', '/read', '/interrupt', '/status', '/binding'])
 export const gatewayKeyHelp = [
   '/key <按键> 向绑定终端发送一个按键，不额外回车。',
   'esc / escape：Escape；enter / return / cr：回车；tab：制表；space：空格。',
@@ -19,7 +19,7 @@ export const gatewayKeyHelp = [
   '每条消息一个按键；重复修饰键、未知键、esc enter 这种连续按键会被拒绝。',
   '按键发送给终端内程序，不触发桌面复制粘贴。Ctrl+Shift 字符等扩展键需目标程序支持键盘协议，不能保证所有程序响应。'
 ].join('\n')
-export const gatewayHelp = '/sessions 选择终端卡片\n/new 新建终端卡片\n/unbind 解除绑定\n/run <单行命令> 输入并回车\n/send <文字> 仅输入\n/read 查看最近屏幕\n/screenshot 查看绑定终端截图\n/key <按键> 发送按键；/help key 查看完整映射\n/interrupt 发送 Ctrl+C\n/binding 查看当前绑定（/status 也可）\n/help 查看帮助\n绑定后普通消息直接输入并回车，输出自动回传。终端中的斜杠命令可用 /run 发送。\n\n' + gatewayKeyHelp
+export const gatewayHelp = '/sessions 选择终端卡片\n/new 新建终端卡片\n/unbind 解除绑定\n/run <单行命令> 输入并回车\n/send <文字> 仅输入\n/read 查看最近屏幕\n/screenshot 查看绑定终端截图\n/key <按键> 发送按键\n/keymap 查看完整按键映射（/help key 也可）\n/interrupt 发送 Ctrl+C\n/binding 查看当前绑定（/status 也可）\n/help 查看帮助\n绑定后普通消息直接输入并回车，输出自动回传。终端中的斜杠命令可用 /run 发送。\n\n' + gatewayKeyHelp
 
 export const gatewayOutput = (text: string) => {
   const clean = stripVTControlCharacters(text).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '').replace(/<at\b/gi, '< at')
@@ -145,7 +145,7 @@ export class GatewayCore {
     }
     const match = text.trim().match(/^(\/\w+)(?:\s+([\s\S]*))?$/)
     const action = match?.[1] || ''; const argument = match?.[2] || ''
-    if (action === '/help' && argument.trim().toLowerCase() === 'key') return gatewayKeyHelp
+    if (action === '/keymap' || action === '/help' && argument.trim().toLowerCase() === 'key') return gatewayKeyHelp
     if (action === '/help' || text.trimStart().startsWith('/') && !gatewayActions.has(action)) return gatewayHelp
     if (action === '/unbind') { this.options.state.bind(key); this.relays.get(key)?.stop(); this.relays.delete(key); return '已解除绑定。' }
     const terminals = (await this.options.terminal.list()).filter(item => this.allowed(item))

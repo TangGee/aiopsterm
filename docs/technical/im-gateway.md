@@ -82,7 +82,7 @@ npm run build
 
 输出事件与 renderer 交付存在短暂时差，初始读屏和重绘事件保留两次有界稳定读取机会；没有新事件后停止读屏，相同内容不发送，继续保留三秒卡片更新上限。避免一次空缓存读取把静态菜单永久吞掉。
 
-`terminal.screenshot` 从同一核心获取当前底部屏幕的普通字符及样式 runs，在 renderer 独立 canvas 生成 PNG，不抓桌面或强制切换面板；图片尺寸和载荷均有限制。网关复核绑定后通过 Feishu image.create 上传，使用返回 image_key 回复图片，消息重试复用 UUID；上传失败回复固定文字。图片仅在内存中处理；发送排队、上传前后和重试前重新核验授权。`/help key` 在无绑定时也可查看，不产生终端写入。
+`terminal.screenshot` 从同一核心获取当前底部屏幕的普通字符及样式 runs，在 renderer 独立 canvas 生成 PNG，不抓桌面或强制切换面板；图片尺寸和载荷均有限制。网关复核绑定后通过 Feishu image.create 上传，使用返回 image_key 回复图片，消息重试复用 UUID；上传失败回复固定文字。图片仅在内存中处理；发送排队、上传前后和重试前重新核验授权。`/keymap` 和 `/help key` 在无绑定或绑定断开时也可查看，不产生终端读写；`/keymap` 忽略参数并返回完整映射，仍检查用户及群聊授权。
 
 补充回归：`tests/terminal-control-screen.test.ts` 覆盖历史滚动、后台面板、传统 buffer、身份冲突及异步替换；`tests/threaded-terminal-core-worker.test.ts` 使用真实 xterm 核心验证待解析数据和一次性更新菜单及反色行；`tests/terminal-screenshot.test.ts` 验证字符布局和颜色绘制、隐藏文字及尺寸限制。网关核心和适配器测试覆盖按键帮助、截图授权、上传失败与消息去重；输出测试保留动画防刷屏并覆盖静态菜单迟到。
 

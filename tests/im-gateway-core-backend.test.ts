@@ -37,6 +37,20 @@ describe('IM gateway core', () => {
     }
     expect(port.write).not.toHaveBeenCalled()
   })
+  it.each(['/keymap', '/keymap ctrl c'])('returns the complete mapping for %s without terminal input', async command => {
+    const expected = await receive('/help key')
+    expect(await receive(command)).toBe(expected)
+    await receive('/bind session')
+    expect(await receive(command)).toBe(expected)
+    terminals[0].connected = false
+    expect(await receive(command)).toBe(expected)
+    expect(port.write).not.toHaveBeenCalled()
+    expect(port.read).not.toHaveBeenCalled()
+    const count = replies.length
+    await receive(command, { senderId: 'unauthorized' })
+    expect(replies).toHaveLength(count)
+    expect(await receive('/help')).toContain('/keymap')
+  })
   it('captures an authorized bound terminal without writing input', async () => {
     port.screenshot = vi.fn(async () => 'data:image/png;base64,aW1hZ2U=')
     await receive('/screenshot'); expect(port.screenshot).not.toHaveBeenCalled()
