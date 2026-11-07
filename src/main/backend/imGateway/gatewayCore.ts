@@ -6,8 +6,8 @@ import type { ControlTerminalSummary } from '@shared/contracts/control'
 import { gatewayConversationKey, GatewayStateStore } from './gatewayState'
 import type { GatewayBinding, GatewayCard, GatewayMessage, GatewayPolicy, GatewayReply, GatewayScreenSender, GatewayTerminalPort } from './gatewayTypes'
 
-const gatewayActions = new Set(['/help', '/sessions', '/new', '/bind', '/unbind', '/run', '/send', '/key', '/read', '/interrupt', '/status'])
-export const gatewayHelp = '/sessions 选择终端卡片\n/new 新建终端卡片\n/unbind 解除绑定\n/run <单行命令> 输入并回车\n/send <文字> 仅输入\n/read 查看最近屏幕\n/key <按键> 发送 esc、ctrl c、enter 等按键\n/interrupt 发送 Ctrl+C\n/status 查看绑定\n/help 查看帮助\n绑定后普通消息直接输入并回车，输出自动回传。终端中的斜杠命令可用 /run 发送。'
+const gatewayActions = new Set(['/help', '/sessions', '/new', '/bind', '/unbind', '/run', '/send', '/key', '/read', '/interrupt', '/status', '/binding'])
+export const gatewayHelp = '/sessions 选择终端卡片\n/new 新建终端卡片\n/unbind 解除绑定\n/run <单行命令> 输入并回车\n/send <文字> 仅输入\n/read 查看最近屏幕\n/key <按键> 发送 esc、ctrl c、ctrl shift c 等按键\n/interrupt 发送 Ctrl+C\n/binding 查看当前绑定（/status 也可）\n/help 查看帮助\n绑定后普通消息直接输入并回车，输出自动回传。终端中的斜杠命令可用 /run 发送。'
 export const gatewayOutput = (text: string) => {
   const clean = stripVTControlCharacters(text).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '').replace(/<at\b/gi, '< at')
   return clean.length > 6000 ? `[仅显示末尾内容]\n${clean.slice(-6000)}` : clean
@@ -17,6 +17,7 @@ export class GatewayCore {
   private queues = new Map<string, Promise<void>>()
   private terminalLocks = new Set<string>()
   private choices = new Map<string, { key: string; command: string; expires: number }>()
+  private disconnected = new WeakSet<GatewayBinding>()
   private relays = new Map<string, GatewayOutputRelay>()
   private count = 0
   private lastMessageAt?: number
@@ -38,29 +39,47 @@ export class GatewayCore {
     return policy.allowedUserIds.includes(message.senderId) && (message.conversationType === 'direct' || policy.allowedGroupIds.includes(message.conversationId))
   }
   private allowed(terminal: ControlTerminalSummary) {
+    return terminal.connected && Boolean(terminal.sessionId) && this.assetAllowed(terminal)
+  }
+  private assetAllowed(terminal: ControlTerminalSummary) {
     const policy = this.options.policy()
-    return terminal.connected && Boolean(terminal.sessionId) && (terminal.kind === 'local' ? this.localAllowed() : terminal.kind === 'ssh' && Boolean(terminal.assetId && (policy.allowedAssetIds.includes('all') || policy.allowedAssetIds.includes(terminal.assetId))))
+    return (terminal.kind === 'local' ? this.localAllowed() : terminal.kind === 'ssh' && Boolean(terminal.assetId && (policy.allowedAssetIds.includes('all') || policy.allowedAssetIds.includes(terminal.assetId))))
   }
   private localAllowed() { const policy = this.options.policy(); return policy.allowLocalTerminal || policy.allowedAssetIds.includes('all') }
-  private async bindingValid(message: GatewayMessage, key: string, binding: GatewayBinding) {
+  private async bindingValid(message: GatewayMessage, key: string, binding: GatewayBinding, knownTerminal: ControlTerminalSummary) {
     if (!this.active || !this.authorized(message)) return false
     const current = this.options.state.binding(key)
     if (current?.sessionId !== binding.sessionId || current.panelId !== binding.panelId) return false
     const terminals = await this.options.terminal.list()
-    return this.active && this.authorized(message) && this.options.state.binding(key) === current && terminals.some(item => item.sessionId === binding.sessionId && item.panelId === binding.panelId && this.allowed(item))
+    if (!this.active || !this.authorized(message) || this.options.state.binding(key) !== current || !this.assetAllowed(knownTerminal)) return false
+    const terminal = terminals.find(item => item.sessionId === binding.sessionId && item.panelId === binding.panelId)
+    if ((!terminal || !terminal.connected) && !this.disconnected.has(current)) {
+      this.disconnected.add(current)
+      this.relays.get(key)?.stop()
+      try {
+        await this.options.send?.(message, '绑定的终端已断开或关闭，输出回传已停止。请用 /sessions 重新选择或 /new 新建终端。此前输入是否执行完成，请在桌面确认，不会自动重发。')
+      } catch { this.options.audit('reply_failed', message) }
+      return false
+    }
+    return Boolean(terminal && this.allowed(terminal))
   }
-  private follow(message: GatewayMessage, key: string, binding: GatewayBinding) {
+  private follow(message: GatewayMessage, key: string, binding: GatewayBinding, terminal: ControlTerminalSummary) {
     if (this.relays.has(key) || !this.options.send || !this.options.terminal.subscribe) return
+    this.disconnected.delete(binding)
     this.relays.set(key, new GatewayOutputRelay({ terminal: this.options.terminal, binding, message,
-      valid: () => this.bindingValid(message, key, binding), send: this.options.send, sendScreen: this.options.sendScreen,
-      failed: () => this.options.audit('output_failed', message), stopped: () => this.relays.delete(key)
+      valid: () => this.bindingValid(message, key, binding, terminal), send: this.options.send, sendScreen: this.options.sendScreen,
+      failed: async () => {
+        this.options.audit('output_failed', message)
+        // A session may disappear while an asynchronous screen read is pending.
+        await this.bindingValid(message, key, binding, terminal)
+      }, stopped: () => this.relays.delete(key)
     }))
   }
   private bind(message: GatewayMessage, key: string, terminal: ControlTerminalSummary) {
     const binding = { sessionId: terminal.sessionId!, panelId: terminal.panelId }
     this.options.state.bind(key, binding)
     this.relays.get(key)?.stop(); this.relays.delete(key)
-    this.follow(message, key, binding)
+    this.follow(message, key, binding, terminal)
     return `已绑定 ${terminal.title}。直接发送文字即可输入并回车，输出会自动回传。/sessions 切换终端，/unbind 解除绑定。`
   }
   private card(key: string, title: string, text: string, buttons: { label: string; command: string }[]): GatewayCard {
@@ -152,17 +171,21 @@ export class GatewayCore {
     }
     const binding = this.options.state.binding(key)
     const terminal = binding && terminals.find(item => item.sessionId === binding.sessionId && item.panelId === binding.panelId)
-    if (!terminal || !binding) return '没有可用的绑定，请发送 /sessions 并点击卡片选择终端。'
-    this.follow(message, key, binding)
-    if (action === '/status') return `当前绑定：${terminal.title}。普通消息会输入此终端，/unbind 解除绑定。`
+    if (!binding) return '没有可用的绑定，请发送 /sessions 并点击卡片选择终端。'
+    if (!terminal) {
+      this.relays.get(key)?.stop()
+      return '绑定的终端已断开、关闭或不再授权，本条消息未写入终端。请发送 /sessions 重新选择，或 /new 新建终端。'
+    }
+    this.follow(message, key, binding, terminal)
+    if (action === '/status' || action === '/binding') return `当前绑定：${terminal.title}。${terminal.kind === 'local' ? '本机终端' : `SSH 主机：${terminal.host || terminal.title}`}，已连接。普通消息会输入此终端，/unbind 解除绑定。`
     if (this.terminalLocks.has(binding.sessionId)) return '该终端正在处理另一条网关请求，请稍后重试。'
     this.terminalLocks.add(binding.sessionId)
     try {
       if (action === '/read') return (await this.options.terminal.read(binding)) || '终端屏幕为空。'
       if (action === '/key') {
-        const name = argument.trim().replace(/^(ctrl|control|c)\s+(\S)$/i, '$1+$2')
+        const name = argument.trim()
         const keyData = name.length <= 40 && !/[\x00-\x1f\x7f]/.test(argument) ? keyDataForTerminal(name) : null
-        if (!keyData) return '无效按键。示例：/key esc、/key ctrl c、/key enter、/key tab、/key up；每条消息只发送一个按键。'
+        if (!keyData) return '无效按键。示例：/key esc、/key ctrl c、/key ctrl shift c、/key enter、/key tab、/key up；每条消息只发送一个按键。'
         if (keyData.data === '\r') this.relays.get(key)?.beginInput()
         await this.options.terminal.write(binding, keyData.data)
         return `已发送按键 ${name}，不额外回车。`

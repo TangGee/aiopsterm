@@ -39,9 +39,13 @@ pwd
 /read
 /send text
 /key ctrl c
+/key ctrl shift c
+/key ctrl alt c
+/key ctrl shift up
 /key esc
 /key enter
 /interrupt
+/binding
 /status
 /unbind
 /help</pre>

@@ -22,6 +22,83 @@ const fixture = (sendScreen?: GatewayScreenSender) => {
   return { terminal, send, valid, failed }
 }
 describe('gateway terminal output', () => {
+  it.each(['disconnected', 'closed', 'replaced', 'notification failure'])('notifies once on a %s terminal without requiring further output', async reason => {
+    let terminals = [{ ...binding, title: 'Host', kind: 'ssh' as const, connected: true, assetId: 'asset', active: false }]
+    const send = vi.fn(async () => {})
+    if (reason === 'notification failure') send.mockRejectedValue(new Error('offline'))
+    const terminal: GatewayTerminalPort = {
+      list: vi.fn(async () => terminals), read: vi.fn(async () => ''), write: vi.fn(async () => {}),
+      subscribe: (target, receive) => subscribeTerminalOutput(target.sessionId, receive)
+    }
+    core = new GatewayCore({ policy: () => ({ allowedUserIds: ['user'], allowedGroupIds: [], allowedAssetIds: ['asset'], allowLocalTerminal: false }),
+      terminal, state: new GatewayStateStore(), reply: vi.fn(async () => {}), send, audit: vi.fn() })
+    await core.receive(message); await core.drain()
+    if (reason === 'closed') terminals = []
+    else if (reason === 'replaced') terminals[0].sessionId = 'replacement'
+    else terminals[0].connected = false
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(send).toHaveBeenCalledOnce()
+    expect(send).toHaveBeenCalledWith(message, expect.stringContaining('终端已断开或关闭'))
+    publishTerminalOutput('session', 'late output'); await vi.advanceTimersByTimeAsync(5000)
+    expect(send).toHaveBeenCalledOnce()
+    expect(terminal.write).not.toHaveBeenCalled()
+  })
+  it.each(['stop', 'unbind', 'user', 'asset'])('does not send a disconnect notification after %s', async action => {
+    const target = { ...binding, title: 'Host', kind: 'ssh' as const, connected: true, assetId: 'asset', active: false }
+    const policy: GatewayPolicy = { allowedUserIds: ['user'], allowedGroupIds: [], allowedAssetIds: ['asset'], allowLocalTerminal: false }
+    const send = vi.fn(async () => {})
+    const terminal: GatewayTerminalPort = {
+      list: vi.fn(async () => [target]), read: vi.fn(async () => ''), write: vi.fn(async () => {}),
+      subscribe: (bound, receive) => subscribeTerminalOutput(bound.sessionId, receive)
+    }
+    core = new GatewayCore({ policy: () => policy, terminal, state: new GatewayStateStore(), reply: vi.fn(async () => {}), send, audit: vi.fn() })
+    await core.receive(message); await core.drain()
+    if (action === 'stop') core.stop()
+    else if (action === 'unbind') { await core.receive({ ...message, messageId: 'unbind', text: '/unbind' }); await core.drain() }
+    else if (action === 'user') policy.allowedUserIds = []
+    else policy.allowedAssetIds = []
+    target.connected = false
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(send).not.toHaveBeenCalled()
+  })
+  it('does not let a late disconnect check notify after rebinding another terminal', async () => {
+    const first = { ...binding, title: 'First', kind: 'ssh' as const, connected: true, assetId: 'asset', active: false }
+    const second = { ...first, panelId: 'second-panel', sessionId: 'second-session', title: 'Second' }
+    const terminal: GatewayTerminalPort = {
+      list: vi.fn(async () => [first, second]), read: vi.fn(async () => ''), write: vi.fn(async () => {}),
+      subscribe: (bound, receive) => subscribeTerminalOutput(bound.sessionId, receive)
+    }
+    const send = vi.fn(async () => {})
+    core = new GatewayCore({ policy: () => ({ allowedUserIds: ['user'], allowedGroupIds: [], allowedAssetIds: ['asset'], allowLocalTerminal: false }),
+      terminal, state: new GatewayStateStore(), reply: vi.fn(async () => {}), send, audit: vi.fn() })
+    await core.receive(message); await core.drain()
+    let finish!: (terminals: typeof first[]) => void
+    vi.mocked(terminal.list).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    await vi.advanceTimersByTimeAsync(1000)
+    await core.receive({ ...message, messageId: 'switch', text: '/bind second-session' })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(terminal.list).toHaveBeenCalledTimes(3)
+    finish([]); await core.drain(); await vi.advanceTimersByTimeAsync(1000)
+    expect(send).not.toHaveBeenCalled()
+    await core.receive({ ...message, messageId: 'input-after-switch', text: 'hello' }); await core.drain()
+    expect(terminal.write).toHaveBeenCalledWith({ panelId: 'second-panel', sessionId: 'second-session' }, 'hello\r')
+  })
+  it('reports a disconnect during a failing screen read and does not resend input', async () => {
+    const target = { ...binding, title: 'Host', kind: 'ssh' as const, connected: true, assetId: 'asset', active: false }
+    const send = vi.fn(async () => {})
+    const terminal: GatewayTerminalPort = {
+      list: vi.fn(async () => [target]), read: vi.fn(async () => { target.connected = false; throw new Error('closed') }), write: vi.fn(async () => {}),
+      subscribe: (bound, receive) => subscribeTerminalOutput(bound.sessionId, receive)
+    }
+    core = new GatewayCore({ policy: () => ({ allowedUserIds: ['user'], allowedGroupIds: [], allowedAssetIds: ['asset'], allowLocalTerminal: false }),
+      terminal, state: new GatewayStateStore(), reply: vi.fn(async () => {}), send, audit: vi.fn() })
+    await core.receive(message); await core.drain()
+    await core.receive({ ...message, messageId: 'input', text: 'hello' }); await core.drain()
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(send).toHaveBeenCalledOnce()
+    expect(send).toHaveBeenCalledWith(message, expect.stringContaining('此前输入是否执行完成'))
+    expect(terminal.write).toHaveBeenCalledOnce()
+  })
   it('starts a new output card for each submitted chat input while preserving key-only navigation', async () => {
     const terminal: GatewayTerminalPort = {
       list: vi.fn(async () => [{ ...binding, title: 'Host', kind: 'ssh' as const, connected: true, assetId: 'asset', active: false }]),
@@ -253,11 +330,11 @@ describe('gateway terminal output', () => {
     await core.receive({ ...message, messageId: 'rebind' }); await core.drain()
     vi.mocked(terminal.list).mockResolvedValue([{ ...binding, sessionId: 'restarted', title: 'Host', kind: 'ssh' as const, connected: true, assetId: 'asset', active: false }])
     publishTerminalOutput('session', 'late'); await vi.advanceTimersByTimeAsync(1000)
-    expect(send).toHaveBeenCalledOnce()
+    expect(send).toHaveBeenCalledTimes(2)
     vi.mocked(terminal.list).mockResolvedValue([{ ...binding, title: 'Host', kind: 'ssh' as const, connected: true, assetId: 'asset', active: false }])
     await core.receive({ ...message, messageId: 'bind-after-restart' }); await core.drain()
     policy.allowedAssetIds = []
     publishTerminalOutput('session', 'revoked'); await vi.advanceTimersByTimeAsync(1000)
-    expect(send).toHaveBeenCalledOnce()
+    expect(send).toHaveBeenCalledTimes(2)
   })
 })

@@ -31,7 +31,9 @@ afterEach(async () => { core.stop(); await core.drain(); await rm(directory, { r
 describe('IM gateway core', () => {
   it.each([
     ['ctrl c', '\x03'], ['ctrl+c', '\x03'], ['CTRL C', '\x03'], ['esc', '\x1b'], ['escape', '\x1b'],
-    ['enter', '\r'], ['tab', '\t'], ['up', '\x1b[A'], ['down', '\x1b[B'], ['ctrl d', '\x04'], ['space', ' ']
+    ['enter', '\r'], ['tab', '\t'], ['up', '\x1b[A'], ['down', '\x1b[B'], ['ctrl d', '\x04'], ['space', ' '],
+    ['ctrl shift c', '\x1b[99;6u'], ['CTRL+SHIFT+C', '\x1b[99;6u'], ['ctrl alt c', '\x1b\x03'],
+    ['ctrl shift up', '\x1b[1;6A'], ['alt shift f5', '\x1b[15;4~']
   ])('sends /key %s only to the bound terminal without adding Return', async (key, expected) => {
     await receive('/bind session')
     expect(await receive(`/key ${key}`)).toContain('已发送按键')
@@ -40,7 +42,7 @@ describe('IM gateway core', () => {
   })
   it('rejects missing, unsupported, multiple or literal control keys without writing them as text', async () => {
     await receive('/bind session')
-    for (const command of ['/key', '/key ctrl', '/key esc enter', '/key ctrl alt c', '/key unknown', '/key constructor', '/key \x1b', '/key ctrl\nc']) {
+    for (const command of ['/key', '/key ctrl', '/key esc enter', '/key ctrl ctrl c', '/key ctrl alt', '/key ctrl meta c', '/key unknown', '/key constructor', '/key \x1b', '/key ctrl\nc']) {
       expect(await receive(command)).toContain('无效按键')
     }
     expect(port.write).not.toHaveBeenCalled()
@@ -61,6 +63,36 @@ describe('IM gateway core', () => {
     expect(port.write).toHaveBeenCalledOnce()
     vi.mocked(port.write).mockRejectedValue(new Error('disconnected'))
     expect(await receive('/key esc')).toContain('操作失败')
+  })
+  it('shows the current binding through /binding and retains /status', async () => {
+    expect(await receive('/binding')).toContain('没有可用的绑定')
+    await receive('/bind session')
+    expect(await receive('/binding')).toContain('当前绑定：Host')
+    expect(await receive('/status')).toContain('当前绑定：Host')
+    terminals.push({ ...terminals[0], sessionId: 'second', panelId: 'second-panel', title: 'Second' })
+    await receive('/bind second')
+    expect(await receive('/binding')).toContain('当前绑定：Second')
+    await receive('/unbind')
+    expect(await receive('/binding')).toContain('没有可用的绑定')
+    expect(port.write).not.toHaveBeenCalled()
+  })
+  it.each(['hello', '/key ctrl shift c', '/read', '/run pwd', '/binding', '/status'])('replies explicitly when the terminal is disconnected for %s', async text => {
+    await receive('/bind session')
+    terminals[0].connected = false
+    expect(await receive(text)).toContain('已断开')
+    expect(port.write).not.toHaveBeenCalled()
+  })
+  it('replies when the original session is gone without falling back to a replacement', async () => {
+    await receive('/bind session')
+    terminals[0].sessionId = 'replacement'
+    expect(await receive('hello')).toContain('已断开')
+    expect(port.write).not.toHaveBeenCalled()
+  })
+  it('replies if a normal chat write fails after the connected-session check', async () => {
+    await receive('/bind session')
+    vi.mocked(port.write).mockRejectedValue(new Error('connection lost'))
+    expect(await receive('hello')).toContain('操作失败或终端已断开')
+    expect(port.write).toHaveBeenCalledOnce()
   })
   it('binds an authorized terminal, writes explicit commands, reads and interrupts', async () => {
     expect(await receive('/sessions')).toContain('Host (Local)')

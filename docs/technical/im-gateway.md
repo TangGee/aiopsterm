@@ -20,7 +20,7 @@
 
 绑定键由 provider、accountId、tenantId、conversationId、senderId 的 JSON 数组 SHA-256 构成。每次操作重新列出终端并检查主机资产授权、连接状态和原 sessionId/panelId；主机重连不能自动继承旧绑定。本地终端默认不授权。`allowedAssetIds` 含保留值 `all` 时允许本机和全部保存的 SSH 资产，包括后来新增的资产；用户和群聊权限仍是精确白名单，`*` 无特殊语义。
 
-单聊检查用户允许列表；群聊还要检查聊天允许列表及当前机器人的精确 @。未知斜杠指令回复帮助。普通聊天在已绑定后输入终端并回车，未绑定时提示选择卡片。`/sessions` 和 `/new` 卡片每页 8 项，以名称和主机展示。新建调用已有桌面本机/SSH 流程，不调用 LLM。`/run` 表示写入并回车，不跟踪退出码或声明完成。`/key` 复用 `src/shared/terminalKeys.ts` 与 Control Socket 共用的纯按键映射，将 `ctrl c` 规范化为 `ctrl+c` 后写入精确绑定，不额外回车；拒绝原文控制字符、未知键名、多键序列，仍经过身份/资产/会话检查、消息去重与终端锁。`/interrupt` 是固定 Ctrl+C；普通消息最多 4096 字符，多行和制表符用 bracketed paste；拒绝其余控制字符。`/run`、`/send` 保持单行 2048 字符上限。
+单聊检查用户允许列表；群聊还要检查聊天允许列表及当前机器人的精确 @。未知斜杠指令回复帮助。普通聊天在已绑定后输入终端并回车，未绑定时提示选择卡片。`/sessions` 和 `/new` 卡片每页 8 项，以名称和主机展示。新建调用已有桌面本机/SSH 流程，不调用 LLM。`/run` 表示写入并回车，不跟踪退出码或声明完成。`/key` 复用 `src/shared/terminalKeys.ts` 与 Control Socket 共用的纯按键映射，解析 Ctrl/Alt/Shift 修饰键（空格、加号或连字符分隔，大小写及顺序无关）后写入精确绑定，不额外回车；拒绝原文控制字符、未知键名、多键序列，仍经过身份/资产/会话检查、消息去重与终端锁。导航键和功能键使用 xterm 修饰参数；Ctrl+Alt 字符保留 ESC 加控制字符的兼容形式，Ctrl+Shift 字符以 CSI-u 保留 Shift 位，不降级成中断字符。此入口不模拟桌面键盘事件或系统快捷键，不协商/修改目标程序的键盘模式，扩展键需要接收程序支持。编码参考 [xterm 控制序列](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html) 与 [kitty 键盘协议](https://sw.kovidgoyal.net/kitty/keyboard-protocol/#key-codes)。`/binding` 和 `/status` 共用绑定查询；`/interrupt` 是固定 Ctrl+C；普通消息最多 4096 字符，多行和制表符用 bracketed paste；拒绝其余控制字符。`/run`、`/send` 保持单行 2048 字符上限。
 
 每个聊天身份串行处理，独立聊天可以并行。全局最多 32 条已接受且未完成的消息。对同一终端的重叠操作返回忙，不自动重复执行。停用、更新权限或应用退出后不执行排队中的操作；已经送出的输入无法撤回。
 
@@ -38,6 +38,8 @@
 
 输出订阅只保存在内存，不持久化聊天正文。新绑定先发送最近屏幕，再每秒合并原会话的数据；跨数据块的 ANSI 状态机过滤 CSI/OSC。光标重绘程序通过 `sendScreen` 创建纯文本内容的交互卡片，保存返回的 message_id，后续以 `im.message.patch` 更新原卡片（`update_multi: true`），最多约 3 秒一次。比较截断后的屏幕，忽略行尾空格；读取和发送串行，慢请求期间的新数据留待下次处理，避免并发新建重复消息。普通输入、`/run` 和回车按键推进输入版本并清空卡片 ID，迟到的旧请求不能覆盖新一轮卡片身份；其他按键继续更新当前卡片。卡片 ID 只存内存，更新失败停止订阅，不回退为新发消息。无 sendScreen 能力的渠道保留文本输出。普通流每批最多 6000 字符，缓冲上限 64000 字符，超限有提示。每次发出前重新验证授权、sessionId/panelId 和绑定身份，慢读屏完成后也验证；发送失败停止订阅并记录 `output_failed`，下一次 `/status`、输入或重新绑定可恢复。重启/重新配置后不立即恢复输出，待该身份发来下一条消息。
 
+输出轮询发现绑定的精确会话断开、消失或替换时，停止订阅并向原聊天发送一次通用断开通知。通知前重新检查用户、群聊、原终端资产权限和绑定对象身份；解绑、停用、权限撤销及旧订阅迟到不触发通知。读屏失败也重新检查断开状态。消息到达时无绑定与绑定失效分别回复；写入失败走错误回执，不自动重试输入，不宣称先前输入未执行。通知失败记录 `reply_failed`，不能因此重启订阅。
+
 ## 凭据、状态与日志
 
 配置单独存储在 userData 下的 `im-gateway.json`；Secret 仅经 Electron safeStorage 加密后写入。Linux basic_text 和不可用的系统加密均拒绝保存新凭据。账号或 provider 改变不能复用旧 Secret。
@@ -52,12 +54,13 @@ SDK 日志关闭，避免请求对象、token 和消息正文进入日志。应�
 
 | 测试文件 | 验收边界 |
 | --- | --- |
-| `tests/im-gateway-core-backend.test.ts` | 用户/群/主机权限、绑定隔离、断线失效、跨重启去重、队列、限流、停用、损坏/不可写状态、输入与输出边界、控制按键精确字节/不追加回车/无效键/权限/去重、all、卡片翻页/隔离/一次性选择、新建自动绑定、普通消息输入 |
+| `tests/terminal-keys-backend.test.ts` | 单键/双键/三键精确编码、修饰键顺序/分隔符、Ctrl+Shift 不降级成 Ctrl、无效组合拒绝 |
+| `tests/im-gateway-core-backend.test.ts` | 用户/群/主机权限、绑定隔离、断线失效、跨重启去重、队列、限流、停用、损坏/不可写状态、输入与输出边界、/binding 与 /status 查询、断开/关闭/替换会话及写入期间断开的明确回执、控制按键精确字节/不追加回车/无效键/权限/去重、all、卡片翻页/隔离/一次性选择、新建自动绑定、普通消息输入 |
 | `tests/im-gateway-manager-backend.test.ts` | 默认关闭、加密、换账号/适配器、权限校验、生命周期和迟到回调、停止后不再启动 |
 | `tests/im-gateway-terminal-backend.test.ts` | 写入精确 sessionId、面板复用时拒绝读屏、控制接口异常、本机/SSH 新建与失败保留 tab |
 | `tests/im-gateway-feishu-backend.test.ts` | 事件筛选、精确机器人 @、连接状态、关闭取消、回复 UUID 与重试、不泄漏 SDK 日志、交互卡片、回调身份校验、主动输出 UUID、纯文本卡片创建与同 ID 更新/失败重试不新建 |
 | `tests/im-gateway-host-creation.test.ts` | 按精确资产 ID 创建、同名冲突/资产删除不回退、新建失败保留面板 |
-| `tests/im-gateway-output-backend.test.ts` | 输出分批、ANSI 跨块过滤、TUI 屏幕、缓冲超限、权限撤销、断线/解除绑定、慢读屏和发送失败、动画合并为同一卡片/尾空格去重/最终屏幕、输入切换与迟到请求隔离 |
+| `tests/im-gateway-output-backend.test.ts` | 输出分批、ANSI 跨块过滤、TUI 屏幕、缓冲超限、权限撤销、断线/解除绑定、断开单次通知/停止与撤权不通知/读屏中途断开、慢读屏和发送失败、动画合并为同一卡片/尾空格去重/最终屏幕、输入切换与迟到请求隔离 |
 | `tests/im-gateway-ipc.test.ts` | IPC 到配置/加密/管理器组装、不可用密钥环、退出停止 |
 | `tests/im-gateway-settings.test.ts` | all/指定范围授权设置、保存后清空 Secret、轮询保留草稿、卸载停止轮询、错误提示、本页帮助入口不触发保存 |
 | `tests/settings-external-actions-backend.test.ts`、`tests/app-runtime-ipc.test.ts` | IM 网关帮助页路由、中英文文档与繁体回退、相对链接仍在项目文档目录内 |
@@ -67,7 +70,7 @@ SDK 日志关闭，避免请求对象、token 和消息正文进入日志。应�
 运行相关测试和构建：
 
 ```bash
-npx vitest run tests/im-gateway-*.test.ts tests/control-socket-backend.test.ts tests/i18n-runtime.test.ts
+npx vitest run tests/im-gateway-*.test.ts tests/terminal-keys-backend.test.ts tests/control-socket-backend.test.ts tests/i18n-runtime.test.ts
 npm run build
 ```
 

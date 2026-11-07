@@ -50,7 +50,7 @@ export class GatewayOutputRelay {
     valid: () => Promise<boolean>
     send: (message: GatewayMessage, text: string) => Promise<void>
     sendScreen?: GatewayScreenSender
-    failed: () => void
+    failed: () => void | Promise<void>
     stopped?: () => void
   }) {
     this.unsubscribe = options.terminal.subscribe?.(options.binding, data => {
@@ -109,6 +109,11 @@ export class GatewayOutputRelay {
       } else {
         await this.options.send(this.options.message, text)
       }
-    } catch { if (!this.stopped) this.options.failed(); this.stop() }
+    } catch {
+      if (!this.stopped) {
+        try { await this.options.failed() } catch { /* Failure reporting must not restart the relay. */ }
+      }
+      this.stop()
+    }
   }
 }

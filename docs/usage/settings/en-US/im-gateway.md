@@ -23,6 +23,10 @@ Use **Save and apply**, then check that the status is **Connected**. Saved setti
 3. Send ordinary text such as `pwd`. It is entered in the bound terminal with Return, and output is forwarded automatically. If Codex is already running there, your text goes to Codex.
 4. To switch terminals, choose another through `/sessions` or use `/bind <sessionId>`. A successful switch stops forwarding the previous terminal's output without requiring `/unbind`. A failed switch retains the previous binding; the old terminal keeps running.
 
+`/binding` (or `/status`) shows the bound terminal, host, and connection state. Three-key combinations include `/key ctrl shift c`, `/key ctrl alt c`, and `/key ctrl shift up`; plus separators such as `ctrl+shift+c` also work. Keys go to the terminal program, not desktop shortcuts such as Copy. Extended combinations require support from the receiving program.
+
 `/key ctrl c` or `/interrupt` sends Ctrl+C; `/key esc` sends Escape; `/key enter`, `/key tab`, and `/key up` send the named key without appending another Return; `/send <text>` types without Return; `/unbind` ends the binding without closing the terminal. Use `/run /model` to send slash commands to a program such as Codex.
+
+A disconnected, closed, or replaced terminal produces one notification. Subsequent messages receive an explicit unavailable-binding reply; choose a terminal again. Previous input is never automatically retried.
 
 Handle SSH passwords, MFA, and connection failures on the desktop; the new tab is retained. Ordinary output is batched. TUI programs such as Codex update one output card at most once every three seconds, so animation does not create repeated messages. Submitting another ordinary message starts a new output card when the screen changes. Cards retain the latest screen, not a complete transcript. See the [detailed gateway reference (Chinese)](../../im-gateway.md) for limits, credential handling, and troubleshooting. If cards arrive but buttons do not work, check that the persistent `card.action.trigger` callback was saved and published, then request a fresh card.
