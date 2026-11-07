@@ -4,7 +4,7 @@ Use Feishu to select an aiopsterm terminal, open a new local or SSH terminal, an
 
 ## Setup and authorization
 
-Create an enterprise custom app in Feishu, enable its bot capability, and grant `im:message.p2p_msg:readonly` and `im:message:send_as_bot`. Subscribe to `im.message.receive_v1` events and `card.action.trigger` callbacks using persistent connections. Group use also requires the applicable mention-message permission. Enter credentials in aiopsterm, connect, save both subscriptions in Feishu, and publish the app configuration.
+Create an enterprise custom app in Feishu, enable its bot capability, and grant `im:message.p2p_msg:readonly` and `im:message:send_as_bot`. Screenshots also require the application permission `im:resource` (retrieve and upload image or file resources). If the console offers `im:resource:upload`, the upload-only permission is sufficient. Permissions marked as enabled and exempt from approval may take effect immediately; verify an actual upload and publish only when the console requires it. Subscribe to `im.message.receive_v1` events and `card.action.trigger` callbacks using persistent connections. Group use also requires the applicable mention-message permission. Enter credentials in aiopsterm, connect, save both subscriptions in Feishu, and publish the app configuration.
 
 | Setting | Purpose |
 | --- | --- |

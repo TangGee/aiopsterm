@@ -42,6 +42,21 @@ describe('Feishu adapter', () => {
     expect(sdk.reply.mock.calls[0][0].data.content).toContain('截图上传失败')
     adapter.stop()
   })
+  it('returns a text fallback when Feishu rejects image upload permission', async () => {
+    sdk.image.mockRejectedValueOnce(Object.assign(new Error('Access denied'), {
+      response: { status: 400, data: { code: 99991672, error: { permission_violations: [{ subject: 'im:resource' }] } } }
+    }))
+    const adapter = await createFeishuAdapter({ accountId: appId, secret: 'secret', connection: vi.fn() })
+    await adapter.reply(normalizeFeishuMessage(event(), appId)!, { image: 'data:image/png;base64,aW1hZ2U=' })
+    expect(sdk.image).toHaveBeenCalledOnce()
+    expect(sdk.reply).toHaveBeenCalledOnce()
+    expect(sdk.reply.mock.calls[0][0].data.msg_type).toBe('text')
+    const text = JSON.parse(sdk.reply.mock.calls[0][0].data.content).text
+    expect(text).toContain('图片上传权限')
+    expect(text).toContain('/read')
+    expect(sdk.create).not.toHaveBeenCalled()
+    adapter.stop()
+  })
   it('discards an uploaded screenshot when authorization changes during upload', async () => {
     let valid = true
     sdk.image.mockImplementation(async () => { valid = false; return { image_key: 'private-image' } })

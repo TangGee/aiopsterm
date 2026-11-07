@@ -4,7 +4,7 @@
 
 ## 配置与授权
 
-飞书应用创建、权限、用户 open_id 获取、长连接事件和卡片回调发布步骤集中在 [飞书 IM 网关](../../im-gateway.md)。需要同时配置 `im.message.receive_v1` 和 `card.action.trigger`，否则可能收到卡片却无法点击操作。
+飞书应用创建、权限、用户 open_id 获取、长连接事件和卡片回调发布步骤集中在 [飞书 IM 网关](../../im-gateway.md)。截图还需开通应用身份权限 `im:resource`（获取与上传图片或文件资源）；若后台提供 `im:resource:upload`，可只开通上传权限。按后台提示确认生效或发布，详见上述配置说明。需要同时配置 `im.message.receive_v1` 和 `card.action.trigger`，否则可能收到卡片却无法点击操作。
 
 | 设置 | 用途 |
 | --- | --- |
