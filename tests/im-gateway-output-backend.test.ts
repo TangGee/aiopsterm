@@ -3,7 +3,7 @@ import { GatewayOutputRelay, GatewayTextDecoder } from '../src/main/backend/imGa
 import { GatewayCore } from '../src/main/backend/imGateway/gatewayCore'
 import { GatewayStateStore } from '../src/main/backend/imGateway/gatewayState'
 import { publishTerminalOutput, subscribeTerminalOutput } from '../src/main/backend/terminal/terminalOutputEvents'
-import type { GatewayCard, GatewayMessage, GatewayPolicy, GatewayReply, GatewayTerminalPort } from '../src/main/backend/imGateway/gatewayTypes'
+import type { GatewayCard, GatewayMessage, GatewayPolicy, GatewayReply, GatewayScreenSender, GatewayTerminalPort } from '../src/main/backend/imGateway/gatewayTypes'
 
 const message: GatewayMessage = { provider: 'feishu', accountId: 'app', tenantId: 'tenant', senderId: 'user', conversationId: 'chat', conversationType: 'direct', messageId: 'bind', createdAt: 1800000000000, text: '/bind session' }
 const binding = { panelId: 'panel', sessionId: 'session' }
@@ -11,17 +11,118 @@ let relay: GatewayOutputRelay | undefined
 let core: GatewayCore | undefined
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(message.createdAt) })
 afterEach(async () => { relay?.stop(); core?.stop(); await relay?.drain(); await core?.drain(); vi.useRealTimers() })
-const fixture = () => {
+const fixture = (sendScreen?: GatewayScreenSender) => {
   const terminal: GatewayTerminalPort = {
     list: vi.fn(async () => [{ ...binding, title: 'Host', kind: 'ssh' as const, connected: true, assetId: 'asset', active: false }]),
     read: vi.fn(async () => '$ prompt'), write: vi.fn(async () => {}),
     subscribe: (target, receive) => subscribeTerminalOutput(target.sessionId, receive)
   }
   const send = vi.fn(async (_message: GatewayMessage, _text: string) => {}); const valid = vi.fn(async () => true); const failed = vi.fn()
-  relay = new GatewayOutputRelay({ terminal, binding, message, send, valid, failed })
+  relay = new GatewayOutputRelay({ terminal, binding, message, send, sendScreen, valid, failed })
   return { terminal, send, valid, failed }
 }
 describe('gateway terminal output', () => {
+  it('starts a new output card for each submitted chat input while preserving key-only navigation', async () => {
+    const terminal: GatewayTerminalPort = {
+      list: vi.fn(async () => [{ ...binding, title: 'Host', kind: 'ssh' as const, connected: true, assetId: 'asset', active: false }]),
+      read: vi.fn(async () => 'ready'), write: vi.fn(async () => {}),
+      subscribe: (target, receive) => subscribeTerminalOutput(target.sessionId, receive)
+    }
+    const screen = vi.fn<GatewayScreenSender>(async (_message, _text, id): Promise<string> => id || `card-${screen.mock.calls.length}`)
+    core = new GatewayCore({ policy: () => ({ allowedUserIds: ['user'], allowedGroupIds: [], allowedAssetIds: ['asset'], allowLocalTerminal: false }),
+      state: new GatewayStateStore(), terminal, reply: vi.fn(async () => {}), send: vi.fn(async () => {}), sendScreen: screen, audit: vi.fn() })
+    await core.receive(message); await core.drain()
+    publishTerminalOutput('session', '\x1b[Hready'); await vi.advanceTimersByTimeAsync(1000)
+    await core.receive({ ...message, messageId: 'input', text: 'question' }); await core.drain()
+    vi.mocked(terminal.read).mockResolvedValue('answer'); publishTerminalOutput('session', '\x1b[Hanswer')
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(screen.mock.calls[1][2]).toBeUndefined()
+    await core.receive({ ...message, messageId: 'escape', text: '/key esc' }); await core.drain()
+    vi.mocked(terminal.read).mockResolvedValue('menu closed'); publishTerminalOutput('session', '\x1b[Hmenu')
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(screen.mock.calls[2][2]).toBe('card-2')
+    await core.receive({ ...message, messageId: 'enter', text: '/key enter' }); await core.drain()
+    vi.mocked(terminal.read).mockResolvedValue('next answer'); publishTerminalOutput('session', '\x1b[Hnext')
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(screen.mock.calls[3][2]).toBeUndefined()
+  })
+  it('coalesces animated TUI screens into one message instead of posting repeated snapshots', async () => {
+    const screen = vi.fn<GatewayScreenSender>(async () => 'output-card')
+    const { terminal, send } = fixture(screen)
+    for (let second = 0; second < 12; second++) {
+      vi.mocked(terminal.read).mockResolvedValue(`Answer\nWorking ${second}s`)
+      publishTerminalOutput('session', '\x1b[Hredraw')
+      await vi.advanceTimersByTimeAsync(1000)
+    }
+    expect(send).not.toHaveBeenCalled()
+    expect(screen).toHaveBeenCalledTimes(4)
+    expect(screen.mock.calls[0]).toEqual([message, 'Answer\nWorking 0s', undefined])
+    expect(screen.mock.calls.slice(1).every(call => call[2] === 'output-card')).toBe(true)
+    vi.mocked(terminal.read).mockResolvedValue('Answer\nFinished')
+    publishTerminalOutput('session', '\x1b[Hfinal')
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(screen).toHaveBeenLastCalledWith(message, 'Answer\nFinished', 'output-card')
+    const sent = screen.mock.calls.length
+    vi.mocked(terminal.read).mockResolvedValue('Answer   \nFinished  \n\n')
+    publishTerminalOutput('session', '\x1b[Hpadding only')
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(screen).toHaveBeenCalledTimes(sent)
+  })
+  it('serializes slow screen reads while new output continues arriving', async () => {
+    let finish!: (text: string) => void
+    const screen = vi.fn<GatewayScreenSender>(async () => 'output-card')
+    const { terminal } = fixture(screen)
+    vi.mocked(terminal.read).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    publishTerminalOutput('session', '\x1b[Hfirst')
+    await vi.advanceTimersByTimeAsync(1000)
+    for (let second = 0; second < 5; second++) {
+      publishTerminalOutput('session', '\x1b[Hmore')
+      await vi.advanceTimersByTimeAsync(1000)
+    }
+    expect(terminal.read).toHaveBeenCalledOnce()
+    finish('Answer'); await relay!.drain()
+    expect(screen).toHaveBeenCalledOnce()
+    vi.mocked(terminal.read).mockResolvedValue('Answer complete')
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(screen).toHaveBeenLastCalledWith(message, 'Answer complete', 'output-card')
+  })
+  it('waits for a slow card creation before sending the latest screen to the same card', async () => {
+    let finish!: (id: string) => void
+    const screen = vi.fn<GatewayScreenSender>().mockImplementationOnce(() => new Promise(resolve => { finish = resolve })).mockResolvedValue('output-card')
+    const { terminal } = fixture(screen)
+    publishTerminalOutput('session', '\x1b[Hfirst'); await vi.advanceTimersByTimeAsync(1000)
+    vi.mocked(terminal.read).mockResolvedValue('Final screen')
+    for (let second = 0; second < 5; second++) {
+      publishTerminalOutput('session', '\x1b[Hanimation'); await vi.advanceTimersByTimeAsync(1000)
+    }
+    expect(screen).toHaveBeenCalledOnce()
+    expect(terminal.read).toHaveBeenCalledOnce()
+    finish('output-card'); await relay!.drain(); await vi.advanceTimersByTimeAsync(3000)
+    expect(screen).toHaveBeenCalledTimes(2)
+    expect(screen).toHaveBeenLastCalledWith(message, 'Final screen', 'output-card')
+  })
+  it('does not reuse an in-flight old output card after a new input', async () => {
+    let finish!: (id: string) => void
+    const screen = vi.fn<GatewayScreenSender>().mockImplementationOnce(() => new Promise(resolve => { finish = resolve })).mockResolvedValue('new-card')
+    const { terminal } = fixture(screen)
+    vi.mocked(terminal.read).mockResolvedValue('old answer')
+    publishTerminalOutput('session', '\x1b[Hold'); await vi.advanceTimersByTimeAsync(1000)
+    relay!.beginInput()
+    vi.mocked(terminal.read).mockResolvedValue('new answer'); publishTerminalOutput('session', '\x1b[Hnew')
+    finish('old-card'); await relay!.drain(); await vi.advanceTimersByTimeAsync(3000)
+    expect(screen).toHaveBeenLastCalledWith(message, 'new answer', undefined)
+  })
+  it('stops after screen updates fail rather than falling back to repeated new messages', async () => {
+    const screen = vi.fn<GatewayScreenSender>().mockResolvedValueOnce('output-card').mockRejectedValue(new Error('deleted card'))
+    const { terminal, send, failed } = fixture(screen)
+    vi.mocked(terminal.read).mockResolvedValue('first')
+    publishTerminalOutput('session', '\x1b[Hfirst'); await vi.advanceTimersByTimeAsync(1000)
+    vi.mocked(terminal.read).mockResolvedValue('second')
+    publishTerminalOutput('session', '\x1b[Hsecond'); await vi.advanceTimersByTimeAsync(3000)
+    expect(failed).toHaveBeenCalledOnce()
+    publishTerminalOutput('session', '\x1b[Hthird'); await vi.advanceTimersByTimeAsync(5000)
+    expect(screen).toHaveBeenCalledTimes(2); expect(send).not.toHaveBeenCalled()
+  })
   it('sends an initial screen then batches exact-session output without requiring /read', async () => {
     const { send } = fixture()
     await vi.advanceTimersByTimeAsync(1000)

@@ -38,6 +38,9 @@ pwd
 /run /model
 /read
 /send text
+/key ctrl c
+/key esc
+/key enter
 /interrupt
 /status
 /unbind

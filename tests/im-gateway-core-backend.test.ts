@@ -29,6 +29,39 @@ beforeEach(async () => {
 })
 afterEach(async () => { core.stop(); await core.drain(); await rm(directory, { recursive: true, force: true }) })
 describe('IM gateway core', () => {
+  it.each([
+    ['ctrl c', '\x03'], ['ctrl+c', '\x03'], ['CTRL C', '\x03'], ['esc', '\x1b'], ['escape', '\x1b'],
+    ['enter', '\r'], ['tab', '\t'], ['up', '\x1b[A'], ['down', '\x1b[B'], ['ctrl d', '\x04'], ['space', ' ']
+  ])('sends /key %s only to the bound terminal without adding Return', async (key, expected) => {
+    await receive('/bind session')
+    expect(await receive(`/key ${key}`)).toContain('已发送按键')
+    expect(port.write).toHaveBeenCalledOnce()
+    expect(port.write).toHaveBeenCalledWith({ sessionId: 'session', panelId: 'panel' }, expected)
+  })
+  it('rejects missing, unsupported, multiple or literal control keys without writing them as text', async () => {
+    await receive('/bind session')
+    for (const command of ['/key', '/key ctrl', '/key esc enter', '/key ctrl alt c', '/key unknown', '/key constructor', '/key \x1b', '/key ctrl\nc']) {
+      expect(await receive(command)).toContain('无效按键')
+    }
+    expect(port.write).not.toHaveBeenCalled()
+  })
+  it('requires a connected authorized binding for keys and never falls back to another terminal', async () => {
+    await receive('/key esc'); expect(port.write).not.toHaveBeenCalled()
+    await receive('/bind session')
+    await receive('/key ctrl c', { senderId: 'unknown' })
+    await receive('/key esc', { conversationId: 'other' })
+    policy.allowedAssetIds = []; await receive('/key esc')
+    policy.allowedAssetIds = ['asset']; terminals[0].connected = false; await receive('/key ctrl c')
+    expect(port.write).not.toHaveBeenCalled()
+  })
+  it('deduplicates key delivery and reports write failures without claiming success', async () => {
+    await receive('/bind session')
+    const input = message('/key ctrl c')
+    await core.receive(input); await core.receive(input); await core.drain()
+    expect(port.write).toHaveBeenCalledOnce()
+    vi.mocked(port.write).mockRejectedValue(new Error('disconnected'))
+    expect(await receive('/key esc')).toContain('操作失败')
+  })
   it('binds an authorized terminal, writes explicit commands, reads and interrupts', async () => {
     expect(await receive('/sessions')).toContain('Host (Local)')
     await receive('/bind session')

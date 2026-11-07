@@ -23,7 +23,7 @@ export const koKR = completeLocaleMessages({
   'imGateway.setup2': "개인 메시지, 필요한 그룹 멘션, 메시지 전송 권한을 활성화하고 지속 연결로 im.message.receive_v1 이벤트와 card.action.trigger 콜백을 구독하세요.",
   'imGateway.setup3': "현재 앱의 사용자 open_id를 입력하세요. all은 로컬 터미널과 저장된 모든 SSH 호스트를 허용합니다. 개별 허용 시 자산 ID와 로컬 터미널 권한을 따로 설정하세요. all에서도 사용자와 그룹 허용 목록은 유지됩니다. 활성화하고 저장한 뒤 연결되면 Feishu 이벤트와 콜백의 지속 연결 설정을 저장하고 앱을 게시하세요.",
   'imGateway.setup4': "/sessions를 보내 터미널 이름을 선택하세요. sessionId를 복사할 필요가 없습니다. 새 터미널 또는 /new로 로컬 또는 허용된 SSH 터미널을 만들고 연결할 수 있습니다. 다른 터미널 선택이나 /bind는 기존 연결을 자동 교체하므로 /unbind가 먼저 필요하지 않습니다. 전환 실패 시 기존 연결을 유지합니다.",
-  'imGateway.behavior': "연결 후 pwd 같은 일반 메시지를 보내면 Enter와 함께 입력되고 출력이 자동 전달됩니다. /send는 입력만, /interrupt는 Ctrl+C를 전송하며 /unbind는 터미널을 닫지 않고 대화를 종료합니다. 터미널 슬래시 명령은 /run /model처럼 보내세요. TUI는 최근 화면 변경을 전달하며 과도한 출력은 알림과 함께 생략됩니다. 저장한 설정은 즉시 적용됩니다. 업그레이드 후 새 버전을 실행하고 재시작 후 /sessions에서 터미널을 다시 선택하세요.",
+  'imGateway.behavior': "연결 후 pwd 같은 일반 메시지를 보내면 Enter와 함께 입력되고 출력이 자동 전달됩니다. /send는 입력만, /interrupt는 Ctrl+C를 전송하며 /unbind는 터미널을 닫지 않고 대화를 종료합니다. 터미널 슬래시 명령은 /run /model처럼 보내세요. TUI는 같은 출력 카드를 최소 3초 간격으로 갱신합니다. /key esc와 /key ctrl c는 추가 Enter 없이 키를 전송합니다. 과도한 출력은 알림과 함께 생략됩니다. 저장한 설정은 즉시 적용됩니다. 업그레이드 후 새 버전을 실행하고 재시작 후 /sessions에서 터미널을 다시 선택하세요.",
   'imGateway.keychainError': "시스템 자격 증명 암호화를 사용할 수 없습니다. 시스템 키체인을 활성화하세요. App Secret은 일반 텍스트로 저장하지 않습니다.",
   'imGateway.authorizationError': "App ID, 허용된 사용자 한 명 이상, 허용된 호스트 또는 로컬 터미널 권한을 입력하세요.",
   'imGateway.secretError': "활성화하기 전에 App Secret을 입력하세요.",

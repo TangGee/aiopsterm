@@ -22,7 +22,7 @@ export const zhCN = {
   'imGateway.setup2': "开通接收单聊消息、群聊 @ 消息（如需群聊）和发送消息权限；长连接订阅 im.message.receive_v1 事件及 card.action.trigger 回调。",
   'imGateway.setup3': "填写当前应用的授权用户 open_id；勾选 all 允许本机和全部已保存的 SSH 主机，或填写指定资产 ID 并单独授权本机。all 不放开用户和群聊白名单。启用并保存，连接成功后保存飞书事件和回调的长连接配置，并发布应用。",
   'imGateway.setup4': "发送 /sessions，点击终端名称绑定，无需复制 sessionId；点击新建终端或发送 /new 可创建并绑定本机或授权 SSH 终端。再次选择或执行 /bind 会自动替换旧绑定，无需先 /unbind；切换失败保留原绑定。",
-  'imGateway.behavior': "绑定后直接发 pwd 等文字即输入终端并回车，输出自动回传。/send 只输入，/interrupt 发送 Ctrl+C，/unbind 停止对话但不关闭终端。终端斜杠命令用 /run /model 等方式发送。TUI 回传变化的最近屏幕，过量输出会省略并提示。保存配置立即应用；升级程序后需启动新版本，重启后重新 /sessions 选择终端。",
+  'imGateway.behavior': "绑定后直接发 pwd 等文字即输入终端并回车，输出自动回传。/send 只输入，/interrupt 发送 Ctrl+C，/unbind 停止对话但不关闭终端。终端斜杠命令用 /run /model 等方式发送。TUI 在同一张输出卡片更新最近屏幕，最多约 3 秒一次；/key esc、/key ctrl c 发送按键，不额外回车，过量输出会省略并提示。保存配置立即应用；升级程序后需启动新版本，重启后重新 /sessions 选择终端。",
   'imGateway.keychainError': "系统凭据加密不可用，请先启用系统密钥环。不会明文保存 App Secret。",
   'imGateway.authorizationError': "请填写 App ID、至少一个授权用户，以及授权主机或本机终端权限。",
   'imGateway.secretError': "启用前请填写 App Secret。",

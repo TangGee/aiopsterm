@@ -23,6 +23,6 @@
 3. 直接发送 `pwd` 等文字，消息会输入绑定终端并回车，输出自动回传。如果终端已运行 Codex，文字就发给 Codex。
 4. 换终端时再次 `/sessions` 选择，或使用 `/bind <sessionId>`；成功后自动停止旧绑定的输出，不必先 `/unbind`。切换失败保留旧绑定，旧终端仍继续运行。
 
-`/interrupt` 发送 Ctrl+C；`/send <文字>` 只输入不回车；`/unbind` 停止当前聊天与终端的绑定，不关闭终端。向 Codex 等程序输入 `/model` 时使用 `/run /model`，避免与网关命令混淆。
+`/key ctrl c` 或 `/interrupt` 发送 Ctrl+C；`/key esc` 发送 Escape；`/key enter`、`/key tab`、`/key up` 等发送对应按键，均不额外回车；`/send <文字>` 只输入不回车；`/unbind` 停止当前聊天与终端的绑定，不关闭终端。向 Codex 等程序输入 `/model` 时使用 `/run /model`，避免与网关命令混淆。
 
-SSH 密码、MFA 或连接失败需要在桌面处理，创建的 tab 会保留。TUI 回传最近屏幕变化，输出分批发送；详细限制及排障见 [使用与命令说明](../../im-gateway.md)。
+SSH 密码、MFA 或连接失败需要在桌面处理，创建的 tab 会保留。普通输出分批发送；Codex 等 TUI 在同一张输出卡片中更新最近屏幕，最多约 3 秒一次，动画不会不断新增消息。提交下一条普通消息后使用新输出卡片。详细限制及排障见 [使用与命令说明](../../im-gateway.md)。

@@ -1,12 +1,13 @@
+import { keyDataForTerminal } from '@shared/terminalKeys'
 import { randomBytes } from 'crypto'
 import { GatewayOutputRelay } from './gatewayOutputRelay'
 import { stripVTControlCharacters } from 'util'
 import type { ControlTerminalSummary } from '@shared/contracts/control'
 import { gatewayConversationKey, GatewayStateStore } from './gatewayState'
-import type { GatewayBinding, GatewayCard, GatewayMessage, GatewayPolicy, GatewayReply, GatewayTerminalPort } from './gatewayTypes'
+import type { GatewayBinding, GatewayCard, GatewayMessage, GatewayPolicy, GatewayReply, GatewayScreenSender, GatewayTerminalPort } from './gatewayTypes'
 
-const gatewayActions = new Set(['/help', '/sessions', '/new', '/bind', '/unbind', '/run', '/send', '/read', '/interrupt', '/status'])
-export const gatewayHelp = '/sessions 选择终端卡片\n/new 新建终端卡片\n/unbind 解除绑定\n/run <单行命令> 输入并回车\n/send <文字> 仅输入\n/read 查看最近屏幕\n/interrupt 发送 Ctrl+C\n/status 查看绑定\n/help 查看帮助\n绑定后普通消息直接输入并回车，输出自动回传。终端中的斜杠命令可用 /run 发送。'
+const gatewayActions = new Set(['/help', '/sessions', '/new', '/bind', '/unbind', '/run', '/send', '/key', '/read', '/interrupt', '/status'])
+export const gatewayHelp = '/sessions 选择终端卡片\n/new 新建终端卡片\n/unbind 解除绑定\n/run <单行命令> 输入并回车\n/send <文字> 仅输入\n/read 查看最近屏幕\n/key <按键> 发送 esc、ctrl c、enter 等按键\n/interrupt 发送 Ctrl+C\n/status 查看绑定\n/help 查看帮助\n绑定后普通消息直接输入并回车，输出自动回传。终端中的斜杠命令可用 /run 发送。'
 export const gatewayOutput = (text: string) => {
   const clean = stripVTControlCharacters(text).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '').replace(/<at\b/gi, '< at')
   return clean.length > 6000 ? `[仅显示末尾内容]\n${clean.slice(-6000)}` : clean
@@ -25,6 +26,7 @@ export class GatewayCore {
     terminal: GatewayTerminalPort
     reply: (message: GatewayMessage, text: GatewayReply) => Promise<void>
     send?: (message: GatewayMessage, text: string) => Promise<void>
+    sendScreen?: GatewayScreenSender
     audit: (event: string, message: GatewayMessage, action?: string) => void
     now?: () => number
   }) {}
@@ -50,7 +52,7 @@ export class GatewayCore {
   private follow(message: GatewayMessage, key: string, binding: GatewayBinding) {
     if (this.relays.has(key) || !this.options.send || !this.options.terminal.subscribe) return
     this.relays.set(key, new GatewayOutputRelay({ terminal: this.options.terminal, binding, message,
-      valid: () => this.bindingValid(message, key, binding), send: this.options.send,
+      valid: () => this.bindingValid(message, key, binding), send: this.options.send, sendScreen: this.options.sendScreen,
       failed: () => this.options.audit('output_failed', message), stopped: () => this.relays.delete(key)
     }))
   }
@@ -157,11 +159,20 @@ export class GatewayCore {
     this.terminalLocks.add(binding.sessionId)
     try {
       if (action === '/read') return (await this.options.terminal.read(binding)) || '终端屏幕为空。'
+      if (action === '/key') {
+        const name = argument.trim().replace(/^(ctrl|control|c)\s+(\S)$/i, '$1+$2')
+        const keyData = name.length <= 40 && !/[\x00-\x1f\x7f]/.test(argument) ? keyDataForTerminal(name) : null
+        if (!keyData) return '无效按键。示例：/key esc、/key ctrl c、/key enter、/key tab、/key up；每条消息只发送一个按键。'
+        if (keyData.data === '\r') this.relays.get(key)?.beginInput()
+        await this.options.terminal.write(binding, keyData.data)
+        return `已发送按键 ${name}，不额外回车。`
+      }
       if (action === '/interrupt') { await this.options.terminal.write(binding, '\x03'); return '已发送 Ctrl+C。使用 /read 查看当前屏幕。' }
       const input = action ? argument : text.replace(/\r\n?/g, '\n')
       const invalid = action ? /[\x00-\x1f\x7f]/.test(input) : /[\x00-\x08\x0b-\x1f\x7f]/.test(input)
       if (!input || input.length > (action ? 2048 : 4096) || invalid) return '输入过长或含控制字符；普通消息最多 4096 字符，/run 和 /send 只接受最多 2048 字符的单行文字。'
       const data = !action && /[\n\t]/.test(input) ? `\x1b[200~${input}\x1b[201~\r` : input + (action === '/send' ? '' : '\r')
+      if (action !== '/send') this.relays.get(key)?.beginInput()
       await this.options.terminal.write(binding, data)
       if (!action) return null
       return action === '/run' ? '已输入并回车，不代表命令执行完成。使用 /read 查看输出。' : '已输入文字，尚未回车。'

@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 const sdk = vi.hoisted(() => ({
   options: null as any, dispatcher: null as any, httpOptions: null as any,
-  request: vi.fn(), create: vi.fn(), reply: vi.fn(), close: vi.fn(), start: vi.fn()
+  request: vi.fn(), create: vi.fn(), patch: vi.fn(), reply: vi.fn(), close: vi.fn(), start: vi.fn()
 }))
 vi.mock('@larksuiteoapi/node-sdk', () => ({
   Domain: { Feishu: 0 }, AppType: { SelfBuild: 0 },
   defaultHttpInstance: { create: (options: any) => { sdk.httpOptions = options; return { interceptors: { response: { use: vi.fn() } } } } },
-  Client: class { request = sdk.request; im = { message: { reply: sdk.reply, create: sdk.create } } },
+  Client: class { request = sdk.request; im = { message: { reply: sdk.reply, create: sdk.create, patch: sdk.patch } } },
   WSClient: class {
     constructor(options: any) { sdk.options = options }
     start = async (options: any) => { sdk.dispatcher = options.eventDispatcher; sdk.start() }
@@ -20,8 +20,32 @@ vi.mock('@larksuiteoapi/node-sdk', () => ({
 import { createFeishuAdapter, normalizeFeishuMessage } from '../src/main/backend/imGateway/feishuAdapter'
 const appId = 'cli_1234567890abcdef'
 const event = (patch: any = {}) => ({ app_id: appId, tenant_key: 'tenant', sender: { sender_type: 'user', sender_id: { open_id: 'ou_user' } }, message: { chat_id: 'oc_chat', message_id: 'om_message', message_type: 'text', chat_type: 'p2p', create_time: '1800000000000', content: '{"text":"/sessions"}' }, ...patch })
-beforeEach(() => { vi.clearAllMocks(); sdk.request.mockResolvedValue({ code: 0, bot: { open_id: 'ou_bot' } }); sdk.reply.mockResolvedValue({ code: 0 }); sdk.create.mockResolvedValue({ code: 0 }) })
+beforeEach(() => { vi.clearAllMocks(); sdk.request.mockResolvedValue({ code: 0, bot: { open_id: 'ou_bot' } }); sdk.reply.mockResolvedValue({ code: 0 }); sdk.create.mockResolvedValue({ code: 0, data: { message_id: 'output-card' } }); sdk.patch.mockResolvedValue({ code: 0 }) })
 describe('Feishu adapter', () => {
+  it('creates a plain-text output card and patches its exact message ID on subsequent screens', async () => {
+    const adapter = await createFeishuAdapter({ accountId: appId, secret: 'secret', connection: vi.fn() })
+    const message = normalizeFeishuMessage(event(), appId)!
+    const id = await adapter.sendScreen!(message, 'First <at user_id="all"> literal')
+    expect(id).toBe('output-card')
+    const data = sdk.create.mock.calls[0][0].data
+    expect(data).toMatchObject({ msg_type: 'interactive', receive_id: 'oc_chat' })
+    expect(JSON.parse(data.content)).toMatchObject({ config: { update_multi: true }, elements: [{ tag: 'div', text: { tag: 'plain_text', content: 'First <at user_id="all"> literal' } }] })
+    sdk.patch.mockRejectedValueOnce(new Error('network'))
+    expect(await adapter.sendScreen!(message, 'Final answer', id)).toBe(id)
+    expect(sdk.create).toHaveBeenCalledOnce()
+    expect(sdk.patch).toHaveBeenCalledTimes(2)
+    expect(sdk.patch.mock.calls[0][0]).toEqual(sdk.patch.mock.calls[1][0])
+    expect(sdk.patch.mock.calls[0][0].path).toEqual({ message_id: id })
+    expect(JSON.parse(sdk.patch.mock.calls[0][0].data.content).elements[0].text.content).toBe('Final answer')
+    adapter.stop()
+  })
+  it('does not recreate output messages when card updates are rejected', async () => {
+    const adapter = await createFeishuAdapter({ accountId: appId, secret: 'secret', connection: vi.fn() })
+    sdk.patch.mockResolvedValue({ code: 230001 })
+    await expect(adapter.sendScreen!(normalizeFeishuMessage(event(), appId)!, 'answer', 'old-card')).rejects.toThrow('FEISHU_REPLY_FAILED')
+    expect(sdk.patch).toHaveBeenCalledTimes(3); expect(sdk.create).not.toHaveBeenCalled()
+    adapter.stop()
+  })
   it('normalizes text identity and ignores bot, other-app and malformed messages', () => {
     expect(normalizeFeishuMessage(event(), appId)).toMatchObject({ provider: 'feishu', accountId: appId, tenantId: 'tenant', senderId: 'ou_user', conversationId: 'oc_chat', messageId: 'om_message', text: '/sessions' })
     expect(normalizeFeishuMessage(event({ app_id: 'another-app' }), appId)).toBeNull()

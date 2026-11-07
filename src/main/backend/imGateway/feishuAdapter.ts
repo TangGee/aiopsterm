@@ -33,6 +33,11 @@ export const feishuGatewayCard = (card: GatewayCard) => ({
     ...card.buttons.map(button => ({ tag: 'action', actions: [{ tag: 'button', text: { tag: 'plain_text', content: button.label }, value: { gateway_token: button.token }, type: 'default' }] }))
   ]
 })
+export const feishuTerminalScreenCard = (text: string) => ({
+  config: { wide_screen_mode: true, update_multi: true },
+  header: { title: { tag: 'plain_text', content: '终端输出' } },
+  elements: [{ tag: 'div', text: { tag: 'plain_text', content: text } }]
+})
 type CardAction = {
   app_id?: string
   operator?: { open_id?: string; tenant_key?: string }
@@ -57,31 +62,35 @@ export const createFeishuAdapter: GatewayAdapterFactory = ({ accountId, secret, 
   let replyQueue = Promise.resolve()
   let lastReplyAt = 0
   const cards = new Map<string, { message: GatewayMessage; expires: number }>()
-  const send = (message: GatewayMessage, content: GatewayReply, push = false) => {
+  const send = (message: GatewayMessage, content: GatewayReply, push = false, previousMessageId?: string, requireMessageId = false) => {
     const uuid = push ? randomUUID().replace(/-/g, '') : createHash('sha256').update(`${accountId}:${message.messageId}`).digest('hex').slice(0, 32)
     if (typeof content !== 'string') {
       for (const [token, card] of cards) if (card.expires < Date.now()) cards.delete(token)
       while (cards.size + content.buttons.length > 2000) cards.delete(cards.keys().next().value!)
       for (const button of content.buttons) cards.set(button.token, { message, expires: Date.now() + 600000 })
     }
-    const data = { msg_type: typeof content === 'string' ? 'text' : 'interactive', content: JSON.stringify(typeof content === 'string' ? { text: content } : feishuGatewayCard(content)), uuid }
+    const data = { msg_type: requireMessageId || typeof content !== 'string' ? 'interactive' : 'text', content: JSON.stringify(requireMessageId ? feishuTerminalScreenCard(content as string) : typeof content === 'string' ? { text: content } : feishuGatewayCard(content)), uuid }
     const sending = replyQueue.catch(() => {}).then(async () => {
       for (let attempt = 0; attempt < 3; attempt++) {
         await delay(Math.max(0, 250 - (Date.now() - lastReplyAt)), undefined, { signal: abort.signal })
         lastReplyAt = Date.now()
         try {
-          const result = push
-            ? await client.im.message.create({ params: { receive_id_type: 'chat_id' }, data: { ...data, receive_id: message.conversationId } })
-            : await client.im.message.reply({ path: { message_id: message.replyToMessageId || message.messageId }, data })
+          const result = previousMessageId
+            ? await client.im.message.patch({ path: { message_id: previousMessageId }, data: { content: data.content } })
+            : push
+              ? await client.im.message.create({ params: { receive_id_type: 'chat_id' }, data: { ...data, receive_id: message.conversationId } })
+              : await client.im.message.reply({ path: { message_id: message.replyToMessageId || message.messageId }, data })
           if (result.code !== 0) throw new Error('FEISHU_REPLY_FAILED')
-          return
+          const messageId = previousMessageId || (result.data && 'message_id' in result.data ? result.data.message_id : undefined)
+          if (requireMessageId && (typeof messageId !== 'string' || !messageId)) throw new Error('FEISHU_REPLY_FAILED')
+          return typeof messageId === 'string' ? messageId : undefined
         } catch {
           if (abort.signal.aborted || attempt === 2) throw new Error('FEISHU_REPLY_FAILED')
           await delay(500 * (attempt + 1), undefined, { signal: abort.signal })
         }
       }
     })
-    replyQueue = sending
+    replyQueue = sending.then(() => {}, () => {})
     return sending
   }
   return {
@@ -111,7 +120,12 @@ export const createFeishuAdapter: GatewayAdapterFactory = ({ accountId, secret, 
       }) })
     },
     stop: () => { abort.abort(); cards.clear(); ws.close({ force: true }) },
-    reply: (message, content) => send(message, content),
-    send: (message, text) => send(message, text, true)
+    reply: async (message, content) => { await send(message, content) },
+    send: async (message, text) => { await send(message, text, true) },
+    sendScreen: async (message, text, previousMessageId) => {
+      const messageId = await send(message, text, true, previousMessageId, true)
+      if (!messageId) throw new Error('FEISHU_REPLY_FAILED')
+      return messageId
+    }
   }
 }

@@ -23,7 +23,7 @@ export const jaJP = completeLocaleMessages({
   'imGateway.setup2': "ダイレクトメッセージ、必要に応じてグループのメンション、送信権限を有効にし、長接続で im.message.receive_v1 と card.action.trigger を購読してください。",
   'imGateway.setup3': "このアプリのユーザー open_id を入力します。all はローカル端末と保存済みの全 SSH ホストを許可します。個別に許可する場合は資産 ID とローカル端末の許可を設定します。all でもユーザーとグループの許可リストは有効です。有効化して保存し、接続後に飛書のイベントとコールバックの長接続設定を保存してアプリを公開します。",
   'imGateway.setup4': "/sessions を送り、端末名を選択して接続先を設定します。sessionId のコピーは不要です。新規端末または /new でローカル端末や許可済み SSH 端末を作成して設定できます。別の端末の選択や /bind は以前の設定を置き換えるため、先に /unbind する必要はありません。切り替え失敗時は元の端末を維持します。",
-  'imGateway.behavior': "端末を選択後、pwd などの通常のメッセージを改行付きで入力し、出力を自動転送します。/send は入力のみ、/interrupt は Ctrl+C、/unbind は端末を閉じずに対話を終了します。端末のスラッシュコマンドは /run /model のように送ります。TUI は最新画面の変化を転送し、過剰な出力は通知付きで省略します。設定は保存直後に適用されます。更新後は新バージョンを起動し、再起動後は /sessions で端末を選び直してください。",
+  'imGateway.behavior': "端末を選択後、pwd などの通常のメッセージを改行付きで入力し、出力を自動転送します。/send は入力のみ、/interrupt は Ctrl+C、/unbind は端末を閉じずに対話を終了します。端末のスラッシュコマンドは /run /model のように送ります。TUI は同じ出力カードを約3秒以上の間隔で更新し、/key esc と /key ctrl c は追加の改行なしでキーを送ります。、過剰な出力は通知付きで省略します。設定は保存直後に適用されます。更新後は新バージョンを起動し、再起動後は /sessions で端末を選び直してください。",
   'imGateway.keychainError': "システムの資格情報暗号化が利用できません。キーチェーンを有効にしてください。App Secret は平文で保存しません。",
   'imGateway.authorizationError': "App ID、許可するユーザー 1 人以上、許可するホストまたはローカル端末の許可を設定してください。",
   'imGateway.secretError': "有効にする前に App Secret を入力してください。",
