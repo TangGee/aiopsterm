@@ -204,6 +204,14 @@ export type ThreadedTerminalCellRun = {
   inverse?: boolean
 }
 
+export type ThreadedTerminalCapture = {
+  cols: number
+  rows: number
+  lines: ThreadedTerminalScreenLine[]
+  theme: ThreadedTerminalTheme
+  settings: ThreadedTerminalSettings
+}
+
 export type ThreadedTerminalScreenSnapshot = {
   terminalId: string
   seq: number
@@ -273,7 +281,7 @@ export type ThreadedTerminalCoreRequest =
   | { type: 'scroll-to-line'; terminalId: string; line: number }
   | { type: 'search'; terminalId: string; query: string; direction: 'next' | 'previous'; caseSensitive?: boolean; incremental?: boolean }
   | { type: 'search-clear'; terminalId: string }
-  | { type: 'read-screen'; terminalId: string; requestId: string; tailLines?: number; normalBuffer?: boolean }
+  | { type: 'read-screen'; terminalId: string; requestId: string; tailLines?: number; normalBuffer?: boolean; capture?: boolean }
   | { type: 'read-selection'; terminalId: string; requestId: string; range: ThreadedTerminalSelectionRange }
   | { type: 'mouse-event'; terminalId: string; event: ThreadedTerminalMouseEventPayload }
   | { type: 'export'; terminalId: string; requestId: string }
@@ -290,7 +298,7 @@ export type ThreadedTerminalCoreResponse =
   | { type: 'title'; terminalId: string; title: string }
   | { type: 'cwd'; terminalId: string; cwd: string }
   | { type: 'progress'; terminalId: string; progress: TerminalProgress | null }
-  | { type: 'read-screen-result'; requestId: string; terminalId: string; text: string; cols: number; rows: number }
+  | { type: 'read-screen-result'; requestId: string; terminalId: string; text: string; cols: number; rows: number; capture?: ThreadedTerminalCapture }
   | { type: 'read-selection-result'; requestId: string; terminalId: string; text: string }
   | { type: 'export-result'; requestId: string; state: ThreadedTerminalExportedState }
   | { type: 'consumed'; terminalId: string; sessionId?: string; bytes: number }

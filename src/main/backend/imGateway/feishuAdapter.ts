@@ -64,15 +64,31 @@ export const createFeishuAdapter: GatewayAdapterFactory = ({ accountId, secret, 
   const cards = new Map<string, { message: GatewayMessage; expires: number }>()
   const send = (message: GatewayMessage, content: GatewayReply, push = false, previousMessageId?: string, requireMessageId = false) => {
     const uuid = push ? randomUUID().replace(/-/g, '') : createHash('sha256').update(`${accountId}:${message.messageId}`).digest('hex').slice(0, 32)
-    if (typeof content !== 'string') {
+    const image = typeof content !== 'string' && 'image' in content ? content : undefined
+    if (typeof content !== 'string' && 'buttons' in content) {
       for (const [token, card] of cards) if (card.expires < Date.now()) cards.delete(token)
       while (cards.size + content.buttons.length > 2000) cards.delete(cards.keys().next().value!)
       for (const button of content.buttons) cards.set(button.token, { message, expires: Date.now() + 600000 })
     }
-    const data = { msg_type: requireMessageId || typeof content !== 'string' ? 'interactive' : 'text', content: JSON.stringify(requireMessageId ? feishuTerminalScreenCard(content as string) : typeof content === 'string' ? { text: content } : feishuGatewayCard(content)), uuid }
+    const data = { msg_type: image ? 'image' : requireMessageId || typeof content !== 'string' ? 'interactive' : 'text', content: JSON.stringify(image ? {} : requireMessageId ? feishuTerminalScreenCard(content as string) : typeof content === 'string' ? { text: content } : feishuGatewayCard(content as GatewayCard)), uuid }
     const sending = replyQueue.catch(() => {}).then(async () => {
+      if (image) {
+        if (image.image.length > 8 * 1024 * 1024 || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(image.image)) throw new Error('FEISHU_IMAGE_INVALID')
+        if (abort.signal.aborted || image.valid && !await image.valid()) return
+        try {
+          const uploaded = await client.im.image.create({ data: { image_type: 'message', image: Buffer.from(image.image.slice('data:image/png;base64,'.length), 'base64') } })
+          if (!uploaded?.image_key) throw new Error('FEISHU_IMAGE_FAILED')
+          data.content = JSON.stringify({ image_key: uploaded.image_key })
+        } catch {
+          if (abort.signal.aborted || image.valid && !await image.valid()) return
+          data.msg_type = 'text'
+          data.content = JSON.stringify({ text: '截图上传失败，请检查机器人的图片上传权限和网络，可用 /read 查看文字。' })
+        }
+      }
       for (let attempt = 0; attempt < 3; attempt++) {
+        if (image && (abort.signal.aborted || image.valid && !await image.valid())) return
         await delay(Math.max(0, 250 - (Date.now() - lastReplyAt)), undefined, { signal: abort.signal })
+        if (image && (abort.signal.aborted || image.valid && !await image.valid())) return
         lastReplyAt = Date.now()
         try {
           const result = previousMessageId

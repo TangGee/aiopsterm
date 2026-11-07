@@ -96,6 +96,29 @@ describe('threadedTerminalCoreWorker', () => {
     await waitFor(() => messages.some((message) => message.type === 'created'))
   }
 
+  it('reads queued shell output beyond the viewport before any render notification', async () => {
+    await createTerminal()
+    const terminalId = createOptions().terminalId
+    send({ type: 'visibility', terminalId, visible: false, priority: 'background' })
+    send({ type: 'data', terminalId, data: 'old\r\n'.repeat(80) + '/home/user/work/test\r\nfile.txt' })
+    send({ type: 'read-screen', terminalId, requestId: 'shell', tailLines: 5 })
+    const result = await waitFor(() => messages.find((m): m is Extract<ThreadedTerminalCoreResponse, { type: 'read-screen-result' }> => m.type === 'read-screen-result' && m.requestId === 'shell'))
+    expect(result.text).toContain('/home/user/work/test')
+    expect(result.text).toContain('file.txt')
+  })
+
+  it('captures a one-shot alternate-buffer menu and its selected row without further output', async () => {
+    await createTerminal()
+    const terminalId = createOptions().terminalId
+    send({ type: 'data', terminalId, data: '\x1b[?1049h\x1b[HUpdate available\r\n\x1b[7m1. Update now\x1b[0m\r\n2. Skip\r\nenter / esc' })
+    send({ type: 'read-screen', terminalId, requestId: 'menu', capture: true })
+    const result = await waitFor(() => messages.find((m): m is Extract<ThreadedTerminalCoreResponse, { type: 'read-screen-result' }> => m.type === 'read-screen-result' && m.requestId === 'menu'))
+    expect(result.text).toContain('Update available')
+    expect(result.text).toContain('2. Skip')
+    expect(result.capture?.lines[1].runs).toEqual(expect.arrayContaining([expect.objectContaining({ text: '1. Update now', inverse: true, fg: '#000000', bg: '#ffffff' })]))
+    expect(result.capture?.lines[0].runs?.[0].text).toContain('Update available')
+  })
+
   it.each(['workspace', 'codex'] as const)('preserves bare LF columns in ConPTY redraws on %s', async (surface) => {
     const options = { ...createOptions(), surface }
     send({ type: 'create', requestId: 'create-codex', options })

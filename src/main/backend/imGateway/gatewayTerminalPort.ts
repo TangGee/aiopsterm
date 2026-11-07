@@ -41,10 +41,17 @@ export const createGatewayTerminalPort = (invoke: Invoke): GatewayTerminalPort =
     const response = await invoke('terminal.send_text', { sessionId: binding.sessionId, text })
     if (!response.ok) throw new Error('IM_GATEWAY_WRITE_FAILED')
   },
+  screenshot: async binding => {
+    const response = await invoke('terminal.screenshot', { ...binding })
+    const terminal = response.data?.terminal as ControlTerminalSummary | undefined
+    const image = response.data?.image
+    if (!response.ok || terminal?.sessionId !== binding.sessionId || terminal.panelId !== binding.panelId || typeof image !== 'string' || image.length > 8 * 1024 * 1024 || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(image)) throw new Error('IM_GATEWAY_CAPTURE_FAILED')
+    return image
+  },
   read: async binding => {
     const response = await invoke('terminal.read_screen', { panelId: binding.panelId, sessionId: binding.sessionId, tailLines: 40 })
     const terminal = response.data?.terminal as ControlTerminalSummary | undefined
-    if (!response.ok || terminal?.sessionId !== binding.sessionId || typeof response.data?.text !== 'string') throw new Error('IM_GATEWAY_READ_FAILED')
+    if (!response.ok || terminal?.sessionId !== binding.sessionId || terminal.panelId !== binding.panelId || typeof response.data?.text !== 'string') throw new Error('IM_GATEWAY_READ_FAILED')
     return response.data.text
   }
 })

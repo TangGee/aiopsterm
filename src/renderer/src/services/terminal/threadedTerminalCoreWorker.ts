@@ -1375,13 +1375,26 @@ const handleMessage = (message: ThreadedTerminalCoreRequest) => {
       return
     }
     if (message.type === 'read-screen') {
-      post({
-        type: 'read-screen-result',
-        requestId: message.requestId,
-        terminalId: record.terminalId,
-        text: readScreenText(record, message.tailLines, message.normalBuffer),
-        cols: record.terminal.cols,
-        rows: record.terminal.rows
+      // Drain data already received by this worker, then read after xterm parses it.
+      // A static menu must not depend on a later output event to become readable.
+      if (record.flushTimer) workerScope.clearTimeout(record.flushTimer)
+      while (record.pendingChunks.length) flushRecord(record)
+      record.terminal.write('', () => {
+        if (record.disposed) return
+        const buffer = record.terminal.buffer.active
+        post({
+          type: 'read-screen-result', requestId: message.requestId, terminalId: record.terminalId,
+          text: readScreenText(record, message.tailLines, message.normalBuffer),
+          cols: record.terminal.cols, rows: record.terminal.rows,
+          ...(message.capture ? { capture: {
+            cols: record.terminal.cols, rows: record.terminal.rows,
+            theme: record.theme, settings: record.settings,
+            lines: Array.from({ length: record.terminal.rows }, (_, y) => ({
+              y, text: buffer.getLine(buffer.baseY + y)?.translateToString(true) || '',
+              runs: [...extractPlainLineRuns(record, buffer.baseY + y), ...extractLineRuns(record, buffer.baseY + y)]
+            }))
+          } } : {})
+        })
       })
       return
     }

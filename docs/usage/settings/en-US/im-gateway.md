@@ -30,3 +30,13 @@ Use **Save and apply**, then check that the status is **Connected**. Saved setti
 A disconnected, closed, or replaced terminal produces one notification. Subsequent messages receive an explicit unavailable-binding reply; choose a terminal again. Previous input is never automatically retried.
 
 Handle SSH passwords, MFA, and connection failures on the desktop; the new tab is retained. Ordinary output is batched. TUI programs such as Codex update one output card at most once every three seconds, so animation does not create repeated messages. Submitting another ordinary message starts a new output card when the screen changes. Cards retain the latest screen, not a complete transcript. See the [detailed gateway reference (Chinese)](../../im-gateway.md) for limits, credential handling, and troubleshooting. If cards arrive but buttons do not work, check that the persistent `card.action.trigger` callback was saved and published, then request a fresh card.
+
+## Key reference and screenshots
+
+`/help` lists commands and key mappings; `/help key` shows only the key reference, even before binding. Supported names include `esc`/`escape`, `enter`/`return`/`cr`, `tab`, `space`, `backspace`/`bs`, `delete`/`del`, `insert`/`ins`, `up`/`arrowup` (also down/left/right), `home`, `end`, `pageup`/`pgup`, `pagedown`/`pgdn`, and `f1` through `f12`. A single character such as `/key y` is also supported.
+
+Combine `ctrl` (aliases `control`, `c`), `alt`, and `shift` using spaces, plus signs or hyphens, in any order or case. Examples: `/key ctrl c`, `/key shift tab`, `/key ctrl shift c`, `/key ctrl alt c`, `/key ctrl shift up`. Send one key per message; repeated modifiers, unknown names and key sequences are rejected. Extended combinations depend on the terminal program's keyboard protocol and do not trigger desktop shortcuts.
+
+`/screenshot` sends a PNG of the bound terminal's current output screen, including text colors and menu selections. Background tabs work without changing desktop focus. This renders terminal cells rather than recording the desktop, so no OS screen-recording permission is needed. User, chat and terminal authorization still apply; the image is uploaded to Feishu and sent to this conversation. The bot needs access to the image upload API. Upload failures produce a text reply suggesting `/read`. Images exclude the mouse, blinking cursor and app chrome; font rendering may differ slightly. Images are limited to 4096 pixels per dimension and are not saved locally.
+
+If these commands are unknown, launch the updated aiopsterm build and rebind with `/sessions`. Republishing the Feishu app alone does not update local code. Finish active terminal tasks before exiting the old app.

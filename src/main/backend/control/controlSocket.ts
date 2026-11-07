@@ -537,6 +537,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     }
     return response
   }
+  if (method === 'terminal.screenshot') return dispatchRendererControlRequest('terminal.screenshot', params)
   if (method === 'terminal.read_screen' || method === 'surface.read_text' || method === 'capture-pane' || method === 'read-screen') return dispatchRendererControlRequest('terminal.read_screen', params)
   if (method === 'terminal.clear_history' || method === 'surface.clear_history' || method === 'clear-history') {
     const response = await dispatchRendererControlRequest('terminal.clear_history', params)

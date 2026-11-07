@@ -19,6 +19,8 @@ export type TerminalControlSurfaceView = {
         getLine(index: number): { translateToString(trimRight?: boolean): string } | undefined
       }
     }
+    readScreen?: (tailLines?: number, normalBuffer?: boolean, capture?: boolean, strict?: boolean) => Promise<{ text: string }>
+    captureScreen?: () => Promise<string>
     clear(): void
     focus(): void
   }
@@ -126,3 +128,8 @@ export const terminalControlBufferText = (view: TerminalControlSurfaceView, tail
   }
   return lines.join('\n').replace(/\s+$/g, '')
 }
+
+// Threaded terminal caches only viewport-relative rows. Read its authoritative core
+// instead of indexing that cache with absolute scrollback offsets.
+export const readTerminalControlScreen = async (view: TerminalControlSurfaceView, tailLines: number) =>
+  view.terminal.readScreen ? (await view.terminal.readScreen(tailLines, false, false, true)).text : terminalControlBufferText(view, tailLines)

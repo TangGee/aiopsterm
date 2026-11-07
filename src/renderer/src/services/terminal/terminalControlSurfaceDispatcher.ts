@@ -191,6 +191,7 @@ export const createTerminalControlSurfaceDispatcher = ({
       return mobileControlHandlers.handleTerminalUnsupportedGestureRequest(params, 'aiopsterm does not expose xterm cell mouse injection through the renderer control socket yet.')
     }
     if (request.method === 'terminal.focus') return mobileControlHandlers.handleTerminalFocusControlRequest(params)
+    if (request.method === 'terminal.screenshot') return mobileControlHandlers.handleTerminalScreenshotControlRequest(params)
     if (request.method === 'terminal.read_screen') return mobileControlHandlers.handleTerminalReadScreenControlRequest(params)
     if (request.method === 'terminal.clear_history') return mobileControlHandlers.clearTerminalHistoryForControl(params)
     if (request.method === 'notification.sync' || request.method === 'notification.open') return workspaceControlHandlers.handleNotificationControlRequest(request.method, params)

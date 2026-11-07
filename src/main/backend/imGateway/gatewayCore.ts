@@ -6,8 +6,21 @@ import type { ControlTerminalSummary } from '@shared/contracts/control'
 import { gatewayConversationKey, GatewayStateStore } from './gatewayState'
 import type { GatewayBinding, GatewayCard, GatewayMessage, GatewayPolicy, GatewayReply, GatewayScreenSender, GatewayTerminalPort } from './gatewayTypes'
 
-const gatewayActions = new Set(['/help', '/sessions', '/new', '/bind', '/unbind', '/run', '/send', '/key', '/read', '/interrupt', '/status', '/binding'])
-export const gatewayHelp = '/sessions 选择终端卡片\n/new 新建终端卡片\n/unbind 解除绑定\n/run <单行命令> 输入并回车\n/send <文字> 仅输入\n/read 查看最近屏幕\n/key <按键> 发送 esc、ctrl c、ctrl shift c 等按键\n/interrupt 发送 Ctrl+C\n/binding 查看当前绑定（/status 也可）\n/help 查看帮助\n绑定后普通消息直接输入并回车，输出自动回传。终端中的斜杠命令可用 /run 发送。'
+const gatewayActions = new Set(['/help', '/sessions', '/new', '/bind', '/unbind', '/run', '/send', '/key', '/screenshot', '/read', '/interrupt', '/status', '/binding'])
+export const gatewayKeyHelp = [
+  '/key <按键> 向绑定终端发送一个按键，不额外回车。',
+  'esc / escape：Escape；enter / return / cr：回车；tab：制表；space：空格。',
+  'backspace / bs：退格；delete / del：删除；insert / ins：插入。',
+  'up / down / left / right：方向键，也可写 arrowup / arrowdown / arrowleft / arrowright。',
+  'home / end：行首/行尾；pageup / pgup、pagedown / pgdn：翻页；f1-f12：功能键。',
+  '单个字符可直接发送，如 /key y；Ctrl+C 中断：/key ctrl c；Ctrl+D：/key ctrl d。',
+  '组合：ctrl、alt、shift 可叠加；ctrl 可写 control 或 c。空格、+、- 分隔，大小写与修饰键顺序不限。',
+  '示例：/key ctrl shift c、/key ctrl alt c、/key ctrl shift up、/key shift tab。',
+  '每条消息一个按键；重复修饰键、未知键、esc enter 这种连续按键会被拒绝。',
+  '按键发送给终端内程序，不触发桌面复制粘贴。Ctrl+Shift 字符等扩展键需目标程序支持键盘协议，不能保证所有程序响应。'
+].join('\n')
+export const gatewayHelp = '/sessions 选择终端卡片\n/new 新建终端卡片\n/unbind 解除绑定\n/run <单行命令> 输入并回车\n/send <文字> 仅输入\n/read 查看最近屏幕\n/screenshot 查看绑定终端截图\n/key <按键> 发送按键；/help key 查看完整映射\n/interrupt 发送 Ctrl+C\n/binding 查看当前绑定（/status 也可）\n/help 查看帮助\n绑定后普通消息直接输入并回车，输出自动回传。终端中的斜杠命令可用 /run 发送。\n\n' + gatewayKeyHelp
+
 export const gatewayOutput = (text: string) => {
   const clean = stripVTControlCharacters(text).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '').replace(/<at\b/gi, '< at')
   return clean.length > 6000 ? `[仅显示末尾内容]\n${clean.slice(-6000)}` : clean
@@ -132,6 +145,7 @@ export class GatewayCore {
     }
     const match = text.trim().match(/^(\/\w+)(?:\s+([\s\S]*))?$/)
     const action = match?.[1] || ''; const argument = match?.[2] || ''
+    if (action === '/help' && argument.trim().toLowerCase() === 'key') return gatewayKeyHelp
     if (action === '/help' || text.trimStart().startsWith('/') && !gatewayActions.has(action)) return gatewayHelp
     if (action === '/unbind') { this.options.state.bind(key); this.relays.get(key)?.stop(); this.relays.delete(key); return '已解除绑定。' }
     const terminals = (await this.options.terminal.list()).filter(item => this.allowed(item))
@@ -181,6 +195,13 @@ export class GatewayCore {
     if (this.terminalLocks.has(binding.sessionId)) return '该终端正在处理另一条网关请求，请稍后重试。'
     this.terminalLocks.add(binding.sessionId)
     try {
+      if (action === '/screenshot') {
+        if (!this.options.terminal.screenshot) return '当前版本不支持终端截图，请更新并重启软件。'
+        const image = await this.options.terminal.screenshot(binding)
+        const valid = () => this.bindingValid(message, key, binding, terminal)
+        if (!await valid()) return '绑定已变化或终端已断开，截图未发送，请用 /sessions 重新选择。'
+        return { image, valid }
+      }
       if (action === '/read') return (await this.options.terminal.read(binding)) || '终端屏幕为空。'
       if (action === '/key') {
         const name = argument.trim()

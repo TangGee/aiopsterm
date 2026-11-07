@@ -7,7 +7,7 @@ import {
   controlNumber,
   controlOk,
   controlText,
-  terminalControlBufferText,
+  readTerminalControlScreen,
   type TerminalControlSurfaceView,
   type WorkspaceStore
 } from '@/services/terminal/terminalControlSurfaceCore'
@@ -32,7 +32,7 @@ export const createTerminalControlSurfaceMobileHandlers = ({
     const panelId = controlText(params.panelId || params.panel_id || params.surfaceId || params.surface_id || params.terminalId || params.terminal_id || params.tabId || params.tab_id)
     const sessionId = controlText(params.sessionId || params.session_id || params.terminalSessionId || params.terminal_session_id)
     if (panelId || sessionId) {
-      return workspace.panels.find((panel) => isTerminalWorkspacePanel(panel) && (panel.id === panelId || panel.sessionId === sessionId)) || null
+      return workspace.panels.find((panel) => isTerminalWorkspacePanel(panel) && (!panelId || panel.id === panelId) && (!sessionId || panel.sessionId === sessionId)) || null
     }
     const active = workspace.panels.find((panel) => isTerminalWorkspacePanel(panel) && panel.id === workspace.activePanelId)
     return active || workspace.panels.find((panel) => isTerminalWorkspacePanel(panel) && panel.sessionId) || null
@@ -89,13 +89,15 @@ export const createTerminalControlSurfaceMobileHandlers = ({
     )
   }
 
-  const handleMobileTerminalReplayControlRequest = (params: Record<string, unknown>) => {
+  const handleMobileTerminalReplayControlRequest = async (params: Record<string, unknown>) => {
     const panel = resolveControlTerminalPanel(params)
     if (!panel) return controlFail('TERMINAL_PANEL_NOT_FOUND', 'Terminal panel not found.')
     const view = terminalViews.get(panel.id)
     if (!view) return controlFail('TERMINAL_VIEW_NOT_READY', 'Terminal view is not ready.', { panelId: panel.id, surface_id: panel.id, sessionId: panel.sessionId })
     const tailLines = controlNumber(params.tailLines || params.lines, view.terminal.rows || 30, 1, Math.max(1, workspace.terminalSettings.scrollBack || 1000))
-    const text = terminalControlBufferText(view, tailLines)
+    const sessionId = panel.sessionId
+    const text = await readTerminalControlScreen(view, tailLines)
+    if (resolveControlTerminalPanel(params) !== panel || panel.sessionId !== sessionId || terminalViews.get(panel.id) !== view) return controlFail('TERMINAL_SESSION_CHANGED', 'Terminal session changed during read.')
     return controlOk(
       terminalMobileTargetPayload(panel, {
         seq: Date.now(),
@@ -143,17 +145,31 @@ export const createTerminalControlSurfaceMobileHandlers = ({
     return controlOk({ terminal: terminalSummaryForControl(panel) })
   }
 
-  const handleTerminalReadScreenControlRequest = (params: Record<string, unknown>) => {
+  const handleTerminalReadScreenControlRequest = async (params: Record<string, unknown>) => {
     const panel = resolveControlTerminalPanel(params)
     if (!panel) return controlFail('TERMINAL_PANEL_NOT_FOUND', 'Terminal panel not found.')
     const view = terminalViews.get(panel.id)
     if (!view) return controlFail('TERMINAL_VIEW_NOT_READY', 'Terminal view is not ready.', { panelId: panel.id, sessionId: panel.sessionId })
     const tailLines = controlNumber(params.tailLines || params.lines, view.terminal.rows || 30, 1, Math.max(1, workspace.terminalSettings.scrollBack || 1000))
+    const sessionId = panel.sessionId
+    const text = await readTerminalControlScreen(view, tailLines)
+    if (resolveControlTerminalPanel(params) !== panel || panel.sessionId !== sessionId || terminalViews.get(panel.id) !== view) return controlFail('TERMINAL_SESSION_CHANGED', 'Terminal session changed during read.')
     return controlOk({
       terminal: terminalSummaryForControl(panel),
-      text: terminalControlBufferText(view, tailLines),
+      text,
       tailLines
     })
+  }
+
+  const handleTerminalScreenshotControlRequest = async (params: Record<string, unknown>) => {
+    const panel = resolveControlTerminalPanel(params)
+    if (!panel?.sessionId) return controlFail('TERMINAL_SESSION_NOT_FOUND', 'Connected terminal not found.')
+    const view = terminalViews.get(panel.id)
+    if (!view?.terminal.captureScreen) return controlFail('TERMINAL_CAPTURE_UNAVAILABLE', 'Terminal capture is not available.')
+    const sessionId = panel.sessionId
+    const image = await view.terminal.captureScreen()
+    if (resolveControlTerminalPanel(params) !== panel || panel.sessionId !== sessionId || terminalViews.get(panel.id) !== view) return controlFail('TERMINAL_SESSION_CHANGED', 'Terminal session changed during capture.')
+    return controlOk({ terminal: terminalSummaryForControl(panel), image })
   }
 
   const clearTerminalHistoryForControl = async (params: Record<string, unknown>) => {
@@ -178,6 +194,7 @@ export const createTerminalControlSurfaceMobileHandlers = ({
     handleTerminalUnsupportedGestureRequest,
     handleTerminalFocusControlRequest,
     handleTerminalReadScreenControlRequest,
+    handleTerminalScreenshotControlRequest,
     clearTerminalHistoryForControl
   }
 }

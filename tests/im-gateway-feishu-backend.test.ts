@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 const sdk = vi.hoisted(() => ({
   options: null as any, dispatcher: null as any, httpOptions: null as any,
-  request: vi.fn(), create: vi.fn(), patch: vi.fn(), reply: vi.fn(), close: vi.fn(), start: vi.fn()
+  image: vi.fn(), request: vi.fn(), create: vi.fn(), patch: vi.fn(), reply: vi.fn(), close: vi.fn(), start: vi.fn()
 }))
 vi.mock('@larksuiteoapi/node-sdk', () => ({
   Domain: { Feishu: 0 }, AppType: { SelfBuild: 0 },
   defaultHttpInstance: { create: (options: any) => { sdk.httpOptions = options; return { interceptors: { response: { use: vi.fn() } } } } },
-  Client: class { request = sdk.request; im = { message: { reply: sdk.reply, create: sdk.create, patch: sdk.patch } } },
+  Client: class { request = sdk.request; im = { image: { create: sdk.image }, message: { reply: sdk.reply, create: sdk.create, patch: sdk.patch } } },
   WSClient: class {
     constructor(options: any) { sdk.options = options }
     start = async (options: any) => { sdk.dispatcher = options.eventDispatcher; sdk.start() }
@@ -22,6 +22,40 @@ const appId = 'cli_1234567890abcdef'
 const event = (patch: any = {}) => ({ app_id: appId, tenant_key: 'tenant', sender: { sender_type: 'user', sender_id: { open_id: 'ou_user' } }, message: { chat_id: 'oc_chat', message_id: 'om_message', message_type: 'text', chat_type: 'p2p', create_time: '1800000000000', content: '{"text":"/sessions"}' }, ...patch })
 beforeEach(() => { vi.clearAllMocks(); sdk.request.mockResolvedValue({ code: 0, bot: { open_id: 'ou_bot' } }); sdk.reply.mockResolvedValue({ code: 0 }); sdk.create.mockResolvedValue({ code: 0, data: { message_id: 'output-card' } }); sdk.patch.mockResolvedValue({ code: 0 }) })
 describe('Feishu adapter', () => {
+  it('uploads a PNG then replies with its image key, reusing the reply ID on retry', async () => {
+    sdk.image.mockResolvedValue({ image_key: 'image-key' })
+    sdk.reply.mockRejectedValueOnce(new Error('network'))
+    const adapter = await createFeishuAdapter({ accountId: appId, secret: 'secret', connection: vi.fn() })
+    await adapter.reply(normalizeFeishuMessage(event(), appId)!, { image: 'data:image/png;base64,aW1hZ2U=' })
+    expect(sdk.image).toHaveBeenCalledOnce()
+    expect(sdk.image.mock.calls[0][0].data).toEqual({ image_type: 'message', image: Buffer.from('image') })
+    expect(sdk.reply).toHaveBeenCalledTimes(2)
+    expect(sdk.reply.mock.calls[0][0]).toEqual(sdk.reply.mock.calls[1][0])
+    expect(sdk.reply.mock.calls[0][0].data).toMatchObject({ msg_type: 'image', content: '{"image_key":"image-key"}' })
+    adapter.stop()
+  })
+  it('replies with a useful error when image upload fails and sends no invalid image', async () => {
+    sdk.image.mockResolvedValue(null)
+    const adapter = await createFeishuAdapter({ accountId: appId, secret: 'secret', connection: vi.fn() })
+    await adapter.reply(normalizeFeishuMessage(event(), appId)!, { image: 'data:image/png;base64,aW1hZ2U=' })
+    expect(sdk.reply.mock.calls[0][0].data.msg_type).toBe('text')
+    expect(sdk.reply.mock.calls[0][0].data.content).toContain('截图上传失败')
+    adapter.stop()
+  })
+  it('discards an uploaded screenshot when authorization changes during upload', async () => {
+    let valid = true
+    sdk.image.mockImplementation(async () => { valid = false; return { image_key: 'private-image' } })
+    const adapter = await createFeishuAdapter({ accountId: appId, secret: 'secret', connection: vi.fn() })
+    await adapter.reply(normalizeFeishuMessage(event(), appId)!, { image: 'data:image/png;base64,aW1hZ2U=', valid: async () => valid })
+    expect(sdk.image).toHaveBeenCalledOnce(); expect(sdk.reply).not.toHaveBeenCalled()
+    adapter.stop()
+  })
+  it('does not upload or send a screenshot after binding authorization changes', async () => {
+    const adapter = await createFeishuAdapter({ accountId: appId, secret: 'secret', connection: vi.fn() })
+    await adapter.reply(normalizeFeishuMessage(event(), appId)!, { image: 'data:image/png;base64,aW1hZ2U=', valid: async () => false })
+    expect(sdk.image).not.toHaveBeenCalled(); expect(sdk.reply).not.toHaveBeenCalled()
+    adapter.stop()
+  })
   it('creates a plain-text output card and patches its exact message ID on subsequent screens', async () => {
     const adapter = await createFeishuAdapter({ accountId: appId, secret: 'secret', connection: vi.fn() })
     const message = normalizeFeishuMessage(event(), appId)!

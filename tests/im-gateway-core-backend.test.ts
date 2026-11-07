@@ -29,6 +29,32 @@ beforeEach(async () => {
 })
 afterEach(async () => { core.stop(); await core.drain(); await rm(directory, { recursive: true, force: true }) })
 describe('IM gateway core', () => {
+  it('provides the key mapping without requiring a binding or sending input', async () => {
+    const help = await receive('/help')
+    const keyHelp = await receive('/help key')
+    for (const name of ['escape', 'return', 'cr', 'tab', 'space', 'backspace', 'bs', 'delete', 'del', 'insert', 'ins', 'arrowup', 'home', 'end', 'pgup', 'pgdn', 'f1-f12', 'ctrl shift c', 'ctrl alt c', 'shift tab', '键盘协议']) {
+      expect(help).toContain(name); expect(keyHelp).toContain(name)
+    }
+    expect(port.write).not.toHaveBeenCalled()
+  })
+  it('captures an authorized bound terminal without writing input', async () => {
+    port.screenshot = vi.fn(async () => 'data:image/png;base64,aW1hZ2U=')
+    await receive('/screenshot'); expect(port.screenshot).not.toHaveBeenCalled()
+    await receive('/bind session')
+    await receive('/screenshot')
+    expect(replies.at(-1)).toMatchObject({ image: 'data:image/png;base64,aW1hZ2U=' })
+    expect(port.screenshot).toHaveBeenCalledWith({ panelId: 'panel', sessionId: 'session' })
+    expect(port.write).not.toHaveBeenCalled()
+    terminals[0].connected = false
+    expect(await receive('/screenshot')).toContain('已断开')
+    expect(port.screenshot).toHaveBeenCalledOnce()
+  })
+  it('does not return an image after asset authorization is revoked during capture', async () => {
+    port.screenshot = vi.fn(async () => { policy.allowedAssetIds = []; return 'private' })
+    await receive('/bind session')
+    expect(await receive('/screenshot')).toContain('截图未发送')
+    expect(replies.some(r => typeof r !== 'string' && 'image' in r)).toBe(false)
+  })
   it.each([
     ['ctrl c', '\x03'], ['ctrl+c', '\x03'], ['CTRL C', '\x03'], ['esc', '\x1b'], ['escape', '\x1b'],
     ['enter', '\r'], ['tab', '\t'], ['up', '\x1b[A'], ['down', '\x1b[B'], ['ctrl d', '\x04'], ['space', ' '],

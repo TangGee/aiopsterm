@@ -2,6 +2,17 @@ import { describe, expect, it, vi } from 'vitest'
 import { createGatewayTerminalPort } from '../src/main/backend/imGateway/gatewayTerminalPort'
 
 describe('gateway terminal control boundary', () => {
+  it('captures only the matching panel and session and rejects invalid images', async () => {
+    const data = { terminal: { panelId: 'p', sessionId: 's' }, image: 'data:image/png;base64,aW1hZ2U=' }
+    const invoke = vi.fn(async () => ({ ok: true, data }))
+    const port = createGatewayTerminalPort(invoke)
+    expect(await port.screenshot!({ panelId: 'p', sessionId: 's' })).toBe(data.image)
+    expect(invoke).toHaveBeenCalledWith('terminal.screenshot', { panelId: 'p', sessionId: 's' })
+    data.terminal.panelId = 'other'
+    await expect(port.screenshot!({ panelId: 'p', sessionId: 's' })).rejects.toThrow('CAPTURE_FAILED')
+    data.terminal.panelId = 'p'; data.image = 'data:text/html;base64,abc'
+    await expect(port.screenshot!({ panelId: 'p', sessionId: 's' })).rejects.toThrow('CAPTURE_FAILED')
+  })
   it('writes to the exact bound backend session without focusing another terminal', async () => {
     const invoke = vi.fn(async () => ({ ok: true, data: {} }))
     const port = createGatewayTerminalPort(invoke)

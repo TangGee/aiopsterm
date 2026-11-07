@@ -21,7 +21,8 @@ export type GatewayPolicy = {
   allowLocalTerminal: boolean
 }
 export type GatewayCard = { title: string; text: string; buttons: { label: string; token: string }[] }
-export type GatewayReply = string | GatewayCard
+export type GatewayImage = { image: string; valid?: () => Promise<boolean> }
+export type GatewayReply = string | GatewayCard | GatewayImage
 export type GatewayHost = { id: string; name: string; host: string }
 export type GatewayBinding = { sessionId: string; panelId: string }
 export type GatewayScreenSender = (message: GatewayMessage, text: string, previousMessageId?: string) => Promise<string>
@@ -31,6 +32,7 @@ export type GatewayTerminalPort = {
   create?: (assetId?: string, active?: () => boolean) => Promise<ControlTerminalSummary>
   subscribe?: (binding: GatewayBinding, receive: (data: string) => void) => () => void
   write: (binding: GatewayBinding, text: string) => Promise<void>
+  screenshot?: (binding: GatewayBinding) => Promise<string>
   read: (binding: GatewayBinding) => Promise<string>
 }
 export type GatewayAdapter = {

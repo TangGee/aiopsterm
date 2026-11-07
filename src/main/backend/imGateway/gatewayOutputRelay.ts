@@ -34,6 +34,7 @@ export class GatewayOutputRelay {
   private pending = ''
   private truncated = false
   private dirty = false
+  private settleReads = 2
   private decoder = new GatewayTextDecoder()
   private lastScreen = ''
   private screenMessageId?: string
@@ -56,6 +57,7 @@ export class GatewayOutputRelay {
     this.unsubscribe = options.terminal.subscribe?.(options.binding, data => {
       if (this.stopped) return
       this.dirty = true
+      this.settleReads = 2
       this.pending += this.decoder.push(data)
       if (this.pending.length > 64000) { this.pending = this.pending.slice(-64000); this.truncated = true }
       this.schedule()
@@ -79,14 +81,15 @@ export class GatewayOutputRelay {
     try {
       if (this.stopped) return
       if (!await this.options.valid()) { this.stop(); return }
-      if (!this.initial && !this.dirty && !this.pending) return
+      if (!this.initial && !this.dirty && !this.pending && !this.settleReads) return
       const screenOutput = this.decoder.redraw && Boolean(this.options.sendScreen)
       if (screenOutput && Date.now() - this.lastScreenAt < 3000) return
       const revision = this.revision
       this.dirty = false
       let text: string
-      if (this.initial || this.decoder.redraw) {
+      if (this.initial || this.decoder.redraw || this.settleReads > 0 && !this.pending) {
         this.initial = false
+        this.settleReads = Math.max(0, this.settleReads - 1)
         // Cursor-addressed programs redraw a screen rather than append a transcript.
         this.pending = ''
         text = stripVTControlCharacters(await this.options.terminal.read(this.options.binding)).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '').replace(/<at\b/gi, '< at')
@@ -96,6 +99,7 @@ export class GatewayOutputRelay {
         if (text === this.lastScreen) return
         this.lastScreen = text
       } else {
+        this.settleReads = 0
         text = this.pending.slice(0, 6000)
         this.pending = this.pending.slice(6000)
       }

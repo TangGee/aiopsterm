@@ -1,3 +1,5 @@
+import { renderTerminalCapture } from './terminalScreenshot'
+import type { ThreadedTerminalCapture } from './threadedTerminalProtocol'
 import CoreWorker from '@/services/terminal/threadedTerminalCoreWorker?worker'
 import RenderWorker from '@/services/terminal/threadedTerminalRenderWorker?worker'
 import { loadTerminalFonts } from '@/services/terminal/terminalFontRuntime'
@@ -105,7 +107,7 @@ type ThreadedTerminalRenderDebug = {
 
 type ReadScreenPending = {
   kind: 'screen'
-  resolve: (value: { text: string; cols: number; rows: number }) => void
+  resolve: (value: { text: string; cols: number; rows: number; capture?: ThreadedTerminalCapture }) => void
   reject: (error: Error) => void
 }
 
@@ -667,7 +669,7 @@ const handleCoreMessage = (handle: ThreadedTerminalCoreHandle, message: Threaded
     const pending = requestMap.get(message.requestId)
     if (!pending || pending.kind !== 'screen') return
     requestMap.delete(message.requestId)
-    pending.resolve({ text: message.text, cols: message.cols, rows: message.rows })
+    pending.resolve({ text: message.text, cols: message.cols, rows: message.rows, capture: message.capture })
     return
   }
   if (message.type === 'read-selection-result') {
@@ -1679,20 +1681,28 @@ export class ThreadedTerminalHost {
     }
   }
 
-  readScreen(tailLines?: number, normalBuffer = false) {
+  readScreen(tailLines?: number, normalBuffer = false, capture = false, strict = false): Promise<{ text: string; cols: number; rows: number; capture?: ThreadedTerminalCapture }> {
     if (!this.coreCreated) {
+      if (strict) return Promise.reject(new Error('Terminal core is not ready.'))
       return Promise.resolve({ text: this.snapshotLines.slice(-(tailLines || this.rows)).join('\n').replace(/\s+$/g, ''), cols: this.cols, rows: this.rows })
     }
     const requestId = nextRequestId('screen')
-    return new Promise<{ text: string; cols: number; rows: number }>((resolve, reject) => {
+    return new Promise<{ text: string; cols: number; rows: number; capture?: ThreadedTerminalCapture }>((resolve, reject) => {
       requestMap.set(requestId, { kind: 'screen', resolve, reject })
-      postCore(this.coreHandle, { type: 'read-screen', terminalId: this.terminalId, requestId, tailLines, normalBuffer })
+      postCore(this.coreHandle, { type: 'read-screen', terminalId: this.terminalId, requestId, tailLines, normalBuffer, capture })
       window.setTimeout(() => {
         if (!requestMap.has(requestId)) return
         requestMap.delete(requestId)
+        if (strict) { reject(new Error('Terminal screen read timed out.')); return }
         resolve({ text: this.snapshotLines.slice(-(tailLines || this.rows)).join('\n').replace(/\s+$/g, ''), cols: this.cols, rows: this.rows })
       }, 1500)
     })
+  }
+
+  async captureScreen() {
+    const result = await this.readScreen(undefined, false, true, true)
+    if (!result.capture) throw new Error('Terminal capture is unavailable.')
+    return renderTerminalCapture(result.capture)
   }
 
   waitForNextRenderFrame(afterSeq = this.lastRenderFrame?.seq || 0, timeoutMs = 2000) {
