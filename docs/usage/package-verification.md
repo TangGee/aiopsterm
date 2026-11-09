@@ -89,6 +89,8 @@ npm run audit:packaged-app
 
 `audit:packaged-app` checks the current platform's unpacked app resources, the packaged Codex package, the platform `rg` helper name, and the platform `node-pty` runtime files. It requires an Electron-only `better-sqlite3` native manifest, verifies that exactly one ABI-keyed SQLite binding remains, rejects every earlier `bindings` lookup candidate, checks the binding SHA-256, and launches the packaged Electron executable in Node mode to execute a real in-memory `SELECT 1`. It also requires every Cline sidecar runtime, bundle, manifest, SBOM, metafile, notice, and license artifact, executes the packaged Node `--version`, and validates the distributable manifest boundary. It does not replace `audit:linux-package` for Linux installer/deb/AppImage checks.
 
+Linux packages must stay within the Ubuntu 20.04 runtime baseline: GLIBC 2.31, GLIBCXX 3.4.28, and CXXABI 1.3.12. The packaged audit checks ELF dependencies against these limits. Reusing a native module that loads on a newer build host is insufficient: if SQLite or node-pty exceeds the baseline, rebuild the Electron native modules inside an Ubuntu 20.04 build environment using `node scripts/ensure-native-runtime.mjs electron --force`, then package again and rerun verification. The environment needs the project dependencies, matching Electron headers, and a compiler suitable for those dependencies. Do not bypass the audit or rebuild the corrected binaries again on the newer host before packaging.
+
 `audit:linux-package` checks the Linux build output without launching the app. It verifies:
 
 - the expected AppImage, deb, `app.asar`, and `app.asar.unpacked` files exist for the current package version
