@@ -1,5 +1,11 @@
 # Package Verification
 
+## Current Test Version
+
+Version `0.1.4` is prepared for local Linux x86_64 AppImage testing and has not been published as a release. The expected artifact is `dist/aiopsterm-0.1.4-linux-x86_64.AppImage`. Test terminal input/output, SSH connections, and the [Feishu gateway](im-gateway.md), including terminal selection, new terminals, key commands, output updates, and screenshots. A successful build or automated smoke check does not replace the planned user testing before release.
+
+## Build And Verification
+
 Before packaging changes are merged, run the package configuration audit:
 
 ```bash

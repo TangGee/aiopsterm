@@ -1,6 +1,6 @@
 {
   "name": "aiopsterm",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Self-owned AI operations terminal shell with backend-owned runtime boundaries.",
   "main": "./out/main/index.js",
   "desktopName": "aiopsterm.desktop",
@@ -9,9 +9,21 @@
     "email": "support@aiopsterm.com"
   },
   "homepage": "https://aiopsterm.com",
-  "repository": { "type": "git", "url": "git+https://github.com/TangGee/aiopsterm.git" },
-  "bugs": { "url": "https://github.com/TangGee/aiopsterm/issues" },
-  "keywords": ["terminal", "ssh", "devops", "ai", "mcp", "electron"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TangGee/aiopsterm.git"
+  },
+  "bugs": {
+    "url": "https://github.com/TangGee/aiopsterm/issues"
+  },
+  "keywords": [
+    "terminal",
+    "ssh",
+    "devops",
+    "ai",
+    "mcp",
+    "electron"
+  ],
   "license": "Apache-2.0",
   "private": true,
   "scripts": {
