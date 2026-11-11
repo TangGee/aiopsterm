@@ -11,3 +11,4 @@
 - [Keyboard Shortcuts And Commands / 快捷键与内置命令](usage/best-practices/zh-CN/07-shortcuts.md) ([English](usage/best-practices/en-US/07-shortcuts.md))
 - [Developer Integration Guides](developer/index.md)
 - [Technical Docs](technical/index.md)
+- [产品运营与视频规划](marketing/index.md)
