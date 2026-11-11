@@ -18,6 +18,7 @@ The scenario-based guide is available in Chinese and English and is included wit
 
 Detailed reference:
 
+- [产品演示视频](demo-video.md)
 - [Feishu IM Gateway](im-gateway.md)
 - [Assets And Workspace Resources](assets-workspace.md)
 - [AI Sessions](ai-sessions.md)
