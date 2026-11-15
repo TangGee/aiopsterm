@@ -18,10 +18,32 @@
 - `infoflowSocket.ts`：为固定版本 SDK 的 EventDispatcher 补实例级 Node error listener，避免其第二次 error 分发造成未处理异常；不修改全局原型。用真实 SDK 回归该路径。每次建连设置 30 秒总期限并响应停止信号，迟到连接再次关闭。已连接后的端点重连失败由五秒状态检查补充重试，停用清理检查器。
 - `infoflowAdapter.ts`：使用 `@core-workspace/infoflow-sdk-nodejs` 0.1.7 的 Client/WSClient。Agent ID 用于消息发送，App Key 作为 SDK appId 用于鉴权。显式关闭 SDK 日志；连接入口和所有回调检查停止状态，SDK 迟到连接完成后再次 disconnect。发送队列停止后拒绝新任务；已开始的 SDK 请求最多等待其超时，不保证撤回网络中已发出的请求。
 - 如流私聊保留 FromUserId 授权身份与 FromUserName 回复目标；拒绝含竖线的目标以避免 SDK 多收件人语义。群聊仅接受 MESSAGE_RECEIVE、当前 agentid 和明确 AT robotid，不处理全量转发；私聊缺少 MsgId 时以 accountId、发送者、回复目标、创建时间和正文的 SHA-256 作为保守去重 ID，同秒同文可能合并，哈希不保存正文。大整数消息 ID 必须以字符串保持精度，不接受不安全的数值 ID。选择列表输出 `/select <令牌>`，适配器将其规范化为 actionToken，仍由核心验证原用户/聊天和一次性消费，不绕过授权。
-- `adapterUtils.ts`：新适配器的发送队列、分段和 PNG 校验。Telegram 最小发送间隔一秒；如流私聊半秒，群消息发送后保留 3.1 秒间隔以遵守公开文档每群每分钟 20 条的限制。队列停止取消等待。图片发送排队后重新检查绑定授权；如流 PNG 上限小于 1 MiB，Telegram PNG 上限 8 MiB。
+- `adapterUtils.ts`：新适配器的发送队列、分段和 PNG 校验。Telegram 最小发送间隔一秒；如流私聊半秒，群消息发送后保留 3.1 秒间隔作为兼容旧接入的保守策略；新机器人平台限额与接口边界见下节。队列停止取消等待。图片发送排队后重新检查绑定授权；如流 PNG 上限小于 1 MiB，Telegram PNG 上限 8 MiB。
 - 如流通过 `screenQuietMs: 4000` 让输出订阅等待重绘静止，不模拟可编辑卡片。初始读屏和最终屏幕仍从精确绑定读取；等待期间继续验证授权及断开状态。普通追加输出不受该等待影响。Telegram sendScreen 将长屏幕截断到消息长度限制，编辑失败不回退为新消息。
 
 增加渠道时，实现适配器、把厂商事件规范化为统一消息、在注册表添加 provider，并增加配置界面和厂商协议用例。必须保留核心授权与去重检查，不能让适配器直接调用终端。当前配置只启用一个 provider/account，并未实现多渠道同时连接。
+
+## 如流 OpenHub 接口边界
+
+来源为用户在会话中提供的 [OpenHub](https://openhub.baidu-int.com/web/)《以机器人身份发送消息到群聊》《机器人向群聊发送可交互消息》《机器人交互消息更新方案》等文档正文。当前环境无法解析该站域名，以下按所提供正文核对，并未完成内网在线验证。公开 SDK 0.1.7 不覆盖全部 OpenHub 能力。
+
+### 已确认的平台能力
+
+- 普通群消息：`POST /robot/msg/groupmsgsend`，文档线上地址为 `https://open-ruliu.baidu-int.com/open-plat/api/v1/robot/msg/groupmsgsend`；需管理员开通“以机器人身份发送消息到群聊”。新机器人限流为每机器人 10 QPS；旧的每群 20 条/分钟规则仅适用于历史自定义机器人。
+- 鉴权：获取 app_access_token 时提交小写 MD5 后的 App Secret；消息请求头为 `Authorization: Bearer-at_xxxxxx`，不是空格分隔的标准 Bearer 写法。文档 token 有效期为 7200 秒，应提前刷新。设置页仍填写原始 Secret，由 SDK 计算摘要，不应让用户预先 MD5 后再填入。
+- 群消息 `clientmsgid` 用于去重，必须唯一；`clienttime` 的参数表标为必填，但正文允许缺省由服务端填当前毫秒时间，不能传 0。当前 SDK 使用 `Date.now()` 生成 clientmsgid、未发送 clienttime；适配器串行限速，不做发送重试。后续若加入重试，应复用同次操作的标识，不能生成新标识重复发送。
+- 交互卡片发送：`POST /robot/group/sendInteractionMsg`，请求头包含 `X-OP-CORP-ID`、`X-OP-AGENT-ID` 和上述 Authorization；返回 receivers 中包含 msg_id、card_id、modify_token。文档给出的线上基址是 `http://apiin.im.baidu.com/api/v1`，与当前 SDK 的 HTTPS 公开域名不同，尚未确认安全可达的部署地址。不能直接替换公开接入地址或发送凭据探测。
+- 卡片刷新：点击 `callBack` 按钮后，平台向已注册 URL 发 POST，携带 userId、toId、toType、eventKey、appContext 等。回调返回 code=200 和新的卡片数据时刷新原卡片，非 200 仅显示 msg。data 的说明先写 string，后又要求完整卡片请求体，实际序列化形态需联调确认。onlyChangePersonal 控制只刷新点击者或所有用户。
+- 图片格式不同：普通 IMAGE 消息使用小于 1 MiB 的原始图片 Base64；交互卡片 IMAGE 使用图片 URL。当前终端截图走普通图片消息，不能将现有 Base64 直接塞入交互卡片图片字段。
+- getSingleMsg 是读取原消息的接口，不是更新接口。返回 modify_token 或 card_id 也不能单独证明存在何种主动更新请求，不能据此猜测更新路径或参数。
+
+### 当前实现及待接入部分
+
+现有实现使用公开 SDK 的 `api.im.baidu.com` REST 与长连接入口，已核对 SDK 的 MD5 Secret 和 `Bearer-` 请求头行为与上述鉴权描述一致。SDK 长连接收消息与文档的 HTTP 回调收消息不是同一部署方式；没有证据表明卡片回调能直接进入现有长连接处理器。
+
+交互卡片发送、按钮回调刷新以及无需点击的主动更新均未实现。当前防刷屏策略仍为静止后发送纯文本，不具备原卡片刷新能力。接入回调前需要完整签名校验、解密与防重放约定，并提供平台可达的回调地址；当前所贴正文仅引用这些算法，未提供算法详情。主动更新仍缺接口路径、方法、鉴权、请求体、有效期和限流约定。暂保留现有公开 SDK 接入及 3.1 秒群发送间隔，不宣称已切换 OpenHub API。
+
+后续卡片验收需要覆盖：合法按钮更新同一卡片、code 非 200 不更新、点击者与会话/卡片绑定校验、无效签名/过期回调/重复事件不执行终端操作、onlyChangePersonal 的隔离效果、超过 JavaScript 安全整数范围的消息和卡片 ID 保持字符串、图片 URL 与 Base64 的差异。若取得主动更新协议，还需验证无需点击即可更新原卡片，更新失败不新增消息刷屏。这些是待实现部分的验收条件，不是已通过的测试。
 
 ## 身份、命令和并发边界
 
