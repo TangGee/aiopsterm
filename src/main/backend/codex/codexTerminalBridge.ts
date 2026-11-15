@@ -854,7 +854,7 @@ const buildPosixWrappedCommand = (command: string, markerStart: string, markerEn
     shellQuote(markerStart),
     '; if ',
     isolatedCommand,
-    '; then __aiopsterm_status=0; else __aiopsterm_status=$?; fi; echo ',
+    '; then __aiopsterm_status=0; else __aiopsterm_status=$?; fi; echo; echo ',
     shellQuote(markerEnd),
     ':$__aiopsterm_status',
     '\n'

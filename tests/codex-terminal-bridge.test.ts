@@ -1,8 +1,8 @@
 import { createConnection } from 'net'
-import { mkdtemp, rm } from 'fs/promises'
+import { mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 type BridgeResponse = {
@@ -755,6 +755,47 @@ describe('Codex terminal bridge runtime', () => {
           })
         })
       )
+    } finally {
+      bridge.closeCodexTerminalBridgeServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it.skipIf(process.platform === 'win32').each([
+    { name: 'unterminated file', method: 'read_file', command: '', output: '{"upstream":"http://127.0.0.1:18082"}', exitCode: 0 },
+    { name: 'unterminated stdout', method: 'run_command', command: "printf result", output: 'result', exitCode: 0 },
+    { name: 'unterminated stderr and failure', method: 'run_command', command: "printf failure >&2; exit 7", output: 'failure', exitCode: 7 }
+  ])('completes $name through a real POSIX shell and releases the command queue', async ({ method, command, output, exitCode }) => {
+    const bridge = await loadBridge()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-codex-no-newline-'))
+    const filePath = join(root, 'proxy.json')
+    let visible = ''
+    try {
+      await writeFile(filePath, output)
+      bridge.registerCodexTerminalBridgeSession({
+        id: 'terminal-no-newline', kind: 'ssh', shell: 'ssh', window: {} as never,
+        write: (data: string | Buffer) => {
+          if (String(data) === '\u0003') return
+          const child = spawnSync('/bin/sh', ['-c', 'exec 2>&1\n' + String(data)], { encoding: 'utf8', env: { ...process.env, SHELL: '/bin/sh' } })
+          const chunk = child.stdout + child.stderr
+          visible += bridge.filterCodexTerminalBridgeDisplayData('terminal-no-newline', chunk)
+          bridge.appendCodexTerminalBridgeData('terminal-no-newline', chunk)
+        }
+      })
+      bridge.setCodexTerminalBridgePreferredSession('terminal-no-newline')
+      const socketPath = await bridge.ensureCodexTerminalBridgeServer(root)
+      const response = await socketRequest(socketPath, {
+        id: 'no-newline', method,
+        params: { path: filePath, command, timeoutMs: 1000 }
+      })
+      expect(response).toMatchObject({ ok: true, data: { output, exitCode } })
+      if (method === 'read_file') expect(response.data).toMatchObject({ content: output })
+      expect(visible).toContain(output)
+      expect(visible).not.toContain('__AIOPSTERM_CODEX_')
+      const next = await socketRequest(socketPath, {
+        id: 'after-no-newline', method: 'run_command', params: { command: 'echo next', timeoutMs: 1000 }
+      })
+      expect(next).toMatchObject({ ok: true, data: { output: 'next', exitCode: 0 } })
     } finally {
       bridge.closeCodexTerminalBridgeServer()
       await rm(root, { recursive: true, force: true })
