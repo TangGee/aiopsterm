@@ -113,3 +113,24 @@ it('replaces a contenteditable draft without duplicating earlier partial results
   expect(target.replaceDraft!('实')).toBe(true); expect(target.replaceDraft!('实时。', true)).toBe(true)
   expect(element.textContent).toBe('left 实时。right'); target.dispose?.()
 })
+
+it('keeps dictating when a reactive editor updates presentation attributes', async () => {
+  const element = document.createElement('div')
+  element.setAttribute('contenteditable', 'true')
+  element.className = 'chat-editable is-empty'
+  document.body.append(element)
+  const range = document.createRange(); range.selectNodeContents(element); range.collapse(false)
+  const selection = document.getSelection()!; selection.removeAllRanges(); selection.addRange(range)
+  const target = captureVoiceInputTarget(element)!
+  expect(target.replaceDraft!('请')).toBe(true)
+  element.className = 'chat-editable'
+  element.style.minHeight = '40px'
+  await Promise.resolve()
+  expect(target.replaceDraft!('请检查磁盘。', true)).toBe(true)
+  expect(element.textContent).toBe('请检查磁盘。')
+  element.firstChild!.textContent = '手动修改'
+  await Promise.resolve()
+  expect(target.replaceDraft!('迟到的识别结果')).toBe(false)
+  expect(element.textContent).toBe('手动修改')
+  target.dispose?.()
+})

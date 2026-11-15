@@ -86,7 +86,8 @@ export const captureVoiceInputTarget = (element: Element | null = document.activ
   let draft: Text | undefined
   const originalFragment = range.cloneContents()
   const observer = new MutationObserver(() => { changed = true })
-  observer.observe(editable, { subtree: true, childList: true, characterData: true, attributes: true })
+  const observedChanges = { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['contenteditable'] }
+  observer.observe(editable, observedChanges)
   const target: VoiceInputTarget = {
     kind: 'text',
     dispose: () => observer.disconnect(),
@@ -110,7 +111,7 @@ export const captureVoiceInputTarget = (element: Element | null = document.activ
       }
       if (current?.rangeCount) range = current.getRangeAt(0).cloneRange()
       html = editable.innerHTML
-      observer.observe(editable, { subtree: true, childList: true, characterData: true, attributes: true })
+      observer.observe(editable, observedChanges)
       return true
     }
   }
@@ -126,7 +127,7 @@ export const captureVoiceInputTarget = (element: Element | null = document.activ
     const current = document.getSelection(); current?.removeAllRanges(); current?.addRange(range)
     editable.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }))
     html = editable.innerHTML
-    observer.observe(editable, { subtree: true, childList: true, characterData: true, attributes: true })
+    observer.observe(editable, observedChanges)
     return true
   }
   target.cancelDraft = () => {
