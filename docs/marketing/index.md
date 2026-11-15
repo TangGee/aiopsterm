@@ -3,5 +3,5 @@
 - [视频内容与发布规划](video-plan.md)：产品定位、受众、素材评估、首批视频脚本、发布节奏与效果验证。
 - [原始录屏与剪辑定位](raw-footage-20261111.md)：三段可用素材、实际规格、验证结果与当时的 AI 场景阻塞。
 - [AI 主机诊断原始录屏](raw-footage-20261115.md)：真实 502 排查、审批修复与 200 复验，含剪辑时间定位。
-- [七类场景与新版补录](raw-footage-supplement-20261115.md)：AI 通知编辑、阿里 Classic、内嵌 Codex、Kubernetes 排障、SQL 多轮调整、飞书贪吃蛇和语音输入，含原片定位和验证依据。
+- [七类场景与新版补录](raw-footage-supplement-20261115.md)：同一 Codex 会话编辑恢复、阿里 Classic、内嵌 Codex、Kubernetes 排障、已有 SQL 优化、飞书贪吃蛇、两种语音输入和终端任务通知，含原片定位和验证依据。
 - [现有工作区演示视频](../usage/demo-video.md)：68 秒本机实录及使用边界。
