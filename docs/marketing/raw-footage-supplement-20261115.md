@@ -1,39 +1,45 @@
-# 六个产品场景的补录素材
+# 七类产品场景与新版补录素材
 
-本轮按[补录范围](video-plan.md#2026-11-15-确认的补录范围)交付独立素材，由用户剪辑，未对外发布。本机目录为 `/home/tlinux/Videos/aiopsterm-supplement-20261115/`。视频无配音、音乐、字幕或加速；文件名对应的 `-timeline.json` 记录操作时间，`verification.json` 记录实际规格、完整解码结果和 SHA-256。
+素材目录：`/home/tlinux/Videos/aiopsterm-supplement-20261115/`。本轮交付原片供用户剪辑，未对外发布。下表为当前选用清单；目录里的旧版 `01/04/05/06-...-raw.mp4` 保留供追溯，不再代表最新验收范围。`verification-v2.json` 记录九个交付片段的规格、完整解码和 SHA-256，`-timeline.json` 记录操作定位。
 
-## 场景和剪辑定位
+## 痛点、内容和剪辑位置
 
-| 文件 | 内容 | 关键时间定位 |
+| 文件 | 要解决的问题与实际内容 | 建议定位 |
 | --- | --- | --- |
-| `01-ai-notification-session-edit-raw.mp4` | 真实 Codex 任务完成后，从 AI 通知进入会话，查看并编辑用户记录，保存后重新读取核对 | 00:26 通知；00:32 查看内容；00:44 编辑保存 |
-| `02-classic-ali-readonly-raw.mp4` | Classic 绑定阿里 SSH，审批系统资源与测试命名空间的只读巡检，取得真实输出和结论 | 00:35 审批命令；后半段为执行结果及结论 |
-| `03-embedded-codex-ali-selected.mp4` | 右侧内嵌 Codex 绑定阿里，调用远程工具，审批后得到测试服务状态 | 00:02 提交任务；00:25 审批远程命令 |
-| `04-kubernetes-ali-fixed-raw.mp4` | 收起右侧 Codex，全宽展示测试 Pod、Describe、Deployment 和容器内 HTTP 检查 | 00:08 输出跟随；00:19 Deployment；00:38 执行检查；结尾返回 `aiopsterm-k3s-ok` |
-| `05-sql-workspace-raw.mp4` | 打开独立 SQLite 演示库，查看合成订单数据，执行汇总 SQL，使用 DB AI 生成并手动运行只读查询 | 00:05 表数据；00:27 执行 SQL；00:37 DB AI；01:29 运行生成的查询 |
-| `06-feishu-interactive-codex-raw.mp4` | `/sessions` 列表点击绑定，直接启动交互式 `codex`；普通消息新增命令行入口，继续追问新增 `--pretty`，真实修改文件并运行测试 | 00:00 终端列表；00:12 已绑定并启动；00:18 第一轮任务；00:58 第一轮结果；01:01 追问；结尾第二轮结果 |
+| `01-ai-notification-session-edit-v2.mp4`，259.60 秒 | 任务结束后找不到上下文：真实通知进入会话，放大 Assistant 回复，编辑 User 消息并保存、刷新重读 | 00:45 通知；01:03 回复详情；01:22 编辑大框；01:31 输入补充要求；01:49 保存；02:17 重读。优先使用前 02:23，后续绑定改用 01b |
+| `01b-bind-terminal-open-codex-v2.mp4`，84.17 秒 | 补全入口：展开 Codex、点击绑定、选择当前终端；通过工具执行 `pwd`，左右两侧核对同一目录 | 00:02 展开；00:05 选终端；00:12 提交；00:48 批准只读命令；末段目录结果 |
+| `02-classic-ali-readonly-raw.mp4`，84.03 秒 | 减少 AI 与 SSH 之间复制：Classic 绑定阿里，审批只读巡检，根据真实输出给结论 | 00:35 审批；后半段结果。沿用已验收素材 |
+| `03-embedded-codex-ali-selected.mp4`，72.07 秒 | 明确 Agent 操作对象：内嵌 Codex 绑定阿里，通过远程工具查询测试服务 | 00:02 提交；00:25 审批；后半段服务结果。沿用已验收素材 |
+| `04-kubernetes-readiness-repair-v2.mp4`，110.17 秒 | Pod Running 但 0/1 Ready：Describe 发现探针 8081 连接失败，容器内验证实际 8080 可用，修正后复验 Available 1/1 | 00:04 Describe；00:32 容器验证；00:56 修改探针；01:21 新 Pod 就绪；01:46 Deployment 恢复 |
+| `05-sql-conversation-refinement-v2.mp4`，202.80 秒 | 业务问题不断变化：先按服务统计 pending 订单，再追问最近七天、金额合计与金额排序；执行两轮 SQL | 00:00 初始问题；02:02 追问；02:31 第一轮结果，各服务 8 条；02:41 调整后的 SQL；02:51 新结果，各服务 4 条并按金额排序 |
+| `06-feishu-snake-codex-v2.mp4`，297.07 秒 | 离开桌面仍能交代开发：`/sessions` 点击绑定，直接启动交互式 `codex`，自然语言写贪吃蛇，再追加 R 重开与测试 | 00:00 列表；00:16 绑定和启动；00:46 第一轮需求；约 03:46 追加需求；04:54 第二轮完成、11 项测试通过 |
+| `06b-snake-browser-play-v2.mp4`，13.90 秒 | 验证开发结果能用：打开同一个生成项目，方向键移动并吃到食物得 20 分、空格暂停和继续、R 重开 | 00:02 开始；00:07 得 20 分后暂停；00:10 继续；00:11 重开 |
+| `07-voice-input-v2.mp4`，31.47 秒 | 长需求输入繁琐：空 Classic 输入框采集语音，连续识别、停录补标点，再手动追加根分区要求 | 00:02 开始录音；00:12 最终识别；末段人工补充。输入没有自动发送 |
 
-01 至 06 的时长分别为 57.43、84.03、72.07、52.83、98.27、115.07 秒，均为 H.264、30 fps、无音轨。01 至 05 为 1600×900，06 仅录飞书聊天区域，为 1238×908。六个文件完整解码通过，已抽查各段关键画面，录屏质量验证不代表完整产品验收。
+01 与 01b 是独立实录，06 与 06b 分别是飞书开发和同一项目的浏览器试玩。不要剪成同一条未经中断的连续镜头。01 原片后半段和 01b 启动阶段含等待及 CLI 环境提示，可选取入口、审批和结果；03 的完整原始来源位于 `discarded/03-embedded-codex-ali-raw.mp4`，当前片是从第 45 秒起的连续截取。
 
-03 是原始实录从第 45 秒起的连续片段，剔除了启动等待和历史警告画面，没有拼接执行结果。完整来源保留在 `discarded/03-embedded-codex-ali-raw.mp4`，偏移记录在对应时间文件中。其他作废试录同样放在 `discarded/`，不属于交付素材。
+05 在等待模型和向编辑器放入 SQL 时有停留，初次复制未写入编辑器；真正执行结果出现在 02:31 和 02:51 之后。不能把空编辑器时的点击当成成功执行，也不能把剪辑后的时长描述为模型真实耗时。
 
-## 展示边界
+## 真实数据与展示边界
 
-- AI 通知片展示的是通知和会话管理，不是右侧 AI 面板。编辑的是已停止的专用演示会话；当前保存不会自动备份，编辑影响与限制见[会话指南](../usage/best-practices/zh-CN/05-ai-sessions.md)。
-- 阿里巡检只查看系统资源和 `aiopsterm-test` 命名空间；没有改动业务服务。SQL 的 30 条订单为合成数据。
-- Codex 是演示中的客户端/交互方式，录制使用配置的 `ark-code-latest`，不能把画面标为某个未经验证的 GPT 模型。
-- 自定义模型可能显示模型元数据回退提示，Codex 界面也保留 warning 状态；这不等于任务失败。内嵌 Codex 片后半段可优先选取远程工具执行和服务结论，最终成片应以实际结果为主。
-- 原片仍可能出现主机地址、账户名和本机路径。公开剪辑时应遮挡这些字段；不得发布演示配置、凭据文件或作废桌面素材。
-- 等待可以在剪辑中压缩并注明，不能把剪辑时长描述成任务真实耗时。项目文件浏览可作为后续补充主题，尚不属于这组六段素材。
+- 01 编辑已停止的专用演示会话，保存后刷新重读确认内容持久化；当前保存不自动备份，修改需重启该 AI 对话后生效，见[会话指南](../usage/best-practices/zh-CN/05-ai-sessions.md)。01b 演示绑定和新查询，不宣称已恢复编辑前的原会话。
+- 04 是在阿里 `aiopsterm-test` 中专门构造的探针端口错误，不能描述为生产事故。仅修改并删除了 `checkout-api-demo` 演示 Deployment，其他业务服务未改动。右侧 Codex 全程收起。
+- 05 使用独立 SQLite 演示库和 60 条合成订单。第二轮筛选 2026-11-09 至 2026-11-15，结果为 worker 445.5、api 418、web 390.5，各 4 条；两条只读 SQL 已用 SQLite 独立执行核对。
+- 06 使用已配置的 `ark-code-latest` 驱动 Codex，不标成未经验证的 GPT 型号。普通消息自动提交，没有额外 `/key enter`。游戏在素材目录的 `snake-game/index.html`，无需外网；演示目录单独提交为 `148c663`。飞书任务和浏览器试玩均来自此项目。
+- 07 使用 Edge TTS 的 `zh-CN-XiaoxiaoNeural` 合成演示语音，经虚拟麦克风进入真实采集、本地 Zipformer 与输入目标链路；不是真人口述，也没有预填识别结果。保留 AAC 演示音轨，原始音频另存 `07-voice-input-source.wav` 供剪辑调音，其他片段无音轨。结束后已恢复原默认音频输入源。
+- 原片保留账户、路径和部分主机信息，公开剪辑应遮挡。不要发布配置、凭据或作废桌面素材。CLI 自定义模型元数据回退及 Linux 沙箱提示不能被剪辑说明误写成已修复的问题；实际工具成功另有证据。
 
-## 修复与验证依据
+## 修复、测试和验证
 
-录制前修复并提交了 Kubernetes 输出跟随（`1469518e`）、`kubectl exec --` 容器命令参数隔离（`77b501b3`）、IM 普通文本独立提交（`8d9075ca`）。使用文档已同步，未将测试版功能描述为正式发布能力。
+本轮录制前移除了 Codex 配置中已弃用的 `features.web_search_request` 写入，保留 `web_search="disabled"`（`7bd04e99`，31 项相关测试通过）。语音预演发现 Classic 空输入样式变化误触发目标失效，修复为区分展示属性与内容修改，同时保留用户编辑保护（`442156fe`）。[语音实现边界](../technical/voice-input.md)集中维护该行为。
 
-- Kubernetes：`kubernetes-backend`、`kubernetes-terminal-pty`、`kubernetes-workspace-presentation` 及两个工作区控制器测试文件，共 57 项通过；涵盖 `--` 前后参数、自动跟随、上滚暂停与恢复。真实 Ali UI 使用原始 exec 命令返回测试服务内容，证据为素材目录的 `k8s-exec-live-verification.json`。
-- IM：`im-gateway-input-backend`、`core-backend`、`output-backend`、`terminal-backend`、`feishu-backend` 和 `im-gateway-ipc`，共 124 项通过。覆盖普通消息分开写入文本和回车、多行粘贴、特殊按键不额外提交、等待期间解绑或失权、消息顺序和写入失败。真实网关核心驱动 Codex CLI 0.167.0 的单行、多行 PTY 验证通过。
-- AI 通知与内容：`agent-session-content-runtime`、`agent-session-notification-runtime`、`managed-ai-session-content-workspace` 共 25 项通过，覆盖通知与内容读写、保存限制。实际通知片另核对了保存后重读。
-- 以上修复已通过项目完整构建。02、03、05 来自此前运行的应用；01、04、06 使用本地源码构建。重启后的飞书使用修复后的网关；本次没有重新打包 AppImage，不代表已有 AppImage 包含这些修复。
-- 飞书实录的两个任务均由普通消息自动提交，没有另发 `/key enter`。真实 Codex 会话包含两次完成事件，所有工具调用成功，依次通过 4 项与 5 项测试。录制后独立运行 `python3 -m unittest -v`，5 项通过，并额外核对默认 JSON 输出保持单行；证据为素材目录的 `feishu-live-verification.json`。录制结束退出演示 Codex、解除飞书绑定，桌面应用继续运行。
+- `global-voice-targets`、`global-voice-recording`、`global-voice-streaming`、`voice-realtime-recording`：33 项通过；新增展示属性更新不中断口述、真实手动修改仍拒绝迟到结果的回归。实际音频识别整句并人工补充成功，证据 `voice-v2-verification.json`。
+- `agent-session-content-runtime`、`agent-session-notification-runtime`、`managed-ai-session-content-workspace`：25 项通过，核对正常保存、分页、未保存保护、版本冲突与重启生效提示；另有 `session-edit-v2-verification.json`。
+- 贪吃蛇 `node --test`：11 项通过，覆盖移动、禁止反向和同一步二次转向、进食、四面墙、自碰撞、尾格、结束、暂停和重开。浏览器实际按键验证真实吃食物得 20 分、暂停画面不变、R 重开归零，无页面异常，见 `snake-browser-verification.json` 和 `snake-tests.log`。
+- Kubernetes、SQL 和绑定 Codex 的真实验收分别见 `k8s-readiness-v2-verification.json`、`sql-v2-verification.json`、`bind-codex-v2-verification.json`。
+- 既有修复仍保留：K8s 跟随滚动 `1469518e`、exec 参数隔离 `77b501b3`（57 项相关测试），IM 文本与回车独立写入 `8d9075ca`（124 项相关测试）。本轮没有重复改动或重跑这些无关用例；新实录验证了实际链路。
+- 本轮两次源码完整构建通过；语音修复后的构建已加载并实录。未重新打包 AppImage，不声称历史安装包包含新修复。
 
-测试命令为 `npx vitest run` 加上述对应测试文件；构建为 `npm run build`。单元测试、真实操作和视频解码分别提供证据，不能互相替代。
+九个片段均为 H.264、30 fps，完整解码通过，已抽查详情编辑、保存重读、绑定执行、故障原因及恢复、SQL 两轮结果、飞书需求及完成、游戏交互和语音文字画面。应用片为 1600×900；飞书聊天裁切为 1238×908；游戏浏览器为 1588×984。视频技术检查与内容证据分别核对，不代表整个产品通过发版验收。
+
+录制后已退出飞书演示 Codex、解除绑定并关闭隔离录制配置的 IM 网关，演示游戏窗口已关闭。桌面应用保留；测试库和游戏源码供用户复核，临时 K8s 演示资源已清理。最终剪辑和正式发布由用户处理。
