@@ -1,5 +1,6 @@
 import { keyDataForTerminal } from '@shared/terminalKeys'
 import { randomBytes } from 'crypto'
+import { setTimeout as settleTerminalInput } from 'node:timers/promises'
 import { GatewayOutputRelay } from './gatewayOutputRelay'
 import { stripVTControlCharacters } from 'util'
 import type { ControlTerminalSummary } from '@shared/contracts/control'
@@ -216,9 +217,16 @@ export class GatewayCore {
       const input = action ? argument : text.replace(/\r\n?/g, '\n')
       const invalid = action ? /[\x00-\x1f\x7f]/.test(input) : /[\x00-\x08\x0b-\x1f\x7f]/.test(input)
       if (!input || input.length > (action ? 2048 : 4096) || invalid) return '输入过长或含控制字符；普通消息最多 4096 字符，/run 和 /send 只接受最多 2048 字符的单行文字。'
-      const data = !action && /[\n\t]/.test(input) ? `\x1b[200~${input}\x1b[201~\r` : input + (action === '/send' ? '' : '\r')
+      const data = !action && /[\n\t]/.test(input) ? `\x1b[200~${input}\x1b[201~` : input
       if (action !== '/send') this.relays.get(key)?.beginInput()
       await this.options.terminal.write(binding, data)
+      if (action !== '/send') {
+        // Interactive editors can treat an Enter in the same input burst as pasted text.
+        // Keep the terminal lock until one separate submit, and recheck delayed authority.
+        await settleTerminalInput(200)
+        if (!await this.bindingValid(message, key, binding, terminal)) return '文字已输入，但绑定、权限或连接已变化，未发送回车。请在桌面检查输入状态。'
+        await this.options.terminal.write(binding, '\r')
+      }
       if (!action) return null
       return action === '/run' ? '已输入并回车，不代表命令执行完成。使用 /read 查看输出。' : '已输入文字，尚未回车。'
     } finally { this.terminalLocks.delete(binding.sessionId) }

@@ -36,7 +36,10 @@ describe('IM gateway IPC', () => {
     await vi.waitFor(async () => expect((await call('status')).pending).toBe(0))
     await env.receive!({ ...incoming, messageId: 'command', text: '/run echo private-content' })
     await vi.waitFor(async () => expect((await call('status')).pending).toBe(0))
-    expect(invokeControlSocketMethod).toHaveBeenCalledWith('terminal.send_text', { sessionId: 's', text: 'echo private-content\r' })
+    expect(vi.mocked(invokeControlSocketMethod).mock.calls.filter(call => call[0] === 'terminal.send_text')).toEqual([
+      ['terminal.send_text', { sessionId: 's', text: 'echo private-content' }],
+      ['terminal.send_text', { sessionId: 's', text: '\r' }]
+    ])
     expect(logRuntimeEvent).toHaveBeenCalledWith('info', 'im.gateway.accepted', expect.objectContaining({ action: '/run', messageId: 'command' }))
     expect(JSON.stringify(vi.mocked(logRuntimeEvent).mock.calls)).not.toContain('private-content')
     expect(JSON.stringify(vi.mocked(logRuntimeEvent).mock.calls)).not.toContain('test-secret')

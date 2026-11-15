@@ -138,12 +138,12 @@ describe('IM gateway core', () => {
     expect(await receive('/sessions')).toContain('Host (Local)')
     await receive('/bind session')
     expect(await receive('/run pwd')).toContain('不代表命令执行完成')
-    expect(port.write).toHaveBeenCalledWith({ sessionId: 'session', panelId: 'panel' }, 'pwd\r')
+    expect(vi.mocked(port.write).mock.calls).toEqual([[{ sessionId: 'session', panelId: 'panel' }, 'pwd'], [{ sessionId: 'session', panelId: 'panel' }, '\r']])
     await receive('/send hello'); expect(port.write).toHaveBeenLastCalledWith(expect.anything(), 'hello')
     expect(await receive('/read')).toBe('output')
     await receive('/interrupt'); expect(port.write).toHaveBeenLastCalledWith(expect.anything(), '\x03')
     await receive('/unbind'); await receive('/run ignored')
-    expect(port.write).toHaveBeenCalledTimes(3)
+    expect(port.write).toHaveBeenCalledTimes(4)
   })
   it('ignores unauthorized identities, unapproved groups, old events, and future timestamps', async () => {
     for (const patch of [{ senderId: 'unknown' }, { conversationType: 'group' as const, conversationId: 'unknown' }, { createdAt: now - 300001 }, { createdAt: now + 60001 }, { text: 'x'.repeat(4097) }]) await receive('/sessions', patch)
@@ -170,10 +170,10 @@ describe('IM gateway core', () => {
     await receive('/bind session')
     const event = message('/run sensitive-content', { messageId: 'same' })
     await core.receive(event); await core.receive(event); await core.drain()
-    expect(port.write).toHaveBeenCalledTimes(1)
+    expect(port.write).toHaveBeenCalledTimes(2)
     core.stop(); state = new GatewayStateStore(join(directory, 'state.json')); core = create()
     await core.receive(event); await core.drain()
-    expect(port.write).toHaveBeenCalledTimes(1)
+    expect(port.write).toHaveBeenCalledTimes(2)
     expect(await readFile(join(directory, 'state.json'), 'utf8')).not.toContain('sensitive-content')
   })
   it('does not replay a terminal write when message delivery fails', async () => {
@@ -181,7 +181,7 @@ describe('IM gateway core', () => {
     core = new GatewayCore({ policy: () => policy, state, terminal: port, now: () => now, reply: async () => { throw new Error('offline') }, audit: vi.fn() })
     const event = message('/run pwd', { messageId: 'retry-event' })
     await core.receive(event); await core.drain(); await core.receive(event); await core.drain()
-    expect(port.write).toHaveBeenCalledTimes(1)
+    expect(port.write).toHaveBeenCalledTimes(2)
   })
   it('serializes a binding and command in the same conversation while acknowledging promptly', async () => {
     let release!: () => void
@@ -189,7 +189,7 @@ describe('IM gateway core', () => {
     vi.mocked(port.list).mockImplementationOnce(async () => { await gate; return terminals })
     await core.receive(message('/bind session')); await core.receive(message('/run pwd'))
     expect(port.write).not.toHaveBeenCalled()
-    release(); await core.drain(); expect(port.write).toHaveBeenCalledTimes(1)
+    release(); await core.drain(); expect(port.write).toHaveBeenCalledTimes(2)
   })
   it('does not perform queued writes after stop or permission revocation', async () => {
     await receive('/bind session')
@@ -218,7 +218,7 @@ describe('IM gateway core', () => {
     await vi.waitFor(() => expect(replies.at(-1)).toContain('另一条网关请求'))
     for (let index = 0; index < 31; index++) await core.receive(message('/status'))
     await expect(core.receive(message('/status'))).rejects.toThrow('IM_GATEWAY_BUSY')
-    release(); await core.drain(); expect(port.write).toHaveBeenCalledTimes(1)
+    release(); await core.drain(); expect(port.write).toHaveBeenCalledTimes(2)
   })
   it('fails closed on corrupt state and does not execute when receipt persistence fails', async () => {
     await writeFile(join(directory, 'broken'), '{broken')
@@ -239,17 +239,17 @@ describe('IM gateway core', () => {
     await receive('/bind session')
     const before = replies.length
     await receive('  echo hello  ')
-    expect(port.write).toHaveBeenLastCalledWith({ sessionId: 'session', panelId: 'panel' }, '  echo hello  \r')
+    expect(vi.mocked(port.write).mock.calls.map(call => call[1])).toEqual(['  echo hello  ', '\r'])
     expect(replies).toHaveLength(before)
-    await receive('/run /model'); expect(port.write).toHaveBeenLastCalledWith(expect.anything(), '/model\r')
-    await receive('/unbind'); await receive('ignored'); expect(port.write).toHaveBeenCalledTimes(2)
+    await receive('/run /model'); expect(vi.mocked(port.write).mock.calls.slice(-2).map(call => call[1])).toEqual(['/model', '\r'])
+    await receive('/unbind'); await receive('ignored'); expect(port.write).toHaveBeenCalledTimes(4)
   })
   it('pastes multiline conversation input while rejecting embedded terminal controls', async () => {
     await receive('/bind session')
     await receive('first line\r\nsecond\tline')
-    expect(port.write).toHaveBeenLastCalledWith(expect.anything(), '\x1b[200~first line\nsecond\tline\x1b[201~\r')
+    expect(vi.mocked(port.write).mock.calls.map(call => call[1])).toEqual(['\x1b[200~first line\nsecond\tline\x1b[201~', '\r'])
     await receive('text\x1b[201~command'); await receive('text\x03')
-    expect(port.write).toHaveBeenCalledOnce()
+    expect(port.write).toHaveBeenCalledTimes(2)
   })
   it('expires choices after ten minutes even if the message itself is fresh', async () => {
     let time = now
@@ -296,7 +296,8 @@ describe('IM gateway core', () => {
     terminals.push({ ...terminals[0], sessionId: 'local', kind: 'local', title: 'Local' }, { ...terminals[0], sessionId: 'new-host', assetId: 'future', title: 'Future' })
     expect(await receive('/sessions')).toContain('Future')
     await receive('/bind local'); await receive('pwd')
-    expect(port.write).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'local' }), 'pwd\r')
+    expect(port.write).toHaveBeenNthCalledWith(1, expect.objectContaining({ sessionId: 'local' }), 'pwd')
+    expect(port.write).toHaveBeenNthCalledWith(2, expect.objectContaining({ sessionId: 'local' }), '\r')
     const count = replies.length
     await receive('/sessions', { senderId: 'unknown' }); await receive('/sessions', { conversationType: 'group', conversationId: 'unknown' })
     expect(replies).toHaveLength(count)

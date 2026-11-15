@@ -18,6 +18,7 @@
     "tests/files-cross-host-transfer-runtime.test.ts",
     "tests/files-resumable-transfer.test.ts",
     "tests/im-gateway-core-backend.test.ts",
+    "tests/im-gateway-input-backend.test.ts",
     "tests/terminal-keys-backend.test.ts",
     "tests/im-gateway-output-backend.test.ts",
     "tests/im-gateway-ipc.test.ts",
