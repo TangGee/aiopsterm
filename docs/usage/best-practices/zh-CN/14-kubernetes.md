@@ -53,6 +53,8 @@
 4. **③ 历史/输出**用于复查最近执行；切换集群会更新作用域，不会把旧结果当成新集群结果。
 5. 点击 **清理**结束该 Agent 状态；它不会删除集群或 kubeconfig。
 
+命令栏支持 `kubectl exec`：例如 `kubectl exec -n aiopsterm-test deployment/aiopsterm-demo -- wget -q -O - http://127.0.0.1:8080`。应用补充的 context/namespace 参数放在 `--` 之前，分隔符之后的容器命令参数保持原样；容器命令中的同名参数不会改变集群作用域。该参数顺序修复与上述滚动修复一样，尚未包含在 2026-11-09 的测试包中。
+
 这里的 Agent 是带集群作用域和历史的 kubectl 命令执行面，不会自行调用大模型，也不会越过当前 cluster/context。集群配置中的 **Agent 代理**指 kubectl 网络代理，不是 AI Agent 开关。
 
 ## 场景五：把 Kubernetes 证据交给 AI

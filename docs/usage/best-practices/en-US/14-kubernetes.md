@@ -55,6 +55,8 @@ The Agent bar is always bound to an explicit cluster/context:
 
 This Agent is a scoped kubectl command surface with history; it does not invoke an LLM by itself or escape the selected cluster/context. **Agent Proxy** in cluster settings is a kubectl network proxy, not an AI Agent switch.
 
+The command bar supports `kubectl exec`. Automatically supplied context/namespace flags are inserted before `--`; arguments after that separator belong to the container command and remain unchanged. Matching flag names in the container command do not override the cluster scope. Like the scrolling fix above, this argument-order fix is not included in the 2026-11-09 test package.
+
 ## Scenario 5: Send Kubernetes Evidence To AI
 
 - Run Describe or Logs, expand output, and click **Send Output To AI**. aiopsterm includes cluster, namespace, resource identity, and real output in a user message to right-side Classic/Codex.

@@ -348,6 +348,22 @@ describe('kubernetes backend boundary', () => {
     expect(result.data?.terminalOutput).toContain('fake kubectl invoked')
   })
 
+  it.each([
+    ['kubectl exec deployment/demo -- wget -qO- http://127.0.0.1:8080', ['exec', 'deployment/demo', '--context=qa/dev', '--namespace=qa', '--', 'wget', '-qO-', 'http://127.0.0.1:8080']],
+    ['kubectl exec -n test deployment/demo -- echo --context=container --namespace=inner -A', ['exec', '-n', 'test', 'deployment/demo', '--context=qa/dev', '--', 'echo', '--context=container', '--namespace=inner', '-A']],
+    ['kubectl --context=explicit exec --namespace=test pod/demo -- sh -c "printf hello"', ['--context=explicit', 'exec', '--namespace=test', 'pod/demo', '--', 'sh', '-c', 'printf hello']]
+  ])('keeps kubectl scope flags before the container command: %s', async (command, expectedArgs) => {
+    await createFakeKubectl('printf "ARG=%s\\n" "$@"')
+    const added = await addKubernetesCluster({
+      name: 'exec-test', contextName: 'qa/dev', serverUrl: 'https://qa.k8s.local:6443',
+      defaultNamespace: 'qa', kubeconfigContent: qaKubeconfigContent, authType: 'kubeconfig', sourceType: 'local'
+    })
+    const result = await executeKubernetesCommand({ command, clusterId: added.data!.cluster!.id, namespace: 'qa', source: 'agent' })
+    expect(result.ok).toBe(true)
+    expect(result.data?.success).toBe(true)
+    expect(result.data?.output.trim().split('\n')).toEqual(expectedArgs.map((arg) => `ARG=${arg}`))
+  })
+
   it('persists Kubernetes Agent proxy config and applies it to local kubectl runs', async () => {
     await createFakeKubectl(
       [

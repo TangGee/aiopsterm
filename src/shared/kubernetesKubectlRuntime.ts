@@ -167,11 +167,13 @@ const buildKubectlArgs = (command: string, cluster: KubernetesClusterRecord, nam
   if (!parsed.ok) return parsed
   const args = [...parsed.args]
   if (/^kubectl(?:\.exe)?$/i.test(args[0] || '')) args.shift()
+  const separator = args.indexOf('--')
+  const commandArgs = separator < 0 ? [] : args.splice(separator)
   if (!hasContextArgument(args)) args.push(`--context=${cluster.context_name}`)
   if (namespace && namespace !== 'all' && !hasNamespaceArgument(args) && !hasAllNamespacesArgument(args) && !isClusterScopedCommand(args)) {
     args.push(`--namespace=${namespace}`)
   }
-  return { ok: true as const, args, error: '' }
+  return { ok: true as const, args: [...args, ...commandArgs], error: '' }
 }
 
 const unsupportedKubernetesSeedCommandMessage = (command: string) =>
