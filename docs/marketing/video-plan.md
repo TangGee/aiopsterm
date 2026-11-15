@@ -8,9 +8,9 @@
 
 已完成：产品与素材审视、本文方案、[68 秒工作区实录](../usage/demo-video.md)、[三段原始录屏](raw-footage-20261111.md)（SSH 手工排查、飞书真实收发、工作区），以及 2026-11-15 补录的 [AI 主机诊断原片](raw-footage-20261115.md)。AI 原片已拍到只读取证、审批修复及实际 HTTP 200 复验，交由用户剪辑。多 Agent 会话管理片、完整首次使用教程尚未制作，素材均未对外发布。
 
-补录进度：AI 通知及会话内容编辑、阿里 Classic、内嵌 Codex、Kubernetes 和 SQL 已有本机原片，位于 `/home/tlinux/Videos/aiopsterm-supplement-20261115/`，整组素材仍待最终验收。飞书交互式 Codex 尚未完成合格重录，`codex exec` 旧片已作废。普通消息需要另发 Enter 的问题已修复，相关 124 项测试及构建通过；实际网关核心驱动 Codex CLI 0.167.0 的单行、多行 PTY 验证通过。当前旧应用尚未切换新构建，不能声称飞书界面端到端复验完成。
+补录进度：[六个产品场景素材](raw-footage-supplement-20261115.md)已完成录制、完整解码及关键画面抽查，位于 `/home/tlinux/Videos/aiopsterm-supplement-20261115/`。包括 AI 通知及会话内容编辑、阿里 Classic、内嵌 Codex、全宽 Kubernetes、SQL 和飞书交互式 Codex。应用已按用户授权重启到修复后的本地构建，飞书完成列表点击绑定和两轮普通消息驱动的真实编程，无需额外 Enter。失败试录及 `codex exec` 旧片不作为交付素材；修复、规格、测试和剪辑定位集中见素材文档。
 
-本次 `ark-code-latest` 已恢复可用并完成真实诊断，主片不再受原订阅问题阻塞。备用 Codex 与 Code-CLI 的历史失败不代表当前状态，本轮未复测，不能据此宣称多 Agent 录制条件也已恢复。
+本次 `ark-code-latest` 已恢复可用并完成真实诊断，主片不再受原订阅问题阻塞。Codex CLI 使用该模型也已完成两轮实录；其他 Code-CLI 服务和模型未复测，不能据此宣称全部历史服务均已恢复。
 
 ## 定位与受众
 
