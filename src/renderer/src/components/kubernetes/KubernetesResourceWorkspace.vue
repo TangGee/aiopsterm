@@ -239,7 +239,7 @@
             </button>
           </div>
         </header>
-        <pre>{{ workspace.k8sResourceOutput }}</pre>
+        <pre ref="outputElement" @scroll="onOutputScroll">{{ workspace.k8sResourceOutput }}</pre>
       </aside>
     </div>
   </section>
@@ -248,6 +248,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useKubernetesWorkspaceRuntimeContext } from '@/services/kubernetes/kubernetesWorkspaceContext'
+import { useKubernetesOutputScroll } from '@/services/kubernetes/kubernetesOutputScroll'
 
 const {
   workspace,
@@ -267,6 +268,12 @@ const {
 } = useKubernetesWorkspaceRuntimeContext()
 
 const outputOpen = ref(workspace.k8sResourceOutputTitle !== '资源输出')
+const outputElement = ref<HTMLElement | null>(null)
+const { onScroll: onOutputScroll } = useKubernetesOutputScroll(
+  outputElement,
+  () => workspace.k8sResourceOutput,
+  () => `${workspace.k8sResourceCluster?.id || ''}:${workspace.k8sResourceOutputTitle}`
+)
 const agentStatusLabels = {
   idle: '空闲',
   ready: '就绪',

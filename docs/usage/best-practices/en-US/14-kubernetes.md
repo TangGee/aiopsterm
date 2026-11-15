@@ -39,6 +39,8 @@ Each Kubernetes terminal receives a private session kubeconfig with current-cont
 
 Streaming logs and `kubectl exec` work. Full-screen TUI programs are not supported by the plain terminal view. kubectl output is capped at 10 MiB and terminal session state retains the newest 1 MiB.
 
+Terminal and resource output follow new content while scrolled to the bottom. Scrolling up preserves your reading position; returning to the bottom resumes following. Switching terminals or opening another resource output shows the latest content. This behavior is implemented in source; the 0.1.4 test package built on 2026-11-09 does not include the fix.
+
 ## Scenario 4: Cluster Agent Command Workflow
 
 ![Kubernetes Agent and AI](../images/en-US/kubernetes-ai-workflow.png)

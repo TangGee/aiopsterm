@@ -57,8 +57,10 @@
       </button>
     </div>
     <div
+      ref="outputElement"
       class="k8s-terminal-container"
       :class="{ empty: !workspace.k8sActiveTerminal }"
+      @scroll="onOutputScroll"
     >
       <pre v-if="workspace.k8sActiveTerminal">{{ workspace.k8sActiveTerminal.output }}</pre>
       <div
@@ -95,7 +97,15 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useKubernetesWorkspaceRuntimeContext } from '@/services/kubernetes/kubernetesWorkspaceContext'
+import { useKubernetesOutputScroll } from '@/services/kubernetes/kubernetesOutputScroll'
 
 const { workspace, command, createTerminalTab, syncActiveTerminalSize, sendAiCommand, sendCommand, Plus, X } = useKubernetesWorkspaceRuntimeContext()
+const outputElement = ref<HTMLElement | null>(null)
+const { onScroll: onOutputScroll } = useKubernetesOutputScroll(
+  outputElement,
+  () => workspace.k8sActiveTerminal?.output || '',
+  () => workspace.k8sActiveTerminal?.id || ''
+)
 </script>

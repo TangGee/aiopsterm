@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent, h, ref } from 'vue'
+import { defineComponent, h, nextTick, reactive, ref } from 'vue'
 import KubernetesWorkspacePresentation from '@/components/kubernetes/KubernetesWorkspacePresentation.vue'
 import { provideKubernetesWorkspaceRuntime } from '@/services/kubernetes/kubernetesWorkspaceContext'
 
@@ -109,6 +109,65 @@ const runtime = () => ({
 })
 
 describe('KubernetesWorkspacePresentation', () => {
+  it.each(['terminal', 'resource'] as const)('follows %s output without interrupting history reading', async (kind) => {
+    const context = runtime()
+    const state = reactive(context.workspace) as any
+    context.workspace = state
+    state.k8sActiveTerminal = { id: 'terminal-a', output: 'initial', commandHistory: [], status: 'connected' }
+    state.k8sResourceOutputTitle = 'Pod A'
+    state.k8sResourceOutput = 'initial'
+    const wrapper = mount(defineComponent({
+      setup() {
+        provideKubernetesWorkspaceRuntime(context as any)
+        return () => h(KubernetesWorkspacePresentation)
+      }
+    }))
+    const viewport = wrapper.find(kind === 'terminal' ? '.k8s-terminal-container' : '.k8s-resource-output pre')
+    const element = viewport.element as HTMLElement
+    let height = 500
+    let top = 0
+    Object.defineProperties(element, {
+      clientHeight: { configurable: true, get: () => 100 },
+      scrollHeight: { configurable: true, get: () => height },
+      scrollTop: { configurable: true, get: () => top, set: (value) => { top = Math.max(0, Math.min(value, height - 100)) } }
+    })
+    const append = async (text: string) => {
+      height += 200
+      if (kind === 'terminal') state.k8sActiveTerminal.output += text
+      else state.k8sResourceOutput += text
+      await nextTick()
+    }
+
+    await append('\nnew output')
+    expect(element.scrollTop).toBe(600)
+    element.scrollTop = 100
+    await viewport.trigger('scroll')
+    await append('\noutput while reading history')
+    expect(element.scrollTop).toBe(100)
+    element.scrollTop = height - 100
+    await viewport.trigger('scroll')
+    await append('\nlatest output')
+    expect(element.scrollTop).toBe(height - 100)
+
+    element.scrollTop = height - 100 - 24
+    await viewport.trigger('scroll')
+    await append('\nnear the bottom')
+    expect(element.scrollTop).toBe(height - 100)
+    element.scrollTop = height - 100 - 25
+    await viewport.trigger('scroll')
+    const readingPosition = element.scrollTop
+    await append('\noutside follow threshold')
+    expect(element.scrollTop).toBe(readingPosition)
+
+    element.scrollTop = 0
+    await viewport.trigger('scroll')
+    if (kind === 'terminal') state.k8sActiveTerminal = { ...state.k8sActiveTerminal, id: 'terminal-b', output: 'another terminal' }
+    else { state.k8sResourceOutputTitle = 'Pod B'; state.k8sResourceOutput = 'another resource' }
+    await nextTick()
+    expect(element.scrollTop).toBe(height - 100)
+    wrapper.unmount()
+  })
+
   it('composes Kubernetes workspace subdomain presenters through the shared runtime context', async () => {
     const Harness = defineComponent({
       setup() {
