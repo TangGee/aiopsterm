@@ -45,10 +45,10 @@ Revision can remove a bad context fragment, sensitive text, or malformed local r
 
 1. Stop/exit the running Agent so it no longer uses in-memory old context.
 2. Open session content, switch to editable source, and revise it.
-3. Save. aiopsterm validates the revision and backs up the original under `agent-sessions/content-backups/`; unsupported structures are not blindly overwritten.
+3. Save. aiopsterm validates the file revision and reports external changes before overwriting. Reload or explicitly confirm a conflicting overwrite. The current implementation does not create automatic backups; copy important transcripts before editing.
 4. Close the original process and resume the session. A running process does not reload its transcript from disk automatically.
 
-Editing history does not undo commands or file changes already performed by the Agent. Restore from the backup instead of hand-splicing incomplete JSON/JSONL.
+Editing history does not undo commands or file changes already performed by the Agent. Restore from your own pre-edit copy instead of hand-splicing incomplete JSON/JSONL.
 
 ## Inspect And Edit AI Project Files
 
