@@ -552,7 +552,6 @@ export const mergeAiopstermCodexConfigToml = (
     'skill_mcp_dependency_install = false',
     'goals = false',
     'workspace_dependencies = false',
-    'web_search_request = false',
     'standalone_web_search = false'
   ])
   userContent = insertManagedTableKeys(userContent, 'tools.experimental_request_user_input', ['enabled = false'])

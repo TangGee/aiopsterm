@@ -55,6 +55,7 @@ The generated Codex config also isolates the embedded agent from aiopsterm's imp
 - `include_environment_context`, `include_permissions_instructions`, `include_apps_instructions`, and `include_collaboration_mode_instructions` are disabled.
 - `project_doc_max_bytes = 0` prevents local `AGENTS.md` project docs from being injected.
 - `web_search = "disabled"` and local/browser/app/plugin/agent/image-generation features are disabled.
+- The generated config uses the root `web_search` setting and removes the deprecated `features.web_search_request` key, including from older managed configs, to avoid a startup deprecation warning.
 - Because `<environment_context>` is disabled, the agent must use `target_context` plus remote commands for cwd, shell, current date/time, timezone, hostname, and filesystem facts.
 
 ## Iteration Rules

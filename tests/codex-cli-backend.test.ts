@@ -285,6 +285,7 @@ describe('Codex CLI backend runtime', () => {
     expect(configToml).toContain('instructions = "You are aiopsterm Agent')
     expect(configToml).toContain('project_doc_max_bytes = 0')
     expect(configToml).toContain('web_search = "disabled"')
+    expect(configToml).not.toContain('web_search_request =')
     expect(configToml).toContain('check_for_update_on_startup = false')
     expect(configToml).toContain('shell_tool = false')
     expect(configToml).toContain('unified_exec = false')
