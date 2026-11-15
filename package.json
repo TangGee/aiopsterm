@@ -88,6 +88,7 @@
     "test:live:k8s:pty": "npm run native:ensure:node && vitest run tests/live-k8s-sandbox.test.ts"
   },
   "dependencies": {
+    "@core-workspace/infoflow-sdk-nodejs": "0.1.7",
     "@larksuiteoapi/node-sdk": "1.76.0",
     "@withfig/autocomplete": "^2.692.3",
     "adm-zip": "^0.5.17",

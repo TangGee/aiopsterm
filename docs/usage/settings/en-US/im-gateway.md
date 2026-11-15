@@ -1,6 +1,16 @@
 # IM Gateway Settings
 
-Use Feishu to select an aiopsterm terminal, open a new local or SSH terminal, and exchange input and output through chat. Open **Settings > IM Gateway**; the question-mark button opens this page. Keep the desktop app running.
+Use Feishu, Telegram or Baidu Infoflow to select an aiopsterm terminal, open a new local or SSH terminal, and exchange input and output through chat. Open **Settings > IM Gateway**; the question-mark button opens this page. Keep the desktop app running.
+
+## Choose a platform
+
+Only one platform and bot can be active. Changing platform clears unsaved bot credentials and user/group identities; saving stops the old channel. Existing Feishu configurations remain compatible. Full provider instructions are in the [platform guide (Chinese)](../../im-platforms.md).
+
+For Telegram, create a bot with [BotFather](https://t.me/BotFather). Enter the numeric token prefix as Bot ID and the full token in Bot Token. Obtain your numeric `message.from.id` and group `message.chat.id` from your own Bot API event diagnostics before enabling the gateway. Fill the allowlists and terminal scope, then save. Only one long-poll consumer may use a bot; an existing webhook is reported as a conflict and is never deleted automatically. In groups, use `/sessions@bot_username` or `@bot_username pwd`. Topic messages, channels, anonymous senders and bot messages are excluded. Selection uses inline buttons; redraws edit one message; screenshots are sent as PNG documents. Network access to `api.telegram.org` is required.
+
+For Baidu Infoflow, create a bot in the enterprise console. Enter its numeric Agent ID, App Key and App Secret; App Key is the SDK authentication `appId`, not Agent ID. Enable the message receiver and choose persistent-connection callbacks as described in the [Baidu guide](https://aca.bce.baidu.com/doc/Dumate/s/Jmr0c3qns). Follow tenant requirements for publication and user access. Allowlist event `FromUserId`/`message.header.fromuserid` and `groupid`. Use the client mention picker in groups. `/sessions` and `/new` return `/select <token>` commands: send the desired command to choose, mentioning the bot in groups. Tokens are scoped to the requesting user/chat and expire after ten minutes. Animated TUI output is sent after four quiet seconds; use `/read` or `/screenshot` during continuous animation. Images must be smaller than 1 MiB. Group images use raw Base64 as specified by the public bot API; actual permissions and delivery still require a real enterprise bot. Group sends reserve a 3.1-second interval to respect the documented 20-per-minute limit.
+
+Secrets remain encrypted in the OS credential store. Automated protocol tests do not replace live bot permission and delivery checks. The following platform permissions and callbacks apply specifically to Feishu.
 
 ## Setup and authorization
 
@@ -14,7 +24,7 @@ For the complete creation, connection, publishing, and verification sequence, se
 | all mode | Allows local terminals and all saved SSH hosts, including hosts added later; user and group allowlists still apply |
 | Asset IDs / Allow local terminals | When all is off, authorize specific saved hosts and local terminals separately; hosts do not need to be connected first |
 
-Use **Save and apply**, then check that the status is **Connected**. Saved settings apply immediately. Feishu permission or callback changes also need publication in its developer console. After upgrading aiopsterm, launch the new version. After restarting, send `/sessions` and select a terminal again; previous cards are no longer valid.
+Use **Save and apply**, then check that the status is **Connected**. Saved settings apply immediately. For Feishu permission or callback changes, follow the console requirements for activation or publication. After upgrading aiopsterm, launch the new version. After restarting, send `/sessions` and select a terminal again; previous cards are no longer valid.
 
 ## Start a terminal conversation
 

@@ -35,6 +35,8 @@ files:
   - '!node_modules/node-bin-darwin-*/**'
   - '!node_modules/node-win-*/**'
 extraResources:
+  - from: resources/licenses/infoflow-sdk-nodejs
+    to: licenses/infoflow-sdk-nodejs
   - from: resources/licenses/larksuite-node-sdk
     to: licenses/larksuite-node-sdk
   - from: resources/licenses/nerd-fonts

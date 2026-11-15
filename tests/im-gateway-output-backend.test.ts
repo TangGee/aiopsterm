@@ -22,6 +22,24 @@ const fixture = (sendScreen?: GatewayScreenSender) => {
   return { terminal, send, valid, failed }
 }
 describe('gateway terminal output', () => {
+  it('waits for redraw silence on channels without editable messages, retaining the final screen', async () => {
+    const terminal: GatewayTerminalPort = {
+      list: async () => [], write: async () => {}, read: vi.fn(async () => 'final answer'),
+      subscribe: (target, receive) => subscribeTerminalOutput(target.sessionId, receive)
+    }
+    const send = vi.fn(async () => {})
+    relay = new GatewayOutputRelay({ terminal, binding, message, send, screenQuietMs: 4000, valid: async () => true, failed: vi.fn() })
+    for (let i = 0; i < 8; i++) {
+      publishTerminalOutput('session', '\x1b[2J\x1b[HWorking')
+      await vi.advanceTimersByTimeAsync(1000)
+    }
+    expect(send).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(4000)
+    expect(send).toHaveBeenCalledOnce()
+    expect(send).toHaveBeenCalledWith(message, 'final answer')
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(send).toHaveBeenCalledOnce()
+  })
   it.each(['disconnected', 'closed', 'replaced', 'notification failure'])('notifies once on a %s terminal without requiring further output', async reason => {
     let terminals = [{ ...binding, title: 'Host', kind: 'ssh' as const, connected: true, assetId: 'asset', active: false }]
     const send = vi.fn(async () => {})

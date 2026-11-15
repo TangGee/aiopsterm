@@ -4,15 +4,25 @@ import { GatewayStateStore } from './gatewayState'
 import type { GatewayAdapter, GatewayAdapterFactory, GatewayMessage, GatewayTerminalPort } from './gatewayTypes'
 
 export type GatewaySavedSettings = { config: ImGatewayConfig; encryptedSecret: string }
+const startError = (error: unknown) => error instanceof Error && /^IM_GATEWAY_(TELEGRAM|INFOFLOW)_[A-Z_]+$/.test(error.message) ? error.message : 'IM_GATEWAY_START_FAILED'
 export const normalizeGatewayConfig = (input: ImGatewayConfig): ImGatewayConfig => {
   if (!input || typeof input.enabled !== 'boolean' || typeof input.allowLocalTerminal !== 'boolean' || typeof input.accountId !== 'string' || typeof input.provider !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(input.provider)) throw new Error('IM_GATEWAY_CONFIG_INVALID')
   const config = { ...defaultImGatewayConfig, provider: input.provider, enabled: input.enabled, allowLocalTerminal: input.allowLocalTerminal, accountId: input.accountId.trim() }
   if (config.accountId.length > 200 || /[\s\x00-\x1f]/.test(config.accountId) || (config.provider === 'feishu' && config.accountId && !/^cli_[a-f0-9]{16}$/i.test(config.accountId))) throw new Error('IM_GATEWAY_APP_ID_INVALID')
+  if (config.provider === 'telegram' && config.accountId && !/^\d{1,20}$/.test(config.accountId)) throw new Error('IM_GATEWAY_APP_ID_INVALID')
+  if (config.provider === 'infoflow') {
+    if (input.appKey !== undefined && typeof input.appKey !== 'string') throw new Error('IM_GATEWAY_APP_ID_INVALID')
+    const appKey = input.appKey?.trim() || ''
+    if (appKey.length > 200 || /[\s\x00-\x1f]/.test(appKey) || config.accountId && (!/^\d+$/.test(config.accountId) || !Number.isSafeInteger(Number(config.accountId)))) throw new Error('IM_GATEWAY_APP_ID_INVALID')
+    Object.assign(config, { appKey })
+    if (config.enabled && !appKey) throw new Error('IM_GATEWAY_APP_KEY_REQUIRED')
+  }
   for (const field of ['allowedUserIds', 'allowedGroupIds', 'allowedAssetIds'] as const) {
     const values = input[field]
     if (!Array.isArray(values) || values.length > 100 || values.some(value => typeof value !== 'string' || !value.trim() || value.length > 200 || /[\s\x00-\x1f]/.test(value))) throw new Error('IM_GATEWAY_ALLOWLIST_INVALID')
     config[field] = [...new Set(values)]
   }
+  if (config.provider === 'telegram' && (config.allowedUserIds.some(id => !/^[1-9]\d*$/.test(id)) || config.allowedGroupIds.some(id => !/^-?[1-9]\d*$/.test(id)))) throw new Error('IM_GATEWAY_ALLOWLIST_INVALID')
   if (config.enabled && (!config.accountId || !config.allowedUserIds.length || (!config.allowedAssetIds.length && !config.allowLocalTerminal))) throw new Error('IM_GATEWAY_AUTHORIZATION_REQUIRED')
   return config
 }
@@ -43,7 +53,7 @@ export class GatewayManager {
       this.config = normalizeGatewayConfig(value.config)
       this.encryptedSecret = value.encryptedSecret || ''
       await this.start()
-    } catch { await this.stop(); this.connection = 'error'; this.error = 'IM_GATEWAY_START_FAILED' }
+    } catch (error) { await this.stop(); this.connection = 'error'; this.error = startError(error) }
   }
   private async stop() {
     this.revision += 1
@@ -62,12 +72,12 @@ export class GatewayManager {
     const factory = this.options.adapters.get(this.config.provider)
     if (!factory) throw new Error('IM_GATEWAY_ADAPTER_UNAVAILABLE')
     const revision = ++this.revision
-    const adapter = await factory({ accountId: this.config.accountId, secret, connection: (state, error = '') => {
+    const adapter = await factory({ accountId: this.config.accountId, appKey: this.config.appKey, secret, connection: (state, error = '') => {
       if (revision === this.revision && !this.closed) { this.connection = state; this.error = error }
     } })
     if (revision !== this.revision || this.closed) { adapter.stop(); return }
     this.adapter = adapter
-    this.core = new GatewayCore({ policy: () => this.config, state: this.options.state, terminal: this.options.terminal, reply: (message, text) => adapter.reply(message, text), send: adapter.send?.bind(adapter), sendScreen: adapter.sendScreen?.bind(adapter), audit: this.options.audit })
+    this.core = new GatewayCore({ policy: () => this.config, state: this.options.state, terminal: this.options.terminal, reply: (message, text) => adapter.reply(message, text), send: adapter.send?.bind(adapter), sendScreen: adapter.sendScreen?.bind(adapter), screenQuietMs: adapter.screenQuietMs, audit: this.options.audit })
     const core = this.core
     await adapter.start(message => message.provider === this.config.provider && message.accountId === this.config.accountId ? core.receive(message) : Promise.resolve())
   }
@@ -76,7 +86,7 @@ export class GatewayManager {
       if (this.closed) throw new Error('IM_GATEWAY_STOPPED')
       const config = normalizeGatewayConfig(input?.config)
       if (!this.options.adapters.has(config.provider)) throw new Error('IM_GATEWAY_ADAPTER_UNAVAILABLE')
-      let encryptedSecret = config.provider === this.config.provider && config.accountId === this.config.accountId ? this.encryptedSecret : ''
+      let encryptedSecret = config.provider === this.config.provider && config.accountId === this.config.accountId && config.appKey === this.config.appKey ? this.encryptedSecret : ''
       if (input.appSecret !== undefined) {
         if (typeof input.appSecret !== 'string' || input.appSecret.length > 4096 || /[\r\n]/.test(input.appSecret)) throw new Error('IM_GATEWAY_SECRET_INVALID')
         encryptedSecret = input.appSecret ? this.options.encrypt(input.appSecret) : ''
@@ -86,7 +96,7 @@ export class GatewayManager {
       await this.stop()
       this.options.write({ config, encryptedSecret })
       this.config = config; this.encryptedSecret = encryptedSecret; this.error = ''
-      try { await this.start() } catch { await this.stop(); this.connection = 'error'; this.error = 'IM_GATEWAY_START_FAILED' }
+      try { await this.start() } catch (error) { await this.stop(); this.connection = 'error'; this.error = startError(error) }
       return this.status()
     })
     this.mutations = mutation.then(() => {}, () => {})

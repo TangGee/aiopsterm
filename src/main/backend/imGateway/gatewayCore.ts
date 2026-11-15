@@ -19,7 +19,7 @@ export const gatewayKeyHelp = [
   '每条消息一个按键；重复修饰键、未知键、esc enter 这种连续按键会被拒绝。',
   '按键发送给终端内程序，不触发桌面复制粘贴。Ctrl+Shift 字符等扩展键需目标程序支持键盘协议，不能保证所有程序响应。'
 ].join('\n')
-export const gatewayHelp = '/sessions 选择终端卡片\n/new 新建终端卡片\n/unbind 解除绑定\n/run <单行命令> 输入并回车\n/send <文字> 仅输入\n/read 查看最近屏幕\n/screenshot 查看绑定终端截图\n/key <按键> 发送按键\n/keymap 查看完整按键映射（/help key 也可）\n/interrupt 发送 Ctrl+C\n/binding 查看当前绑定（/status 也可）\n/help 查看帮助\n绑定后普通消息直接输入并回车，输出自动回传。终端中的斜杠命令可用 /run 发送。\n\n' + gatewayKeyHelp
+export const gatewayHelp = '/sessions 选择终端列表\n/new 新建终端列表\n/unbind 解除绑定\n/run <单行命令> 输入并回车\n/send <文字> 仅输入\n/read 查看最近屏幕\n/screenshot 查看绑定终端截图\n/key <按键> 发送按键\n/keymap 查看完整按键映射（/help key 也可）\n/interrupt 发送 Ctrl+C\n/binding 查看当前绑定（/status 也可）\n/help 查看帮助\n绑定后普通消息直接输入并回车，输出自动回传。终端中的斜杠命令可用 /run 发送。\n\n' + gatewayKeyHelp
 
 export const gatewayOutput = (text: string) => {
   const clean = stripVTControlCharacters(text).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '').replace(/<at\b/gi, '< at')
@@ -40,6 +40,7 @@ export class GatewayCore {
     terminal: GatewayTerminalPort
     reply: (message: GatewayMessage, text: GatewayReply) => Promise<void>
     send?: (message: GatewayMessage, text: string) => Promise<void>
+    screenQuietMs?: number
     sendScreen?: GatewayScreenSender
     audit: (event: string, message: GatewayMessage, action?: string) => void
     now?: () => number
@@ -80,7 +81,7 @@ export class GatewayCore {
     if (this.relays.has(key) || !this.options.send || !this.options.terminal.subscribe) return
     this.disconnected.delete(binding)
     this.relays.set(key, new GatewayOutputRelay({ terminal: this.options.terminal, binding, message,
-      valid: () => this.bindingValid(message, key, binding, terminal), send: this.options.send, sendScreen: this.options.sendScreen,
+      valid: () => this.bindingValid(message, key, binding, terminal), send: this.options.send, sendScreen: this.options.sendScreen, screenQuietMs: this.options.screenQuietMs,
       failed: async () => {
         this.options.audit('output_failed', message)
         // A session may disappear while an asynchronous screen read is pending.
@@ -167,7 +168,7 @@ export class GatewayCore {
       if (start > 0) buttons.push({ label: '上一页', command: `${action} ${page - 1}` })
       if (start + 8 < entries.length) buttons.push({ label: '下一页', command: `${action} ${page + 1}` })
       buttons.push({ label: action === '/sessions' ? '新建终端' : '已打开的终端', command: action === '/sessions' ? '/new' : '/sessions' })
-      return this.card(key, action === '/sessions' ? '选择终端' : '新建终端', entries.length ? `点击即可绑定并开始对话。第 ${page + 1} 页` : '暂无可用终端，可新建或在桌面检查授权和连接。', buttons)
+      return this.card(key, action === '/sessions' ? '选择终端' : '新建终端', entries.length ? `选择对应项即可绑定并开始对话。第 ${page + 1} 页` : '暂无可用终端，可新建或在桌面检查授权和连接。', buttons)
     }
     if (action === '/new') {
       const assetId = argument.startsWith('open:asset:') ? argument.slice(11) : undefined

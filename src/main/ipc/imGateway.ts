@@ -24,7 +24,11 @@ export const registerImGatewayIpc = (ipcMain: IpcMain) => {
         decrypt: value => value ? safeStorage.decryptString(Buffer.from(value, 'base64')) : '',
         state: new GatewayStateStore(join(app.getPath('userData'), 'im-gateway-state.json')),
         terminal,
-        adapters: new Map([['feishu', async context => (await import('../backend/imGateway/feishuAdapter.js')).createFeishuAdapter(context)]]),
+        adapters: new Map([
+          ['feishu', async context => (await import('../backend/imGateway/feishuAdapter.js')).createFeishuAdapter(context)],
+          ['telegram', async context => (await import('../backend/imGateway/telegramAdapter.js')).createTelegramAdapter(context)],
+          ['infoflow', async context => (await import('../backend/imGateway/infoflowAdapter.js')).createInfoflowAdapter(context)]
+        ]),
         audit: (event, message, action) => logRuntimeEvent(event.endsWith('failed') ? 'warn' : 'info', `im.gateway.${event}`, {
           provider: message.provider, messageId: message.messageId, senderId: message.senderId, conversationId: message.conversationId, action
         })

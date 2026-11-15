@@ -14,6 +14,23 @@ beforeEach(() => {
 })
 afterEach(() => { wrapper?.unmount(); vi.useRealTimers() })
 describe('IM gateway settings', () => {
+  it('switches platform fields without carrying credentials or authorized identities across platforms', async () => {
+    wrapper = mount(ImGatewaySettings); await flushPromises()
+    await wrapper.get('[data-testid="gateway-secret"]').setValue('feishu-secret')
+    await wrapper.get('[data-testid="gateway-users"]').setValue('ou_old')
+    await wrapper.get('[data-testid="gateway-provider"]').setValue('infoflow')
+    expect((wrapper.get('[data-testid="gateway-secret"]').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.get('[data-testid="gateway-users"]').element as HTMLInputElement).value).toBe('')
+    await wrapper.get('[data-testid="gateway-app-id"]').setValue('99')
+    await wrapper.get('[data-testid="gateway-app-key"]').setValue('app-key')
+    await wrapper.get('[data-testid="gateway-secret"]').setValue('infoflow-secret')
+    await wrapper.findAll('button').find(button => button.text() === 'imGateway.save')!.trigger('click'); await flushPromises()
+    expect(api.save).toHaveBeenCalledWith({ config: expect.objectContaining({ provider: 'infoflow', accountId: '99', appKey: 'app-key', enabled: false, allowedUserIds: [] }), appSecret: 'infoflow-secret' })
+    await wrapper.get('[data-testid="gateway-provider"]').setValue('telegram')
+    expect(wrapper.find('[data-testid="gateway-app-key"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Bot Token')
+    expect(wrapper.text()).toContain('imGateway.telegramSetup')
+  })
   it('opens page documentation without saving settings or exposing credentials', async () => {
     wrapper = mount(ImGatewaySettings); await flushPromises()
     await wrapper.get('.settings-page-help-button').trigger('click')

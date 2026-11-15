@@ -13,7 +13,7 @@ let write: ReturnType<typeof vi.fn>
 let encrypt: ReturnType<typeof vi.fn>
 let manager: GatewayManager
 const config = () => ({ ...defaultImGatewayConfig, accountId: 'cli_1234567890abcdef', allowedUserIds: ['ou_user'], allowedAssetIds: ['host'] })
-const make = () => new GatewayManager({ read: () => saved, write, encrypt, decrypt: value => value.slice(4), state: new GatewayStateStore(), terminal: { list: async () => [], read: async () => '', write: async () => {} }, adapters: new Map([['feishu', factory], ['another-im', factory]]), audit: vi.fn() })
+const make = () => new GatewayManager({ read: () => saved, write, encrypt, decrypt: value => value.slice(4), state: new GatewayStateStore(), terminal: { list: async () => [], read: async () => '', write: async () => {} }, adapters: new Map([['feishu', factory], ['another-im', factory], ['infoflow', factory], ['telegram', factory]]), audit: vi.fn() })
 beforeEach(() => {
   saved = { config: config(), encryptedSecret: 'enc:original-secret' }; contexts = []; stops = []
   write = vi.fn((value: GatewaySavedSettings) => { saved = value })
@@ -25,6 +25,31 @@ beforeEach(() => {
   manager = make()
 })
 describe('gateway lifecycle and credentials', () => {
+  it('keeps safe platform startup error codes available for diagnosis', async () => {
+    await manager.initialize()
+    factory = () => { throw new Error('IM_GATEWAY_TELEGRAM_WEBHOOK_CONFLICT') }
+    manager = make()
+    const status = await manager.save({ config: { ...config(), provider: 'telegram', accountId: '123', allowedUserIds: ['7'], enabled: true }, appSecret: '123:token' })
+    expect(status).toMatchObject({ connection: 'error', error: 'IM_GATEWAY_TELEGRAM_WEBHOOK_CONFLICT' })
+    expect(JSON.stringify(status)).not.toContain('123:token')
+    manager.shutdown()
+  })
+  it('requires Infoflow App Key and does not reuse a secret when the key changes', async () => {
+    const next = { ...config(), provider: 'infoflow', accountId: '99', appKey: 'key-a', enabled: true }
+    expect(() => normalizeGatewayConfig({ ...next, appKey: '' })).toThrow('APP_KEY_REQUIRED')
+    expect(() => normalizeGatewayConfig({ ...next, appKey: 42 as any })).toThrow('APP_ID_INVALID')
+    await manager.initialize()
+    await manager.save({ config: next, appSecret: 'infoflow-secret' })
+    expect(contexts.at(-1)).toMatchObject({ accountId: '99', appKey: 'key-a', secret: 'infoflow-secret' })
+    await expect(manager.save({ config: { ...next, appKey: 'key-b' } })).rejects.toThrow('SECRET_REQUIRED')
+    expect(manager.status().config.appKey).toBe('key-a')
+    manager.shutdown()
+  })
+  it('validates platform-specific account IDs', () => {
+    expect(() => normalizeGatewayConfig({ ...config(), provider: 'telegram', accountId: 'demo_bot' })).toThrow('APP_ID_INVALID')
+    expect(normalizeGatewayConfig({ ...config(), provider: 'telegram', accountId: '123', allowedUserIds: ['7'] }).accountId).toBe('123')
+    expect(() => normalizeGatewayConfig({ ...config(), provider: 'infoflow', accountId: '999999999999999999999' })).toThrow('APP_ID_INVALID')
+  })
   it('starts disabled, encrypts new secrets, and never returns credentials in status', async () => {
     await manager.initialize(); expect(contexts).toHaveLength(0)
     const status = await manager.save({ config: { ...config(), enabled: true }, appSecret: 'new-secret' })

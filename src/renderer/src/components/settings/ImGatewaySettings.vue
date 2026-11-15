@@ -10,12 +10,15 @@
     <div role="status" class="gateway-status">{{ t('imGateway.connection') }}: {{ connectionLabel }} | {{ t('imGateway.pending') }}: {{ status?.pending || 0 }}</div>
     <p v-if="notice" role="alert">{{ notice }}</p>
     <fieldset :disabled="busy || !loaded">
+      <label>{{ t('imGateway.provider') }}<select v-model="draft.provider" data-testid="gateway-provider" @change="changeProvider"><option value="feishu">{{ t('imGateway.feishu') }}</option><option value="telegram">Telegram</option><option value="infoflow">{{ t('imGateway.infoflow') }}</option></select></label>
+      <p>{{ t('imGateway.channelSwitch') }}</p>
       <label><input v-model="draft.enabled" type="checkbox" data-testid="gateway-enabled">{{ t('imGateway.enabled') }}</label>
-      <label>App ID<input v-model="draft.accountId" autocomplete="off" placeholder="cli_..." data-testid="gateway-app-id"></label>
-      <label>App Secret<input v-model="secret" type="password" autocomplete="new-password" :placeholder="status?.hasAppSecret ? t('imGateway.secretSaved') : t('imGateway.secretPlaceholder')" data-testid="gateway-secret"></label>
+      <label>{{ draft.provider === 'telegram' ? 'Bot ID' : draft.provider === 'infoflow' ? 'Agent ID' : 'App ID' }}<input v-model="draft.accountId" autocomplete="off" :placeholder="draft.provider === 'feishu' ? 'cli_...' : '123456789'" data-testid="gateway-app-id"></label>
+      <label v-if="draft.provider === 'infoflow'">App Key<input v-model="draft.appKey" autocomplete="off" data-testid="gateway-app-key"></label>
+      <label>{{ draft.provider === 'telegram' ? 'Bot Token' : 'App Secret' }}<input v-model="secret" type="password" autocomplete="new-password" :placeholder="sameAccount && status?.hasAppSecret ? t('imGateway.secretSaved') : t('imGateway.secretPlaceholder')" data-testid="gateway-secret"></label>
       <label><input v-model="clearSecret" type="checkbox" data-testid="gateway-clear-secret">{{ t('imGateway.clearSecret') }}</label>
-      <label>{{ t('imGateway.users') }}<textarea v-model="users" rows="3" placeholder="ou_..." data-testid="gateway-users"></textarea></label>
-      <label>{{ t('imGateway.groups') }}<textarea v-model="groups" rows="2" placeholder="oc_..."></textarea></label>
+      <label>{{ t('imGateway.users') }}<textarea v-model="users" rows="3" :placeholder="draft.provider === 'feishu' ? 'ou_...' : t('imGateway.userIdHint')" data-testid="gateway-users"></textarea></label>
+      <label>{{ t('imGateway.groups') }}<textarea v-model="groups" rows="2" :placeholder="draft.provider === 'feishu' ? 'oc_...' : t('imGateway.groupIdHint')"></textarea></label>
       <p>{{ t('imGateway.groupHelp') }}</p>
       <label><input v-model="allTerminals" type="checkbox" data-testid="gateway-all">{{ t('imGateway.allTerminals') }}</label>
       <label>{{ t('imGateway.assets') }}<textarea v-model="assets" :disabled="allTerminals" rows="3" data-testid="gateway-assets"></textarea></label>
@@ -31,7 +34,8 @@
     </table>
     <details open>
       <summary>{{ t('imGateway.help') }}</summary>
-      <ol><li>{{ t('imGateway.setup1') }}</li><li>{{ t('imGateway.setup2') }}</li><li>{{ t('imGateway.setup3') }}</li><li>{{ t('imGateway.setup4') }}</li></ol>
+      <ol v-if="draft.provider === 'feishu'"><li>{{ t('imGateway.setup1') }}</li><li>{{ t('imGateway.setup2') }}</li><li>{{ t('imGateway.setup3') }}</li><li>{{ t('imGateway.setup4') }}</li></ol>
+      <p v-else>{{ t(draft.provider === 'telegram' ? 'imGateway.telegramSetup' : 'imGateway.infoflowSetup') }}</p>
       <pre>/sessions
 /new
 pwd
@@ -52,7 +56,7 @@ pwd
 /status
 /unbind
 /help</pre>
-      <p>{{ t('imGateway.behavior') }}</p>
+      <p v-if="draft.provider === 'feishu'">{{ t('imGateway.behavior') }}</p>
     </details>
   </div>
 </template>
@@ -71,12 +75,17 @@ const users = ref(''); const groups = ref(''); const assets = ref(''); const sec
 const allTerminals = computed({ get: () => assets.value.split(/[\s,]+/).includes('all'), set: (value: boolean) => { assets.value = value ? 'all' : '' } })
 const loaded = ref(false); const busy = ref(false); const notice = ref(''); const terminals = ref<ControlTerminalSummary[]>([])
 let disposed = false; let polling = false; let timer: ReturnType<typeof setInterval> | undefined
+const sameAccount = computed(() => draft.value.provider === status.value?.config.provider && draft.value.accountId === status.value?.config.accountId && draft.value.appKey === status.value?.config.appKey)
+const changeProvider = () => {
+  draft.value.enabled = false; draft.value.accountId = ''; delete draft.value.appKey
+  users.value = ''; groups.value = ''; secret.value = ''; clearSecret.value = false; notice.value = ''
+}
 const connectionLabel = computed(() => t(`imGateway.state.${status.value?.connection || 'disabled'}`))
 const errorText = (code = '') => {
   if (code === 'IM_GATEWAY_KEYCHAIN_UNAVAILABLE') return t('imGateway.keychainError')
   if (code === 'IM_GATEWAY_AUTHORIZATION_REQUIRED') return t('imGateway.authorizationError')
   if (code === 'IM_GATEWAY_SECRET_REQUIRED') return t('imGateway.secretError')
-  if (code === 'FEISHU_CONNECTION_FAILED' || code === 'IM_GATEWAY_START_FAILED') return t('imGateway.connectionError')
+  if (code === 'FEISHU_CONNECTION_FAILED' || code === 'IM_GATEWAY_START_FAILED' || code.endsWith('_CONNECTION_FAILED')) return t('imGateway.connectionError')
   return `${t('imGateway.error')} (${/^IM_GATEWAY_[A-Z_]+$/.test(code) ? code : 'IM_GATEWAY_UNAVAILABLE'})`
 }
 const refresh = async (initialize = false) => {
@@ -127,8 +136,8 @@ onUnmounted(() => { disposed = true; if (timer) clearInterval(timer); secret.val
 .im-gateway-settings { max-width: 860px; display: grid; gap: 14px; }
 fieldset { border: 0; padding: 0; display: grid; gap: 14px; }
 label { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-input:not([type=checkbox]), textarea { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--theme-module-active-border); border-radius: 8px; background: var(--theme-module-active-input-bg); color: var(--theme-module-active-text); font: inherit; }
-input:focus-visible, textarea:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--theme-accent, #4faabb); outline-offset: 2px; }
+input:not([type=checkbox]), textarea, select { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--theme-module-active-border); border-radius: 8px; background: var(--theme-module-active-input-bg); color: var(--theme-module-active-text); font: inherit; }
+input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--theme-accent, #4faabb); outline-offset: 2px; }
 input[type=checkbox] { accent-color: var(--theme-accent, #4faabb); }
 button:not(.settings-page-help-button) { padding: 9px 14px; border: 1px solid var(--theme-module-active-border); border-radius: 8px; background: var(--theme-module-active-card-bg); color: var(--theme-module-active-text); font: inherit; cursor: pointer; }
 button:not(.settings-page-help-button):hover { filter: brightness(1.15); }

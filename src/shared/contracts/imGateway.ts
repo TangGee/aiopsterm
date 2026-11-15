@@ -4,6 +4,7 @@ export type ImGatewayConfig = {
   provider: string
   enabled: boolean
   accountId: string
+  appKey?: string
   allowedUserIds: string[]
   allowedGroupIds: string[]
   allowedAssetIds: string[]

@@ -4,4 +4,6 @@ Symbols Nerd Font Mono is bundled from Nerd Fonts v3.5.1, commit b894ea7803af6aa
 
 The Feishu IM gateway uses @larksuiteoapi/node-sdk 1.76.0 (https://github.com/larksuite/node-sdk), licensed under MIT. Its license is included in resources/licenses/larksuite-node-sdk/LICENSE and distributed in licenses/larksuite-node-sdk/LICENSE.
 
+The Baidu Infoflow IM gateway uses @core-workspace/infoflow-sdk-nodejs 0.1.7 (https://www.npmjs.com/package/@core-workspace/infoflow-sdk-nodejs), licensed under MIT. Its license is included in resources/licenses/infoflow-sdk-nodejs/LICENSE and distributed in licenses/infoflow-sdk-nodejs/LICENSE.
+
 License materials are included under resources/licenses/, vendor/xterm/, and the separately maintained codex/ repository. Release builds generate the exact dependency inventory and license evidence; run npm run build:cline-sidecar, npm run audit:cline-sidecar, and npm run audit:package-config.

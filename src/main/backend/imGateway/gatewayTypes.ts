@@ -36,6 +36,7 @@ export type GatewayTerminalPort = {
   read: (binding: GatewayBinding) => Promise<string>
 }
 export type GatewayAdapter = {
+  screenQuietMs?: number
   start: (receive: (message: GatewayMessage) => Promise<void>) => Promise<void>
   stop: () => void
   send?: (message: GatewayMessage, text: string) => Promise<void>
@@ -44,6 +45,7 @@ export type GatewayAdapter = {
 }
 export type GatewayAdapterFactory = (context: {
   accountId: string
+  appKey?: string
   secret: string
   connection: (state: ImGatewayConnectionState, error?: string) => void
 }) => GatewayAdapter | Promise<GatewayAdapter>

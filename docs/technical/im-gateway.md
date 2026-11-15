@@ -1,6 +1,6 @@
 # IM 网关架构
 
-使用与飞书配置集中在 [飞书 IM 网关](../usage/im-gateway.md)。本实现属于 aiopsterm Electron 主进程，不是单独部署的无界面远程服务。当前注册飞书一个渠道；消息规范、策略和终端控制不依赖飞书协议。
+使用与飞书配置集中在 [IM 网关](../usage/im-gateway.md)。本实现属于 aiopsterm Electron 主进程，不是单独部署的无界面远程服务。当前注册飞书、Telegram、百度如流三个渠道；消息规范、策略和终端控制不依赖飞书协议。
 
 ## 分层与扩展
 
@@ -13,6 +13,13 @@
 - `gatewayTerminalPort.ts`：复用现有 [Control Socket 内部调用边界](control-socket.md) 的 terminal.list/send_text/read_screen、asset.list/ssh.connect 和 surface.create，不监听新网络端口。新建时指定资产 ID、`exactAssetId: true` 且 `reuse: false`，防止资产删除后按名称匹配到另一主机，本机通过 `surface.create` 的 `autoConnect: true` 启动 PTY 后等待对应面板的会话就绪；失败保留 tab。写入仅使用精确 sessionId；读取同时指定 panelId 和 sessionId，并校验返回的会话身份。
 
 - `gatewayOutputRelay.ts` 与 `terminal/terminalOutputEvents.ts`：主进程终端数据的内存订阅，普通输出批量发送，TUI 重绘读取精确面板屏幕。飞书发送不会阻塞 PTY 渲染；解除绑定、停用、权限撤销或会话变更停止订阅。
+
+- `telegramAdapter.ts`：Bot API 长轮询、明确提及校验、inline keyboard 身份和卡片 ID 验证、PNG 文件发送和原消息编辑。固定 HTTPS API，不跟随重定向；请求有超时和停止信号，Token 从不进入日志。启动检查 getMe 身份与已有 webhook，不覆盖其他接收配置。只有处理完一条更新才推进 offset；重启积压消息仍由核心时间窗口和持久化凭据过滤。网络故障延迟重试接收；发送没有幂等键，不自动重试可能已经成功的发送。
+- `infoflowSocket.ts`：为固定版本 SDK 的 EventDispatcher 补实例级 Node error listener，避免其第二次 error 分发造成未处理异常；不修改全局原型。用真实 SDK 回归该路径。每次建连设置 30 秒总期限并响应停止信号，迟到连接再次关闭。已连接后的端点重连失败由五秒状态检查补充重试，停用清理检查器。
+- `infoflowAdapter.ts`：使用 `@core-workspace/infoflow-sdk-nodejs` 0.1.7 的 Client/WSClient。Agent ID 用于消息发送，App Key 作为 SDK appId 用于鉴权。显式关闭 SDK 日志；连接入口和所有回调检查停止状态，SDK 迟到连接完成后再次 disconnect。发送队列停止后拒绝新任务；已开始的 SDK 请求最多等待其超时，不保证撤回网络中已发出的请求。
+- 如流私聊保留 FromUserId 授权身份与 FromUserName 回复目标；拒绝含竖线的目标以避免 SDK 多收件人语义。群聊仅接受 MESSAGE_RECEIVE、当前 agentid 和明确 AT robotid，不处理全量转发；私聊缺少 MsgId 时以 accountId、发送者、回复目标、创建时间和正文的 SHA-256 作为保守去重 ID，同秒同文可能合并，哈希不保存正文。大整数消息 ID 必须以字符串保持精度，不接受不安全的数值 ID。选择列表输出 `/select <令牌>`，适配器将其规范化为 actionToken，仍由核心验证原用户/聊天和一次性消费，不绕过授权。
+- `adapterUtils.ts`：新适配器的发送队列、分段和 PNG 校验。Telegram 最小发送间隔一秒；如流私聊半秒，群消息发送后保留 3.1 秒间隔以遵守公开文档每群每分钟 20 条的限制。队列停止取消等待。图片发送排队后重新检查绑定授权；如流 PNG 上限小于 1 MiB，Telegram PNG 上限 8 MiB。
+- 如流通过 `screenQuietMs: 4000` 让输出订阅等待重绘静止，不模拟可编辑卡片。初始读屏和最终屏幕仍从精确绑定读取；等待期间继续验证授权及断开状态。普通追加输出不受该等待影响。Telegram sendScreen 将长屏幕截断到消息长度限制，编辑失败不回退为新消息。
 
 增加渠道时，实现适配器、把厂商事件规范化为统一消息、在注册表添加 provider，并增加配置界面和厂商协议用例。必须保留核心授权与去重检查，不能让适配器直接调用终端。当前配置只启用一个 provider/account，并未实现多渠道同时连接。
 
@@ -42,9 +49,11 @@
 
 ## 凭据、状态与日志
 
-配置单独存储在 userData 下的 `im-gateway.json`；Secret 仅经 Electron safeStorage 加密后写入。Linux basic_text 和不可用的系统加密均拒绝保存新凭据。账号或 provider 改变不能复用旧 Secret。
+配置单独存储在 userData 下的 `im-gateway.json`；Secret 仅经 Electron safeStorage 加密后写入。Linux basic_text 和不可用的系统加密均拒绝保存新凭据。账号、provider 或如流 App Key 改变不能复用旧 Secret。旧飞书配置无需迁移；一次只保存一个活动渠道配置，切换不保留多账号档案。详细接入步骤见 [平台指南](../usage/im-platforms.md)。
 
 `im-gateway-state.json` 只存哈希消息凭据与终端绑定，不保存消息内容、屏幕或凭据。UI 通过 renderer service/preload 调用 IPC；不直接访问文件、网络和系统密钥环。
+
+如流 SDK 在处理器异常后仍可能确认投递；本地持久化失败时网关拒绝操作并显示 `IM_GATEWAY_INFOFLOW_RECEIVE_FAILED`，不能保证平台重投。应先检查终端，再发送新消息，不能自动重放输入。
 
 SDK 日志关闭，避免请求对象、token 和消息正文进入日志。应用运行日志仅记录 `im.gateway.accepted/replied/operation_failed/reply_failed/output_failed` 的必要标识和操作名，初始化失败只记录固定原因。消息回执不回显原始异常。
 
@@ -56,6 +65,8 @@ SDK 日志关闭，避免请求对象、token 和消息正文进入日志。应�
 | --- | --- |
 | `tests/terminal-keys-backend.test.ts` | 单键/双键/三键精确编码、修饰键顺序/分隔符、Ctrl+Shift 不降级成 Ctrl、无效组合拒绝 |
 | `tests/im-gateway-core-backend.test.ts` | 用户/群/主机权限、绑定隔离、断线失效、跨重启去重、队列、限流、停用、损坏/不可写状态、输入与输出边界、/binding 与 /status 查询、断开/关闭/替换会话及写入期间断开的明确回执、控制按键精确字节/不追加回车/无效键/权限/去重、all、卡片翻页/隔离/一次性选择、新建自动绑定、普通消息输入 |
+| `tests/im-gateway-telegram-backend.test.ts`、`tests/im-gateway-infoflow-backend.test.ts` | 平台事件与身份校验、明确提及、选择命令/按钮、图片有效性与撤权、长消息、编辑失败、SDK 日志抑制、握手超时和停止后迟到回调 |
+| `tests/im-gateway-platforms-backend.test.ts` | 真实 SDK 错误分发兼容保护、平台事件到核心绑定/输入去重/控制键/断开拒绝写入 |
 | `tests/im-gateway-manager-backend.test.ts` | 默认关闭、加密、换账号/适配器、权限校验、生命周期和迟到回调、停止后不再启动 |
 | `tests/im-gateway-terminal-backend.test.ts` | 写入精确 sessionId、面板复用时拒绝读屏、控制接口异常、本机/SSH 新建与失败保留 tab |
 | `tests/im-gateway-feishu-backend.test.ts` | 事件筛选、精确机器人 @、连接状态、关闭取消、回复 UUID 与重试、不泄漏 SDK 日志、交互卡片、回调身份校验、主动输出 UUID、纯文本卡片创建与同 ID 更新/失败重试不新建 |
@@ -74,7 +85,7 @@ npx vitest run tests/im-gateway-*.test.ts tests/terminal-keys-backend.test.ts te
 npm run build
 ```
 
-真实飞书验收需要使用者配置自己的应用和授权身份：单聊卡片查询、翻页、绑定、本机/SSH 新建、普通消息输入/持续输出/读屏/中断/解除绑定；Codex 持续动画仅更新同一卡片、停止后的最终屏幕、下一轮输入另起卡片、`/key esc` 关闭菜单、`/key ctrl c` 中断及 `/key enter` 提交；all 和指定资产范围；群聊有无正确 @；非授权用户/主机拒绝；网络重连与终端 sessionId 变化；关闭网关后不再接受新操作。自动化模拟测试不能代替企业应用权限发布、真实消息投递和系统密钥环验收。
+真实平台验收需要使用者配置自己的应用和授权身份，Telegram/如流步骤与尚未联调的边界见 [平台指南](../usage/im-platforms.md)。飞书验收包括：单聊卡片查询、翻页、绑定、本机/SSH 新建、普通消息输入/持续输出/读屏/中断/解除绑定；Codex 持续动画仅更新同一卡片、停止后的最终屏幕、下一轮输入另起卡片、`/key esc` 关闭菜单、`/key ctrl c` 中断及 `/key enter` 提交；all 和指定资产范围；群聊有无正确 @；非授权用户/主机拒绝；网络重连与终端 sessionId 变化；关闭网关后不再接受新操作。自动化模拟测试不能代替企业应用权限发布、真实消息投递和系统密钥环验收。
 
 ## 读屏与截图边界
 
@@ -82,7 +93,7 @@ npm run build
 
 输出事件与 renderer 交付存在短暂时差，初始读屏和重绘事件保留两次有界稳定读取机会；没有新事件后停止读屏，相同内容不发送，继续保留三秒卡片更新上限。避免一次空缓存读取把静态菜单永久吞掉。
 
-`terminal.screenshot` 从同一核心获取当前底部屏幕的普通字符及样式 runs，在 renderer 独立 canvas 生成 PNG，不抓桌面或强制切换面板；图片尺寸和载荷均有限制。网关复核绑定后通过 Feishu image.create 上传，使用返回 image_key 回复图片，消息重试复用 UUID；上传失败回复固定文字。图片仅在内存中处理；发送排队、上传前后和重试前重新核验授权。`/keymap` 和 `/help key` 在无绑定或绑定断开时也可查看，不产生终端读写；`/keymap` 忽略参数并返回完整映射，仍检查用户及群聊授权。
+`terminal.screenshot` 从同一核心获取当前底部屏幕的普通字符及样式 runs，在 renderer 独立 canvas 生成 PNG，不抓桌面或强制切换面板；图片尺寸和载荷均有限制。网关复核绑定后由平台适配器发送。飞书通过 image.create 上传并使用 image_key 回复，重试复用 UUID；Telegram 发送 PNG document；如流使用 SDK 图片消息。发送失败回复固定文字。图片仅在内存中处理；发送排队、上传前后和重试前重新核验授权。`/keymap` 和 `/help key` 在无绑定或绑定断开时也可查看，不产生终端读写；`/keymap` 忽略参数并返回完整映射，仍检查用户及群聊授权。
 
 补充回归：`tests/terminal-control-screen.test.ts` 覆盖历史滚动、后台面板、传统 buffer、身份冲突及异步替换；`tests/threaded-terminal-core-worker.test.ts` 使用真实 xterm 核心验证待解析数据和一次性更新菜单及反色行；`tests/terminal-screenshot.test.ts` 验证字符布局和颜色绘制、隐藏文字及尺寸限制。网关核心和适配器测试覆盖按键帮助、截图授权、上传失败与消息去重；输出测试保留动画防刷屏并覆盖静态菜单迟到。
 

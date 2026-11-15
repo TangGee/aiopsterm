@@ -42,6 +42,7 @@ export class GatewayOutputRelay {
   private revision = 0
   private flushing = false
   private timer?: ReturnType<typeof setTimeout>
+  private lastDataAt = 0
   private unsubscribe?: () => void
   private running: Promise<void> = Promise.resolve()
   constructor(private options: {
@@ -50,12 +51,14 @@ export class GatewayOutputRelay {
     message: GatewayMessage
     valid: () => Promise<boolean>
     send: (message: GatewayMessage, text: string) => Promise<void>
+    screenQuietMs?: number
     sendScreen?: GatewayScreenSender
     failed: () => void | Promise<void>
     stopped?: () => void
   }) {
     this.unsubscribe = options.terminal.subscribe?.(options.binding, data => {
       if (this.stopped) return
+      this.lastDataAt = Date.now()
       this.dirty = true
       this.settleReads = 2
       this.pending += this.decoder.push(data)
@@ -82,6 +85,8 @@ export class GatewayOutputRelay {
       if (this.stopped) return
       if (!await this.options.valid()) { this.stop(); return }
       if (!this.initial && !this.dirty && !this.pending && !this.settleReads) return
+      // Channels without editable messages wait for TUI redraws to settle.
+      if (this.decoder.redraw && this.options.screenQuietMs && Date.now() - this.lastDataAt < this.options.screenQuietMs) return
       const screenOutput = this.decoder.redraw && Boolean(this.options.sendScreen)
       if (screenOutput && Date.now() - this.lastScreenAt < 3000) return
       const revision = this.revision

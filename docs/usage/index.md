@@ -8,7 +8,7 @@ The scenario-based guide is available in Chinese and English and is included wit
 | --- | --- | --- |
 | Getting started / 快速上手 | [产品总览与快速上手](best-practices/zh-CN/01-getting-started.md) | [Product Tour And Getting Started](best-practices/en-US/01-getting-started.md) |
 | Terminal workspace / 终端工作区 | [终端与主工作区](best-practices/zh-CN/02-terminal-workspace.md) | [Terminal And Main Workspace](best-practices/en-US/02-terminal-workspace.md) |
-| Feishu terminal conversations / 飞书终端对话 | [IM 网关设置与卡片操作](settings/zh-CN/im-gateway.md) | [IM Gateway Settings And Cards](settings/en-US/im-gateway.md) |
+| IM terminal conversations / IM 终端对话 | [IM 网关设置与卡片操作](settings/zh-CN/im-gateway.md) | [IM Gateway Settings And Cards](settings/en-US/im-gateway.md) |
 | Host Agent / 主机 Agent | [主机 Agent](best-practices/zh-CN/03-host-agent.md) | [Host Agent](best-practices/en-US/03-host-agent.md) |
 | AI sessions / AI 会话 | [AI 会话管理](best-practices/zh-CN/05-ai-sessions.md) | [AI Session Management](best-practices/en-US/05-ai-sessions.md) |
 | Quick Commands / 快捷命令 | [快捷命令与宏](best-practices/zh-CN/06-quick-commands.md) | [Quick Commands And Macros](best-practices/en-US/06-quick-commands.md) |
@@ -19,7 +19,8 @@ The scenario-based guide is available in Chinese and English and is included wit
 Detailed reference:
 
 - [产品演示视频](demo-video.md)
-- [Feishu IM Gateway](im-gateway.md)
+- [IM Gateway](im-gateway.md)
+- [Telegram 与百度如流配置](im-platforms.md)
 - [Assets And Workspace Resources](assets-workspace.md)
 - [AI Sessions](ai-sessions.md)
 - [AI Command Tools](ai-command-tools.md)
