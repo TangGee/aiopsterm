@@ -377,6 +377,25 @@ npm run test:e2e:packaged
 
 The packaged E2E launches the unpacked packaged app with an isolated user-data directory, checks the main window, local terminal surface, Files module entry point, and verifies packaged control notifications through the platform control socket or Windows named pipe.
 
+## Current Local Linux Test Package
+
+The local x86_64 AppImage was rebuilt on 2026-11-16, retaining version `0.1.4`. It contains compiled source revision `4677c7a93dac032b7a91cb1c098d6821c45e7179`, including the recording-session fixes for voice input and Codex terminal output without a trailing newline. This is a local test package, not a published release or evidence of Windows/macOS validation.
+
+- Package: `dist/aiopsterm-0.1.4-linux-x86_64.AppImage` (314,198,247 bytes).
+- SHA-256: `bc38d3cb2dc6b0d41a99f30fa1512ddf039c6e8c2b2badfb3804f6558b2760d5`; the adjacent `.sha256` file supports checksum verification from `dist/`.
+- Previous November 9 package: `dist/backups/20261109/aiopsterm-0.1.4-linux-x86_64.AppImage`. Switching executables does not roll back user data; preserve a separate user-data backup before testing migrations.
+- Build and verification evidence: `dist/verification/20261116/`. The packaged compiled-output manifest matches all 41 output files and records a clean source tree at the revision above.
+
+Start the executable directly or open it in the file manager:
+
+```bash
+./dist/aiopsterm-0.1.4-linux-x86_64.AppImage
+```
+
+The full `build:linux:appimage` build passed, but its host-built native modules exceeded the Ubuntu 20.04 runtime baseline. The final package uses SQLite and PTY modules rebuilt with GCC 11 in the existing `aiopsterm-linux20-builder:gcc11` Ubuntu 20.04 image, followed by `electron-builder --linux AppImage --config electron-builder.yml`. No compatibility audit was bypassed. Future rebuilds must retain the documented Linux baseline; rebuilding native modules on a newer host can reintroduce this dependency.
+
+Final verification passed: 33 focused cases in `tests/package-config.test.ts` and `tests/packaged-pty-files.test.ts`; `npm run package:verify -- linux-appimage` (resource, native ABI/runtime baseline, startup/help/background smoke and AppImage launcher audits); and all 8 cases from `xvfb-run -a npm run test:e2e:packaged`. E2E coverage includes actual AppImage launches, control-command capability branches, local/Codex terminal startup, files, notification requests, scrollback and background-terminal capture with wrong-session rejection. These checks used isolated application data and did not replace the user's running application. Existing relevant cases were sufficient and were not changed.
+
 ## Terminal Recovery Verification
 
 Run the focused supervisor, persistence, real SSH/PTY and renderer suites documented in [Terminal Recovery Validation](ssh-session-persistence-test-plan.md). The Electron test in `tests/e2e/terminal-recovery.spec.ts` verifies both renderer reload with the same local process and full application restart with a new process. Switch native modules to Node before backend tests and Electron before desktop tests. Tabby and tmux checkouts remain reference-only outside the application source and package inputs.

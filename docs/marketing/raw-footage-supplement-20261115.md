@@ -48,7 +48,7 @@
 - 贪吃蛇 `node --test`：11 项通过，覆盖移动、禁止反向和同一步二次转向、进食、四面墙、自碰撞、尾格、结束、暂停和重开。浏览器实际按键验证真实吃食物得 20 分、暂停画面不变、R 重开归零，无页面异常，见 `snake-browser-verification.json` 和 `snake-tests.log`。
 - Kubernetes、SQL 和绑定 Codex 的真实验收分别见 `k8s-readiness-v2-verification.json`、`sql-optimization-v3-verification.json`、`bound-repair-v4-verification.json`。
 - 既有修复仍保留：K8s 跟随滚动 `1469518e`、exec 参数隔离 `77b501b3`（57 项相关测试），IM 文本与回车独立写入 `8d9075ca`（124 项相关测试）。本轮没有重复改动或重跑这些无关用例；新实录验证了实际链路。
-- 01b 预演发现无末尾换行的文件会使 POSIX 命令结束标记粘在输出后，导致读取超时。已修复标记分行并提交 `a8cff839`，新增三个真实 `/bin/sh` 回归，覆盖无换行文件、标准输出、错误输出和非零退出码、后续队列；桥接测试共 30 项通过。同一 SSH 文件在修复后 48 毫秒成功返回，正式录制再次读取成功，见 `codex-unterminated-read-v4-verification.json` 和[内嵌 Codex 技术说明](../technical/codex-cli-ai-panel.md)。完整 `npm run build` 通过，录制应用已重启加载此源码构建，未重新打包 AppImage。
+- 01b 预演发现无末尾换行的文件会使 POSIX 命令结束标记粘在输出后，导致读取超时。已修复标记分行并提交 `a8cff839`，新增三个真实 `/bin/sh` 回归，覆盖无换行文件、标准输出、错误输出和非零退出码、后续队列；桥接测试共 30 项通过。同一 SSH 文件在修复后 48 毫秒成功返回，正式录制再次读取成功，见 `codex-unterminated-read-v4-verification.json` 和[内嵌 Codex 技术说明](../technical/codex-cli-ai-panel.md)。完整 `npm run build` 通过，录制应用已重启加载此源码构建；该修复现已包含在 [11 月 16 日重新打包的 Linux 测试包](../technical/development.md#current-local-linux-test-package)中，包路径、回退副本及打包验证集中记录于开发文档。
 - 本轮复核并运行 `agent-terminal-binding-runtime`、`codex-terminal-bridge`、`agent-sessions-backend`、`agents-sidebar-product-sessions`（修复前 77 项、桥接新增后多 3 项），以及 `ssh-terminal-session-auth-runtime`、`ssh-terminal-backend`（34 项）。覆盖绑定隔离、会话迁移、过期事件、原生审批待办、SSH 认证和错误路径。日志演示的三个 unittest 另行审阅并复跑通过，见 `multi-agent-v4-tests.log`；不将其计作产品单元测试。
 
 当前十三段均有完整解码和哈希记录；保留的十段哈希与上次验证一致，01b、09、10 重新完整解码并检查关键画面。三段新版均为 H.264、1600×900、30 fps，无音轨。新旧证据按片段区分，不代表整个产品通过发版验收。
