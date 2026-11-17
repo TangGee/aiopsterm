@@ -6,6 +6,7 @@ import { GatewayCore, gatewayOutput } from '../src/main/backend/imGateway/gatewa
 import { GatewayStateStore, gatewayConversationKey } from '../src/main/backend/imGateway/gatewayState'
 import type { GatewayCard, GatewayMessage, GatewayPolicy, GatewayReply, GatewayTerminalPort } from '../src/main/backend/imGateway/gatewayTypes'
 import type { ControlTerminalSummary } from '../src/shared/contracts/control'
+import { keyDataForTerminal } from '../src/shared/terminalKeys'
 
 const now = 1800000000000
 let nextMessage = 0
@@ -29,6 +30,23 @@ beforeEach(async () => {
 })
 afterEach(async () => { core.stop(); await core.drain(); await rm(directory, { recursive: true, force: true }) })
 describe('IM gateway core', () => {
+  it('formats key help in short plain-text groups with usable single-command lines', async () => {
+    const help = await receive('/keymap')
+    expect(help.split('\n\n').length).toBeGreaterThanOrEqual(5)
+    expect(help.length).toBeLessThanOrEqual(1800)
+    expect(help.split('\n').every(line => [...line].length <= 80)).toBe(true)
+    expect(help).not.toMatch(/[\t|`]/)
+    const commands = help.split('\n').filter(line => /^\/key .+ - /.test(line))
+    expect(commands.length).toBeGreaterThanOrEqual(16)
+    for (const line of commands) {
+      const key = line.slice(5, line.indexOf(' - '))
+      expect(keyDataForTerminal(key), line).not.toBeNull()
+    }
+    for (const key of ['enter', 'esc', 'up', 'down', 'ctrl c', 'shift tab']) {
+      expect(commands.some(line => line.startsWith(`/key ${key} - `))).toBe(true)
+    }
+    expect(port.write).not.toHaveBeenCalled()
+  })
   it('provides the key mapping without requiring a binding or sending input', async () => {
     const help = await receive('/help')
     const keyHelp = await receive('/help key')

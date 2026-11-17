@@ -28,7 +28,7 @@ afterEach(async () => { core.stop(); await vi.runAllTimersAsync(); await core.dr
 const writes = () => vi.mocked(terminal.write).mock.calls.map(call => call[1])
 
 describe('IM input submission', () => {
-  it.each(['请检查服务健康状态', '/run pwd', 'x'.repeat(4096)])('submits text once after the paste burst has settled (%#)', async text => {
+  it.each(['请检查服务健康状态', '/run pwd', '/model', 'x'.repeat(4096)])('submits text once after the paste burst has settled (%#)', async text => {
     await core.receive(event(text)); await vi.advanceTimersByTimeAsync(0)
     const input = text.startsWith('/run ') ? text.slice(5) : text
     expect(writes()).toEqual([input])
@@ -41,6 +41,48 @@ describe('IM input submission', () => {
   it('preserves multiline paste boundaries before a single independent submit', async () => {
     await core.receive(event('first\r\nsecond\tline')); await vi.advanceTimersByTimeAsync(200); await core.drain()
     expect(writes()).toEqual(['\x1b[200~first\nsecond\tline\x1b[201~', '\r'])
+  })
+  it.each(['/model', '/model example-model high', '  /model  example-model  ', '/review-code --staged', '/custom:task value', '/usr/bin/printf hello', '/helpful', '/MODEL'])('forwards non-gateway slash input unchanged and only once: %s', async text => {
+    const incoming = event(text)
+    await core.receive(incoming); await core.receive(incoming)
+    await vi.advanceTimersByTimeAsync(200); await core.drain()
+    expect(writes()).toEqual([text, '\r'])
+    expect(vi.mocked(terminal.write).mock.calls.every(call => call[0] === binding)).toBe(true)
+    expect(reply).not.toHaveBeenCalled()
+  })
+  it('keeps multiline slash input in one paste before submitting', async () => {
+    await core.receive(event('/custom first\r\nsecond\tline'))
+    await vi.advanceTimersByTimeAsync(200); await core.drain()
+    expect(writes()).toEqual(['\x1b[200~/custom first\nsecond\tline\x1b[201~', '\r'])
+    expect(reply).not.toHaveBeenCalled()
+  })
+  it.each(['unbound', 'user', 'group', 'asset', 'disconnect'] as const)('does not forward slash input when %s blocks terminal access', async reason => {
+    const incoming = event('/model')
+    if (reason === 'unbound') state.bind(gatewayConversationKey(incoming))
+    if (reason === 'user') incoming.senderId = 'unauthorized'
+    if (reason === 'group') incoming.conversationType = 'group'
+    if (reason === 'asset') policy.allowLocalTerminal = false
+    if (reason === 'disconnect') target.connected = false
+    await core.receive(incoming); await vi.advanceTimersByTimeAsync(200); await core.drain()
+    expect(terminal.write).not.toHaveBeenCalled()
+    if (reason === 'unbound') expect(reply).toHaveBeenCalledWith(incoming, expect.stringContaining('没有可用的绑定'))
+    else if (reason === 'asset' || reason === 'disconnect') expect(reply).toHaveBeenCalledWith(incoming, expect.stringContaining('本条消息未写入终端'))
+    else expect(reply).not.toHaveBeenCalled()
+  })
+  it('uses ordinary input limits and control-character protection for slash input', async () => {
+    const maximum = '/custom ' + 'x'.repeat(4088)
+    await core.receive(event(maximum)); await vi.advanceTimersByTimeAsync(200); await core.drain()
+    expect(writes()).toEqual([maximum, '\r'])
+    await core.receive(event(maximum + 'x')); await core.receive(event('/model\x1b[A'))
+    await vi.advanceTimersByTimeAsync(200); await core.drain()
+    expect(writes()).toEqual([maximum, '\r'])
+  })
+  it('reserves gateway help while allowing explicit terminal help through /run', async () => {
+    await core.receive(event('/help')); await vi.advanceTimersByTimeAsync(0); await core.drain()
+    expect(reply).toHaveBeenCalledWith(expect.anything(), expect.stringContaining('/sessions'))
+    expect(terminal.write).not.toHaveBeenCalled()
+    await core.receive(event('/run /help')); await vi.advanceTimersByTimeAsync(200); await core.drain()
+    expect(writes()).toEqual(['/help', '\r'])
   })
   it.each([['/send hello', 'hello'], ['/key enter', '\r'], ['/key ctrl c', '\x03'], ['/key up', '\x1b[A']])('does not append or delay a submit for %s', async (text, expected) => {
     await core.receive(event(text)); await vi.advanceTimersByTimeAsync(0); await core.drain()

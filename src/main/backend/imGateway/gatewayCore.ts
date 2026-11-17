@@ -9,18 +9,59 @@ import type { GatewayBinding, GatewayCard, GatewayMessage, GatewayPolicy, Gatewa
 
 const gatewayActions = new Set(['/help', '/keymap', '/sessions', '/new', '/bind', '/unbind', '/run', '/send', '/key', '/screenshot', '/read', '/interrupt', '/status', '/binding'])
 export const gatewayKeyHelp = [
-  '/key <按键> 向绑定终端发送一个按键，不额外回车。',
-  'esc / escape：Escape；enter / return / cr：回车；tab：制表；space：空格。',
-  'backspace / bs：退格；delete / del：删除；insert / ins：插入。',
-  'up / down / left / right：方向键，也可写 arrowup / arrowdown / arrowleft / arrowright。',
-  'home / end：行首/行尾；pageup / pgup、pagedown / pgdn：翻页；f1-f12：功能键。',
-  '单个字符可直接发送，如 /key y；Ctrl+C 中断：/key ctrl c；Ctrl+D：/key ctrl d。',
-  '组合：ctrl、alt、shift 可叠加；ctrl 可写 control 或 c。空格、+、- 分隔，大小写与修饰键顺序不限。',
-  '示例：/key ctrl shift c、/key ctrl alt c、/key ctrl shift up、/key shift tab。',
-  '每条消息一个按键；重复修饰键、未知键、esc enter 这种连续按键会被拒绝。',
-  '按键发送给终端内程序，不触发桌面复制粘贴。Ctrl+Shift 字符等扩展键需目标程序支持键盘协议，不能保证所有程序响应。'
+  '按键帮助',
+  '用法: /key <按键>',
+  '先绑定终端，再选择下面一条命令发送。不会额外追加回车。',
+  '',
+  '常用操作',
+  '/key enter - 回车确认',
+  '/key esc - Escape，通常用于取消或关闭菜单',
+  '/key ctrl c - Ctrl+C，通常用于中断',
+  '/key ctrl d - Ctrl+D，发送输入结束',
+  '/key tab - Tab',
+  '/key shift tab - Shift+Tab',
+  '/key space - 空格',
+  '/key y - 输入字符 y，不提交',
+  '',
+  '光标和翻页',
+  '/key up - 上方向键',
+  '/key down - 下方向键',
+  '/key left - 左方向键',
+  '/key right - 右方向键',
+  '/key home - 行首',
+  '/key end - 行尾',
+  '/key pageup - 上一页',
+  '/key pagedown - 下一页',
+  '',
+  '编辑和功能键',
+  '/key backspace - 退格',
+  '/key delete - 删除',
+  '/key insert - 插入',
+  '/key f1 - F1，功能键支持 f1-f12',
+  '',
+  '组合键示例',
+  '/key ctrl shift c - Ctrl+Shift+C',
+  '/key ctrl alt c - Ctrl+Alt+C',
+  '/key ctrl shift up - Ctrl+Shift+上方向键',
+  'ctrl、alt、shift 可组合，用空格、+ 或 - 分隔。',
+  '大小写和修饰键顺序不限，每条消息只能发送一个按键。',
+  '',
+  '可用别名',
+  'esc: escape',
+  'enter: return、cr',
+  'backspace: bs',
+  'delete: del',
+  'insert: ins',
+  'up/down/left/right: arrowup/arrowdown/arrowleft/arrowright',
+  'pageup/pagedown: pgup/pgdn',
+  'ctrl: control、c',
+  '',
+  '注意',
+  '按键发送给终端程序，不触发桌面复制粘贴。',
+  'Ctrl+Shift 等扩展组合需要目标程序支持键盘协议。',
+  '重复修饰键、未知键和 esc enter 这样的多键序列会被拒绝。'
 ].join('\n')
-export const gatewayHelp = '/sessions 选择终端列表\n/new 新建终端列表\n/unbind 解除绑定\n/run <单行命令> 输入并回车\n/send <文字> 仅输入\n/read 查看最近屏幕\n/screenshot 查看绑定终端截图\n/key <按键> 发送按键\n/keymap 查看完整按键映射（/help key 也可）\n/interrupt 发送 Ctrl+C\n/binding 查看当前绑定（/status 也可）\n/help 查看帮助\n绑定后普通消息直接输入并回车，输出自动回传。终端中的斜杠命令可用 /run 发送。\n\n' + gatewayKeyHelp
+export const gatewayHelp = '/sessions 选择终端列表\n/new 新建终端列表\n/unbind 解除绑定\n/run <单行命令> 输入并回车\n/send <文字> 仅输入\n/read 查看最近屏幕\n/screenshot 查看绑定终端截图\n/key <按键> 发送按键\n/keymap 查看完整按键映射（/help key 也可）\n/interrupt 发送 Ctrl+C\n/binding 查看当前绑定（/status 也可）\n/help 查看帮助\n绑定后普通消息和 /model 等非内置斜杠命令直接输入终端并回车。\n与网关命令重名时可用 /run 转发，例如 /run /help。\n\n' + gatewayKeyHelp
 
 export const gatewayOutput = (text: string) => {
   const clean = stripVTControlCharacters(text).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '').replace(/<at\b/gi, '< at')
@@ -157,9 +198,10 @@ export class GatewayCore {
       text = choice.command
     }
     const match = text.trim().match(/^(\/\w+)(?:\s+([\s\S]*))?$/)
-    const action = match?.[1] || ''; const argument = match?.[2] || ''
+    const action = match && gatewayActions.has(match[1]) ? match[1] : ''
+    const argument = action ? match?.[2] || '' : ''
     if (action === '/keymap' || action === '/help' && argument.trim().toLowerCase() === 'key') return gatewayKeyHelp
-    if (action === '/help' || text.trimStart().startsWith('/') && !gatewayActions.has(action)) return gatewayHelp
+    if (action === '/help') return gatewayHelp
     if (action === '/unbind') { this.options.state.bind(key); this.relays.get(key)?.stop(); this.relays.delete(key); return '已解除绑定。' }
     const terminals = (await this.options.terminal.list()).filter(item => this.allowed(item))
     if (!this.active || !this.authorized(message)) throw new Error('IM_GATEWAY_STOPPED')

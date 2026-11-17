@@ -35,7 +35,7 @@ Use **Save and apply**, then check that the status is **Connected**. Saved setti
 
 `/binding` (or `/status`) shows the bound terminal, host, and connection state. Three-key combinations include `/key ctrl shift c`, `/key ctrl alt c`, and `/key ctrl shift up`; plus separators such as `ctrl+shift+c` also work. Keys go to the terminal program, not desktop shortcuts such as Copy. Extended combinations require support from the receiving program.
 
-`/key ctrl c` or `/interrupt` sends Ctrl+C; `/key esc` sends Escape; `/key enter`, `/key tab`, and `/key up` send the named key without appending another Return; `/send <text>` types without Return; `/unbind` ends the binding without closing the terminal. Use `/run /model` to send slash commands to a program such as Codex.
+`/key ctrl c` or `/interrupt` sends Ctrl+C; `/key esc` sends Escape; `/key enter`, `/key tab`, and `/key up` send the named key without appending another Return; `/send <text>` types without Return; `/unbind` ends the binding without closing the terminal. Non-gateway slash commands such as `/model` are forwarded intact to the bound terminal and submitted automatically. Use `/run /help` when the terminal command has the same name as a gateway command.
 
 A disconnected, closed, or replaced terminal produces one notification. Subsequent messages receive an explicit unavailable-binding reply; choose a terminal again. Previous input is never automatically retried.
 
@@ -43,7 +43,7 @@ Handle SSH passwords, MFA, and connection failures on the desktop; the new tab i
 
 ## Key reference and screenshots
 
-`/help` lists commands and key mappings; `/keymap` or `/help key` shows the complete key reference, even before binding. Arguments such as `/keymap ctrl c` still return the full reference and never send terminal input. Supported names include `esc`/`escape`, `enter`/`return`/`cr`, `tab`, `space`, `backspace`/`bs`, `delete`/`del`, `insert`/`ins`, `up`/`arrowup` (also down/left/right), `home`, `end`, `pageup`/`pgup`, `pagedown`/`pgdn`, and `f1` through `f12`. A single character such as `/key y` is also supported.
+`/help` lists commands and key mappings; `/keymap` or `/help key` shows the complete key reference in plain-text groups with one command per line, even before binding. Arguments such as `/keymap ctrl c` still return the full reference and never send terminal input. Supported names include `esc`/`escape`, `enter`/`return`/`cr`, `tab`, `space`, `backspace`/`bs`, `delete`/`del`, `insert`/`ins`, `up`/`arrowup` (also down/left/right), `home`, `end`, `pageup`/`pgup`, `pagedown`/`pgdn`, and `f1` through `f12`. A single character such as `/key y` is also supported.
 
 Combine `ctrl` (aliases `control`, `c`), `alt`, and `shift` using spaces, plus signs or hyphens, in any order or case. Examples: `/key ctrl c`, `/key shift tab`, `/key ctrl shift c`, `/key ctrl alt c`, `/key ctrl shift up`. Send one key per message; repeated modifiers, unknown names and key sequences are rejected. Extended combinations depend on the terminal program's keyboard protocol and do not trigger desktop shortcuts.
 

@@ -49,7 +49,7 @@
 
 绑定键由 provider、accountId、tenantId、conversationId、senderId 的 JSON 数组 SHA-256 构成。每次操作重新列出终端并检查主机资产授权、连接状态和原 sessionId/panelId；主机重连不能自动继承旧绑定。本地终端默认不授权。`allowedAssetIds` 含保留值 `all` 时允许本机和全部保存的 SSH 资产，包括后来新增的资产；用户和群聊权限仍是精确白名单，`*` 无特殊语义。
 
-单聊检查用户允许列表；群聊还要检查聊天允许列表及当前机器人的精确 @。未知斜杠指令回复帮助。普通聊天在已绑定后输入终端并回车，未绑定时提示选择卡片。`/sessions` 和 `/new` 卡片每页 8 项，以名称和主机展示。新建调用已有桌面本机/SSH 流程，不调用 LLM。`/run` 表示写入并回车，不跟踪退出码或声明完成。`/key` 复用 `src/shared/terminalKeys.ts` 与 Control Socket 共用的纯按键映射，解析 Ctrl/Alt/Shift 修饰键（空格、加号或连字符分隔，大小写及顺序无关）后写入精确绑定，不额外回车；拒绝原文控制字符、未知键名、多键序列，仍经过身份/资产/会话检查、消息去重与终端锁。导航键和功能键使用 xterm 修饰参数；Ctrl+Alt 字符保留 ESC 加控制字符的兼容形式，Ctrl+Shift 字符以 CSI-u 保留 Shift 位，不降级成中断字符。此入口不模拟桌面键盘事件或系统快捷键，不协商/修改目标程序的键盘模式，扩展键需要接收程序支持。编码参考 [xterm 控制序列](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html) 与 [kitty 键盘协议](https://sw.kovidgoyal.net/kitty/keyboard-protocol/#key-codes)。`/binding` 和 `/status` 共用绑定查询；`/interrupt` 是固定 Ctrl+C；普通消息最多 4096 字符，多行和制表符用 bracketed paste；拒绝其余控制字符。`/run`、`/send` 保持单行 2048 字符上限。
+单聊检查用户允许列表；群聊还要检查聊天允许列表及当前机器人的精确 @。仅精确匹配网关内置斜杠命令；`/model` 等非内置命令连同命令名、参数和首尾空格按普通输入转发，不降级为帮助或只发送参数。普通聊天和非内置斜杠命令在已绑定后输入终端并回车，未绑定时提示选择卡片，仍执行授权、去重、长度、控制字符及延迟提交检查。与网关重名的终端命令使用 `/run` 显式转发，如 `/run /help`。`/sessions` 和 `/new` 卡片每页 8 项，以名称和主机展示。新建调用已有桌面本机/SSH 流程，不调用 LLM。`/run` 表示写入并回车，不跟踪退出码或声明完成。`/key` 复用 `src/shared/terminalKeys.ts` 与 Control Socket 共用的纯按键映射，解析 Ctrl/Alt/Shift 修饰键（空格、加号或连字符分隔，大小写及顺序无关）后写入精确绑定，不额外回车；拒绝原文控制字符、未知键名、多键序列，仍经过身份/资产/会话检查、消息去重与终端锁。导航键和功能键使用 xterm 修饰参数；Ctrl+Alt 字符保留 ESC 加控制字符的兼容形式，Ctrl+Shift 字符以 CSI-u 保留 Shift 位，不降级成中断字符。此入口不模拟桌面键盘事件或系统快捷键，不协商/修改目标程序的键盘模式，扩展键需要接收程序支持。编码参考 [xterm 控制序列](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html) 与 [kitty 键盘协议](https://sw.kovidgoyal.net/kitty/keyboard-protocol/#key-codes)。`/binding` 和 `/status` 共用绑定查询；`/interrupt` 是固定 Ctrl+C；普通消息最多 4096 字符，多行和制表符用 bracketed paste；拒绝其余控制字符。`/run`、`/send` 保持单行 2048 字符上限。
 
 普通消息和 `/run` 将文字与提交分两次写入：文字写入成功后等待 200 ms，再独立发送一次 CR，避免 Codex 等交互程序将同批回车识别为粘贴换行。多行 bracketed paste 在第一次写入内闭合。等待期间持续持有终端锁，提交前重新检查网关启用状态、用户与资产权限、绑定及连接；失效时保留已输入文字但不回车。任一写入失败都不自动重试。`/send`、`/key`、`/interrupt` 不经过延迟提交路径。该行为由共享网关核心负责，适用于各 IM 渠道；正在运行的旧进程需更新并重启后生效。
 
@@ -117,7 +117,7 @@ npm run build
 
 输出事件与 renderer 交付存在短暂时差，初始读屏和重绘事件保留两次有界稳定读取机会；没有新事件后停止读屏，相同内容不发送，继续保留三秒卡片更新上限。避免一次空缓存读取把静态菜单永久吞掉。
 
-`terminal.screenshot` 从同一核心获取当前底部屏幕的普通字符及样式 runs，在 renderer 独立 canvas 生成 PNG，不抓桌面或强制切换面板；图片尺寸和载荷均有限制。网关复核绑定后由平台适配器发送。飞书通过 image.create 上传并使用 image_key 回复，重试复用 UUID；Telegram 发送 PNG document；如流使用 SDK 图片消息。发送失败回复固定文字。图片仅在内存中处理；发送排队、上传前后和重试前重新核验授权。`/keymap` 和 `/help key` 在无绑定或绑定断开时也可查看，不产生终端读写；`/keymap` 忽略参数并返回完整映射，仍检查用户及群聊授权。
+`terminal.screenshot` 从同一核心获取当前底部屏幕的普通字符及样式 runs，在 renderer 独立 canvas 生成 PNG，不抓桌面或强制切换面板；图片尺寸和载荷均有限制。网关复核绑定后由平台适配器发送。飞书通过 image.create 上传并使用 image_key 回复，重试复用 UUID；Telegram 发送 PNG document；如流使用 SDK 图片消息。发送失败回复固定文字。图片仅在内存中处理；发送排队、上传前后和重试前重新核验授权。`/keymap` 和 `/help key` 在无绑定或绑定断开时也可查看，不产生终端读写；`/keymap` 忽略参数并返回完整映射，仍检查用户及群聊授权。帮助使用纯文本分组、空行分段和一行一条 `/key ... - 说明`，不依赖 Markdown 表格或空格对齐；保留别名、组合键限制及键盘协议说明。
 
 补充回归：`tests/terminal-control-screen.test.ts` 覆盖历史滚动、后台面板、传统 buffer、身份冲突及异步替换；`tests/threaded-terminal-core-worker.test.ts` 使用真实 xterm 核心验证待解析数据和一次性更新菜单及反色行；`tests/terminal-screenshot.test.ts` 验证字符布局和颜色绘制、隐藏文字及尺寸限制。网关核心和适配器测试覆盖按键帮助、截图授权、上传失败与消息去重；输出测试保留动画防刷屏并覆盖静态菜单迟到。
 

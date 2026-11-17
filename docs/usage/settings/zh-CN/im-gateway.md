@@ -31,7 +31,7 @@ Telegram 在群内使用 `/sessions@机器人用户名` 或 `@机器人用户名
 
 `/binding`（或 `/status`）查看当前绑定的终端和连接状态。`/key ctrl shift c`、`/key ctrl alt c`、`/key ctrl shift up` 支持三键组合，也可写为 `ctrl+shift+c`。按键交给终端内程序处理，不触发桌面复制等快捷键；扩展组合键是否有效取决于目标程序支持。
 
-`/key ctrl c` 或 `/interrupt` 发送 Ctrl+C；`/key esc` 发送 Escape；`/key enter`、`/key tab`、`/key up` 等发送对应按键，均不额外回车；`/send <文字>` 只输入不回车；`/unbind` 停止当前聊天与终端的绑定，不关闭终端。向 Codex 等程序输入 `/model` 时使用 `/run /model`，避免与网关命令混淆。
+`/key ctrl c` 或 `/interrupt` 发送 Ctrl+C；`/key esc` 发送 Escape；`/key enter`、`/key tab`、`/key up` 等发送对应按键，均不额外回车；`/send <文字>` 只输入不回车；`/unbind` 停止当前聊天与终端的绑定，不关闭终端。`/model` 等非网关内置的斜杠命令会直接转发给已绑定终端并回车；只有与网关重名时才用 `/run /help` 等显式转发。
 
 终端断开或关闭会通知一次；继续发消息会明确提示绑定失效，需重新选择终端，不会自动重发此前输入。
 
@@ -39,6 +39,6 @@ SSH 密码、MFA 或连接失败需要在桌面处理，创建的 tab 会保留�
 
 ## 按键帮助与截图
 
-`/help` 查看命令及按键映射，`/keymap` 或 `/help key` 单独查看完整按键表，无需绑定；`/keymap ctrl c` 也只返回映射，不发送按键。支持 Escape、回车、Tab、空格、方向键、Home/End、PageUp/PageDown、退格/删除/插入、F1-F12、单个字符及 Ctrl/Alt/Shift 组合。完整名称、别名及协议限制见 [按键映射](../../im-gateway.md#按键映射)。
+`/help` 查看命令及按键映射，`/keymap` 或 `/help key` 单独查看按类别分组、每行一条命令的完整按键帮助，无需绑定；`/keymap ctrl c` 也只返回映射，不发送按键。支持 Escape、回车、Tab、空格、方向键、Home/End、PageUp/PageDown、退格/删除/插入、F1-F12、单个字符及 Ctrl/Alt/Shift 组合。完整名称、别名及协议限制见 [按键映射](../../im-gateway.md#按键映射)。
 
 `/screenshot` 将绑定终端的字符、颜色和选中行生成图片发回当前对话，后台标签也可使用；只包含终端当前屏幕，不采集系统桌面，因此不需要系统录屏权限。仍检查绑定和授权，飞书图片上传失败时会回复错误并提示 `/read`。图片不含鼠标、闪烁光标和应用边框，字体可能略有差异。详见 [截图说明](../../im-gateway.md#查看终端截图)。旧软件不识别这些命令时，需要启动新构建；仅重新发布飞书应用不能更新本机功能。
