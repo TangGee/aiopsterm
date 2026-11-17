@@ -81,14 +81,17 @@ export class GatewayCore {
   private follow(message: GatewayMessage, key: string, binding: GatewayBinding, terminal: ControlTerminalSummary) {
     if (this.relays.has(key) || !this.options.send || !this.options.terminal.subscribe) return
     this.disconnected.delete(binding)
-    this.relays.set(key, new GatewayOutputRelay({ terminal: this.options.terminal, binding, message,
+    const relay = new GatewayOutputRelay({ terminal: this.options.terminal, binding, message,
       valid: () => this.bindingValid(message, key, binding, terminal), send: this.options.send, sendScreen: this.options.sendScreen, screenQuietMs: this.options.screenQuietMs,
       failed: async () => {
         this.options.audit('output_failed', message)
         // A session may disappear while an asynchronous screen read is pending.
         await this.bindingValid(message, key, binding, terminal)
-      }, stopped: () => this.relays.delete(key)
-    }))
+      }, stopped: () => { if (this.relays.get(key) === relay) this.relays.delete(key) }
+    })
+    // A newly bound terminal must not publish before its acknowledgement.
+    relay.pause()
+    this.relays.set(key, relay)
   }
   private bind(message: GatewayMessage, key: string, terminal: ControlTerminalSummary) {
     const binding = { sessionId: terminal.sessionId!, panelId: terminal.panelId }
@@ -122,13 +125,21 @@ export class GatewayCore {
     this.count += 1
     const pending = (this.queues.get(key) || Promise.resolve()).then(async () => {
       if (!this.active || !this.authorized(message)) return
-      const action = message.text.trim().split(/\s/, 1)[0]
-      this.options.audit('accepted', message, gatewayActions.has(action) ? action : 'unknown')
-      let reply: GatewayReply | null
-      try { reply = await this.handle(message, key) } catch { reply = '操作失败或终端已断开，请在桌面检查连接，再用 /sessions 重新选择。新建的 tab 会保留在桌面。'; this.options.audit('operation_failed', message) }
-      if (!this.active || reply === null || !this.authorized(message)) return
-      try { await this.options.reply(message, typeof reply === 'string' ? gatewayOutput(reply) : reply); this.options.audit('replied', message) }
-      catch { this.options.audit('reply_failed', message) }
+      const previousRelay = this.relays.get(key)
+      previousRelay?.pause()
+      // Finish an already submitted send before a newer reply. Slow screen reads
+      // are invalidated by pause and do not block processing the user's request.
+      await previousRelay?.drainDelivery()
+      try {
+        if (!this.active || !this.authorized(message)) return
+        const action = message.text.trim().split(/\s/, 1)[0]
+        this.options.audit('accepted', message, gatewayActions.has(action) ? action : 'unknown')
+        let reply: GatewayReply | null
+        try { reply = await this.handle(message, key) } catch { reply = '操作失败或终端已断开，请在桌面检查连接，再用 /sessions 重新选择。新建的 tab 会保留在桌面。'; this.options.audit('operation_failed', message) }
+        if (!this.active || reply === null || !this.authorized(message)) return
+        try { await this.options.reply(message, typeof reply === 'string' ? gatewayOutput(reply) : reply); this.options.audit('replied', message) }
+        catch { this.options.audit('reply_failed', message) }
+      } finally { this.relays.get(key)?.resume() }
     }).finally(() => {
       this.count -= 1
       if (this.queues.get(key) === pending) this.queues.delete(key)
@@ -209,7 +220,6 @@ export class GatewayCore {
         const name = argument.trim()
         const keyData = name.length <= 40 && !/[\x00-\x1f\x7f]/.test(argument) ? keyDataForTerminal(name) : null
         if (!keyData) return '无效按键。示例：/key esc、/key ctrl c、/key ctrl shift c、/key enter、/key tab、/key up；每条消息只发送一个按键。'
-        if (keyData.data === '\r') this.relays.get(key)?.beginInput()
         await this.options.terminal.write(binding, keyData.data)
         return `已发送按键 ${name}，不额外回车。`
       }
@@ -218,7 +228,6 @@ export class GatewayCore {
       const invalid = action ? /[\x00-\x1f\x7f]/.test(input) : /[\x00-\x08\x0b-\x1f\x7f]/.test(input)
       if (!input || input.length > (action ? 2048 : 4096) || invalid) return '输入过长或含控制字符；普通消息最多 4096 字符，/run 和 /send 只接受最多 2048 字符的单行文字。'
       const data = !action && /[\n\t]/.test(input) ? `\x1b[200~${input}\x1b[201~` : input
-      if (action !== '/send') this.relays.get(key)?.beginInput()
       await this.options.terminal.write(binding, data)
       if (action !== '/send') {
         // Interactive editors can treat an Enter in the same input burst as pasted text.

@@ -40,11 +40,13 @@ export class GatewayOutputRelay {
   private screenMessageId?: string
   private lastScreenAt = -Infinity
   private revision = 0
+  private paused = false
   private flushing = false
   private timer?: ReturnType<typeof setTimeout>
   private lastDataAt = 0
   private unsubscribe?: () => void
   private running: Promise<void> = Promise.resolve()
+  private sending: Promise<unknown> = Promise.resolve()
   constructor(private options: {
     terminal: GatewayTerminalPort
     binding: GatewayBinding
@@ -69,10 +71,26 @@ export class GatewayOutputRelay {
     this.schedule()
   }
   stop() { if (this.stopped) return; this.stopped = true; this.options.stopped?.(); this.unsubscribe?.(); if (this.timer) clearTimeout(this.timer) }
-  beginInput() { this.revision++; this.screenMessageId = undefined }
+  beginInput() {
+    this.revision++
+    this.screenMessageId = undefined
+    if (this.decoder.redraw && this.options.sendScreen) {
+      this.lastScreen = ''
+      this.lastScreenAt = -Infinity
+      this.initial = true
+      this.dirty = true
+    }
+  }
+  pause() {
+    this.paused = true
+    this.beginInput()
+    if (this.timer) { clearTimeout(this.timer); this.timer = undefined }
+  }
+  resume() { this.paused = false; this.schedule() }
+  async drainDelivery() { await this.sending.catch(() => {}) }
   async drain() { await this.running }
   private schedule() {
-    if (this.stopped || this.timer || this.flushing) return
+    if (this.stopped || this.paused || this.timer || this.flushing) return
     this.timer = setTimeout(() => {
       this.timer = undefined
       this.flushing = true
@@ -82,8 +100,9 @@ export class GatewayOutputRelay {
   }
   private async flush() {
     try {
-      if (this.stopped) return
+      if (this.stopped || this.paused) return
       if (!await this.options.valid()) { this.stop(); return }
+      if (this.stopped || this.paused) return
       if (!this.initial && !this.dirty && !this.pending && !this.settleReads) return
       // Channels without editable messages wait for TUI redraws to settle.
       if (this.decoder.redraw && this.options.screenQuietMs && Date.now() - this.lastDataAt < this.options.screenQuietMs) return
@@ -100,7 +119,7 @@ export class GatewayOutputRelay {
         text = stripVTControlCharacters(await this.options.terminal.read(this.options.binding)).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '').replace(/<at\b/gi, '< at')
         // Compare exactly what the recipient sees, ignoring terminal cell padding.
         text = text.split('\n').map(line => line.trimEnd()).join('\n').trimEnd().slice(-6000)
-        if (revision !== this.revision) { this.dirty = true; return }
+        if (this.paused || revision !== this.revision) { this.dirty = true; return }
         if (text === this.lastScreen) return
         this.lastScreen = text
       } else {
@@ -110,13 +129,12 @@ export class GatewayOutputRelay {
       }
       if (this.truncated) { text = '[输出过快，部分内容已省略，请在桌面查看完整输出]\n' + text; this.truncated = false }
       if (!text.trim() || this.stopped || !await this.options.valid()) return
-      if (revision !== this.revision) { this.dirty = true; return }
+      if (this.paused || revision !== this.revision) { this.dirty = true; return }
       if (screenOutput) {
-        const messageId = await this.options.sendScreen!(this.options.message, text, this.screenMessageId)
-        if (revision === this.revision) this.screenMessageId = messageId
-        this.lastScreenAt = Date.now()
+        const messageId = await (this.sending = this.options.sendScreen!(this.options.message, text, this.screenMessageId))
+        if (revision === this.revision) { this.screenMessageId = messageId; this.lastScreenAt = Date.now() }
       } else {
-        await this.options.send(this.options.message, text)
+        await (this.sending = this.options.send(this.options.message, text))
       }
     } catch {
       if (!this.stopped) {
