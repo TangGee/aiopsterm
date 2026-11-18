@@ -190,6 +190,7 @@ const packageTargetsScript = readFileSync(resolve('scripts/package-targets.mjs')
 const packagedAppAuditScript = readFileSync(resolve('scripts/audit-packaged-app.mjs'), 'utf8')
 const packagedSmokeScript = readFileSync(resolve('scripts/smoke-packaged-app.mjs'), 'utf8')
 const packagedE2eSpec = readFileSync(resolve('tests/packaged-e2e/packaged-app.spec.ts'), 'utf8')
+const packagedE2eControl = readFileSync(resolve('tests/packaged-e2e/support/control.ts'), 'utf8')
 const codexPackagingRequirements = [
   { label: 'Cline sidecar build entrypoint', source: packageScripts['build:cline-sidecar'], text: 'node scripts/build-cline-sidecar.mjs' },
   { label: 'Cline sidecar audit entrypoint', source: packageScripts['audit:cline-sidecar'], text: 'node scripts/audit-cline-sidecar-runtime.mjs' },
@@ -271,7 +272,8 @@ const codexPackagingRequirements = [
   { label: 'package target macos', source: packageTargetsScript, text: 'macos' },
   { label: 'package target windows', source: packageTargetsScript, text: 'windows' },
   { label: 'packaged e2e control notification', source: packagedE2eSpec, text: 'notification.create' },
-  { label: 'packaged e2e windows named pipe', source: packagedE2eSpec, text: '\\\\\\\\.\\\\pipe\\\\aiopsterm-control-' },
+  { label: 'packaged e2e shared control helper', source: packagedE2eSpec, text: "from './support/control'" },
+  { label: 'packaged e2e windows named pipe', source: packagedE2eControl, text: '\\\\\\\\.\\\\pipe\\\\aiopsterm-control-' },
   { label: 'build-codex target triple', source: codexBuildScript, text: 'codexTargetTriple' },
   { label: 'build-codex package builder', source: codexBuildScript, text: 'build_codex_package.py' },
   { label: 'build-codex package output', source: codexBuildScript, text: '--package-dir "${package_dir}"' },
