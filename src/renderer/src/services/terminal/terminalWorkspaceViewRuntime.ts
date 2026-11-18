@@ -268,6 +268,7 @@ export const createTerminalWorkspaceViewRuntime = ({
   const paneFontSizes = reactive<Record<string, number>>({})
   const terminalElements = new Map<string, HTMLElement>()
   const terminalViews = new Map<string, TerminalView>()
+  const importedFontRequests = new WeakMap<TerminalView, { family: string }>()
   const terminalViewPanels = new Map<string, TerminalPanel>()
   let terminalKeyboardShortcutHandler: TerminalKeyboardShortcutHandler | null = null
   let terminalFocusIntent = 0
@@ -1079,11 +1080,22 @@ export const createTerminalWorkspaceViewRuntime = ({
       )
     } else if (importedTerminalFontId(settings.fontFamily)) {
       const family = settings.fontFamily
-      void loadTerminalFonts(family).then((loaded) => {
-        if (!loaded || terminalViews.get(panelId) !== view || view.terminal.options.fontFamily !== resolveTerminalFontFamily(family)) return
-        scheduleTerminalFit(panelId, { frames: 2, forceGeometry: true })
-        view.terminal.refresh(0, Math.max(0, view.terminal.rows - 1))
-      })
+      if (importedFontRequests.get(view)?.family !== family) {
+        const request = { family }
+        importedFontRequests.set(view, request)
+        void loadTerminalFonts(family).then((loaded) => {
+          if (importedFontRequests.get(view) !== request) return
+          if (!loaded) {
+            importedFontRequests.delete(view)
+            return
+          }
+          if (terminalViews.get(panelId) !== view || view.terminal.options.fontFamily !== resolveTerminalFontFamily(family)) return
+          scheduleTerminalFit(panelId, { frames: 2, forceGeometry: true })
+          view.terminal.refresh(0, Math.max(0, view.terminal.rows - 1))
+        })
+      }
+    } else {
+      importedFontRequests.delete(view)
     }
     if (options.refit !== false) {
       scheduleTerminalFit(panelId, { scrollToBottom: true, frames: 3, forceGeometry: true })

@@ -10,6 +10,7 @@
 - Codex 与语音：保留切换目录后的内嵌会话，修复读取无末尾换行文件时的命令完成识别；修复编辑器样式更新导致语音输入内容丢失。
 - Kubernetes：修复 exec 容器参数位置；控制台跟随新输出，同时保留用户向上查看历史的位置。
 - Linux 与 Windows：修复 AppImage 内部控制命令启动路径和 Windows 终端缩放时的光标几何位置。
+- 自定义字体：修复兼容终端加载字体后反复调整尺寸导致界面卡住的问题；字体源文件删除后仍可从已导入副本恢复。
 
 ## 使用边界
 
@@ -26,3 +27,5 @@ Telegram 和百度如流的协议已有自动化覆盖，但尚无本轮真实�
 回归应覆盖 IM 权限和绑定、未知 slash 透传、按键和回车、消息排序与持续输出，以及实际打包应用的终端、Codex、文件和通知。相关自动化用例包括 `tests/im-gateway-*.test.ts`、`tests/package-config.test.ts`、`tests/packaged-pty-files.test.ts`、`tests/regression/local-signing.test.ts`、`tests/regression/release-gate.test.ts` 及 `tests/packaged-e2e/`；签名后的应用另执行项目发布回归。真实远程服务及平台联调的结果应单独记录。
 
 Linux 的 27 个主题设置页基线已同步新增的 IM 网关入口，重启前后均断言入口可见。逐图核对表明变化仅位于设置导航区域；截图阈值和重启布局一致性断言保持不变。该项维护不代表其他发布回归或跨平台签名已完成。
+
+自定义字体回归同时覆盖正常加载后布局稳定、切回内置字体时忽略过期加载结果、加载失败后重试。单元用例位于 `tests/terminal-workspace-view-runtime.test.ts`，真实应用中删除字体源文件并重启恢复的验收位于 `tests/regression/terminal-fonts.spec.ts`，两种终端后端均需通过。

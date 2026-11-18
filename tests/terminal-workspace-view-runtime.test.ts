@@ -19,6 +19,15 @@ const terminalClientMocks = vi.hoisted(() => ({
   resizeTerminal: vi.fn(async () => undefined)
 }))
 
+const terminalFontMocks = vi.hoisted(() => ({
+  loadTerminalFonts: vi.fn(async (_family: string) => true)
+}))
+
+vi.mock('@/services/terminal/terminalFontRuntime', () => ({
+  loadTerminalFonts: terminalFontMocks.loadTerminalFonts,
+  loadTerminalSymbolFont: async () => true
+}))
+
 const threadedTerminalMocks = vi.hoisted(() => {
   class FakeThreadedTerminal {
     static instances: FakeThreadedTerminal[] = []
@@ -320,11 +329,65 @@ afterEach(() => {
   threadedTerminalMocks.threadedEnabled = false
   threadedTerminalMocks.FakeThreadedTerminal.instances = []
   terminalClientMocks.resizeTerminal.mockClear()
+  terminalFontMocks.loadTerminalFonts.mockReset().mockResolvedValue(true)
   logs.length = 0
   vi.restoreAllMocks()
 })
 
 describe('terminalWorkspaceViewRuntime', () => {
+  it('settles legacy font layout after loading instead of scheduling fits indefinitely', async () => {
+    const { runtime, workspace, panel } = createRuntime()
+    workspace.terminalSettings.fontFamily = `"AIOpsTerm Imported ${'a'.repeat(64)}"`
+    const host = document.createElement('div')
+    document.body.append(host)
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(8)
+    const terminal = FakeTerminal.instances[0]
+    const refreshCount = terminal.refresh.mock.calls.length
+    expect(refreshCount).toBeGreaterThan(0)
+    await flushFrames(4)
+    expect(terminal.refresh).toHaveBeenCalledTimes(refreshCount)
+    expect(terminalFontMocks.loadTerminalFonts).toHaveBeenCalledTimes(1)
+    runtime.dispose()
+  })
+
+  it('ignores an obsolete font load after switching back to a built-in font', async () => {
+    let finish!: (loaded: boolean) => void
+    terminalFontMocks.loadTerminalFonts.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const { runtime, workspace, panel } = createRuntime()
+    workspace.terminalSettings.fontFamily = `"AIOpsTerm Imported ${'b'.repeat(64)}"`
+    const host = document.createElement('div')
+    document.body.append(host)
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(4)
+    workspace.terminalSettings.fontFamily = 'JetBrains Mono'
+    runtime.applyTerminalSettingsToAll()
+    await flushFrames(5)
+    const terminal = FakeTerminal.instances[0]
+    terminal.refresh.mockClear()
+    finish(true)
+    await flushFrames(4)
+    expect(terminal.refresh).not.toHaveBeenCalled()
+    expect(terminal.options.fontFamily).toContain('JetBrains Mono')
+    runtime.dispose()
+  })
+
+  it('retries a failed imported font load and settles after recovery', async () => {
+    terminalFontMocks.loadTerminalFonts.mockResolvedValueOnce(false)
+    const { runtime, workspace, panel } = createRuntime()
+    workspace.terminalSettings.fontFamily = `"AIOpsTerm Imported ${'c'.repeat(64)}"`
+    const host = document.createElement('div')
+    document.body.append(host)
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(8)
+    expect(terminalFontMocks.loadTerminalFonts).toHaveBeenCalledTimes(2)
+    const terminal = FakeTerminal.instances[0]
+    const refreshCount = terminal.refresh.mock.calls.length
+    await flushFrames(4)
+    expect(terminal.refresh).toHaveBeenCalledTimes(refreshCount)
+    runtime.dispose()
+  })
+
   it.each([false, true])('registers voice targets after opening the terminal and rejects replaced sessions (threaded=%s)', async (threaded) => {
     threadedTerminalMocks.threadedEnabled = threaded
     const panel = createEmptyTerminalPanel('voice-terminal', 'Local')
