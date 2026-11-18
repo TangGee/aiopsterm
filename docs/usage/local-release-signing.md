@@ -26,6 +26,8 @@ Linux CI 容器没有 FUSE 设备。AppImage 控制命令回归通过 `APPIMAGE_
 
 后台终端截图回归按平台使用真实控制通道：Windows 使用主进程对应的命名管道和 PowerShell，Linux/macOS 使用 Unix socket 和 shell；macOS 测试目录使用短路径以满足 socket 长度限制。测试必须确认命令实际输出、后台目标会话的 PNG 截图，以及错误会话请求被拒绝，不能仅依赖命令回显。
 
+Windows 截图用例通过实际终端键盘输入准备内容，单独按 Enter 提交。PSReadLine 可能将同一次 PTY 写入中的文字和回车识别为粘贴；不能用尚未执行的命令回显代替截图验收所需的真实输出。
+
 ## 下载并校验输入
 
 在包含这些脚本的项目 checkout 中安装依赖。使用当次构建提交对应的源码和 lockfile；安装依赖不需要重新编译应用源码。下载机器需要 Node.js、GitHub CLI 和 tar，并通过 `gh auth login` 获得仓库访问权限。

@@ -36,15 +36,26 @@ test('bound terminal reads scrollback and captures a background menu', async ({}
     if (process.platform === 'win32') {
       await expect.poll(async () => (await invoke('terminal.read_screen', { panelId, sessionId })).data?.text, { timeout: 60_000 }).toMatch(/PS [\s\S]*>\s*$/)
     }
+    const enterCommand = async (command: string) => {
+      if (process.platform === 'win32') {
+        // PSReadLine can treat a bulk PTY write containing Enter as pasted input.
+        // Prepare the capture fixture through the real keyboard input path.
+        await page.locator('.terminal-pane.active .threaded-terminal-input, .terminal-pane.active .xterm-helper-textarea').first().focus()
+        await page.keyboard.type(command)
+        await page.keyboard.press('Enter')
+      } else {
+        expect((await invoke('terminal.send_text', { sessionId, text: `${command}\r` })).ok).toBe(true)
+      }
+    }
     const history = process.platform === 'win32'
       ? "1..100 | ForEach-Object { Write-Output 'history' }; Write-Output 'PWD_RESULT /work/test'; Write-Output 'LS_RESULT file.txt'"
       : "printf 'history\\n%.0s' {1..100}; printf 'PWD_RESULT /work/test\\nLS_RESULT file.txt\\n'"
-    await invoke('terminal.send_text', { sessionId, text: `${history}\r` })
-    await expect.poll(async () => (await invoke('terminal.read_screen', { panelId, sessionId, tailLines: 5 })).data?.text).toMatch(/(?:^|\n)LS_RESULT file\.txt\s*(?:\n|$)/)
+    await enterCommand(history)
+    await expect.poll(async () => (await invoke('terminal.read_screen', { panelId, sessionId, tailLines: 5 })).data?.text, { timeout: process.platform === 'win32' ? 60_000 : 15_000 }).toMatch(/(?:^|\n)LS_RESULT file\.txt\s*(?:\n|$)/)
     const menu = process.platform === 'win32'
       ? "[Console]::Write(([char]27)+'[?1049h'+([char]27)+'[2J'+([char]27)+\"[HUpdate available`r`n\"+([char]27)+'[7m1. Update now'+([char]27)+\"[0m`r`n2. Skip`r`nenter continue / esc skip\"); Start-Sleep -Seconds 60"
       : "printf '\\033[?1049h\\033[2J\\033[HUpdate available\\r\\n\\033[7m1. Update now\\033[0m\\r\\n2. Skip\\r\\nenter continue / esc skip'; sleep 60"
-    await invoke('terminal.send_text', { sessionId, text: `${menu}\r` })
+    await enterCommand(menu)
     await expect.poll(async () => (await invoke('terminal.read_screen', { panelId, sessionId })).data?.text).toMatch(/(?:^|\n)enter continue \/ esc skip\s*$/)
     await invoke('surface.create', { type: 'local', focus: true, autoConnect: true })
     const result = await invoke('terminal.screenshot', { panelId, sessionId })
