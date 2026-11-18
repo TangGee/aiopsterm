@@ -2,7 +2,7 @@
 
 ## Current Test Version
 
-Version `0.1.4` is prepared for local Linux x86_64 AppImage testing and has not been published as a release. The expected artifact is `dist/aiopsterm-0.1.4-linux-x86_64.AppImage`. Test terminal input/output, SSH connections, and the [Feishu gateway](im-gateway.md), including terminal selection, new terminals, key commands, output updates, and screenshots. A successful build or automated smoke check does not replace the planned user testing before release.
+Version `0.1.4` is being prepared as the next release candidate and has not been published. Changes, limitations, and cross-platform acceptance requirements are recorded in the [0.1.4 release candidate](release-0.1.4.md). The existing local Linux test artifact is `dist/aiopsterm-0.1.4-linux-x86_64.AppImage`. Test terminal input/output, SSH connections, and the [IM gateway](im-gateway.md), including terminal selection, new terminals, key commands, slash forwarding, output ordering, and screenshots. A successful local AppImage build does not establish completion of Windows signing, macOS notarization, or user acceptance.
 
 ## Build And Verification
 

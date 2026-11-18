@@ -1,0 +1,26 @@
+# 0.1.4 发布候选
+
+本页记录相对已发布版本 0.1.3 的用户可见变化与发布验收。0.1.4 正在准备构建、签名和公证，尚未发布。平台安装包和签名结果必须以对应提交的验证记录为准。
+
+## 主要变化
+
+- IM 终端控制：通过飞书选择或新建本机、SSH 终端，操作交互式 Codex，接收终端输出并查看终端截图。新增 Telegram 接入和百度如流基础适配；平台配置与差异见 [IM 网关](im-gateway.md)及[平台配置](im-platforms.md)。
+- 交互体验：普通消息自动提交，按键命令不额外回车；非网关内置 slash 命令（例如 `/model`）透传终端；交互后的终端回复重新出现在聊天底部，连续重绘更新当前消息；按键帮助按类别逐行展示。
+- 主机与文件：支持从最近面板搜索主机，连接时立即打开终端标签并保留失败状态；文件传输支持断点续传与任务恢复。参见[终端工作区](terminal-workspace.md)和[文件管理](best-practices/zh-CN/10-files.md)。
+- Codex 与语音：保留切换目录后的内嵌会话，修复读取无末尾换行文件时的命令完成识别；修复编辑器样式更新导致语音输入内容丢失。
+- Kubernetes：修复 exec 容器参数位置；控制台跟随新输出，同时保留用户向上查看历史的位置。
+- Linux 与 Windows：修复 AppImage 内部控制命令启动路径和 Windows 终端缩放时的光标几何位置。
+
+## 使用边界
+
+IM 网关默认关闭，一次启用一个平台；桌面应用和目标终端必须运行。升级后检查平台、授权名单和连接状态。网关内置 `/help` 仍由网关处理，需要终端自身帮助时发送 `/run /help`。
+
+Telegram 和百度如流的协议已有自动化覆盖，但尚无本轮真实机器人联调证据。如流交互卡片和主动更新接口仍未实现，不作为本版已交付能力；如流 TUI 输出采用静止后发送屏幕的策略。详细限制集中维护于[平台配置](im-platforms.md)。
+
+## 发布验收
+
+各平台必须从同一已提交源码构建，保留编译来源、安装包哈希和测试结果。Linux 使用 Ubuntu 20.04 原生模块基线；Windows 完成带可信时间戳的 Authenticode 签名；macOS 完成 Developer ID 签名、公证、票据附加和 Gatekeeper 验证。操作步骤见[构建与本地签名](local-release-signing.md)。
+
+本地发布准备记录位于 `.cache/release-publish/v0.1.4/`。只有通过签名后验证的产物才可标记为正式候选；既有 0.1.4 AppImage 测试包不代表三平台发布验收完成。运行中的应用和终端保持不动，待当前任务结束后再切换安装包。
+
+回归应覆盖 IM 权限和绑定、未知 slash 透传、按键和回车、消息排序与持续输出，以及实际打包应用的终端、Codex、文件和通知。相关自动化用例包括 `tests/im-gateway-*.test.ts`、`tests/package-config.test.ts`、`tests/packaged-pty-files.test.ts`、`tests/regression/local-signing.test.ts`、`tests/regression/release-gate.test.ts` 及 `tests/packaged-e2e/`；签名后的应用另执行项目发布回归。真实远程服务及平台联调的结果应单独记录。
