@@ -379,24 +379,19 @@ The packaged E2E launches the unpacked packaged app with an isolated user-data d
 
 ## Current Local Linux Test Package
 
-The local x86_64 AppImage was rebuilt on 2026-11-18, retaining version `0.1.4`. It contains compiled source revision `25c193a2fb728f6e95f4a33213dad0190e59392a`, including the IM terminal reply ordering fix, forwarding of non-built-in slash commands such as `/model`, and reorganized key help. Earlier voice-input and Codex terminal-output fixes remain included. This is a local test package, not a published release or evidence of Windows/macOS validation.
+The current locally verified Linux candidate is version `0.1.4`, built on 2026-11-18 from clean revision `9a08bb77892f0352bb0f9080f05b8f2aeb278073`. Its user-visible changes and release limits are maintained in [0.1.4 Release Candidate](../usage/release-0.1.4.md). This is not a published release or evidence that Windows signing and macOS notarization have completed.
 
-- Package: `dist/aiopsterm-0.1.4-linux-x86_64.AppImage` (314,202,145 bytes).
-- SHA-256: `fe6512b770ef20c0b4ef770cba7b4c5d1ad30802d94f371751f0c1df7cc2c47d`; the adjacent `.sha256` file supports checksum verification from `dist/`.
-- Previous November 16 package: `dist/backups/20261116/aiopsterm-0.1.4-linux-x86_64.AppImage`. Switching executables does not roll back user data; preserve a separate user-data backup before testing migrations.
-- Build and verification evidence: `dist/verification/20261118/`, including stage logs, the build driver, packaged E2E results, and compiled-output provenance. The packaged manifest matches all 41 output files and records a clean source tree at the revision above.
+- Delivery directory on the maintainer workstation: `/home/tlinux/Downloads/aiopsterm-v0.1.4-9a08bb77/`.
+- AppImage SHA-256: `2e7eb70b743a0eb40d58c1b9c2e7534dd69da48869ae7f710554f58ecbecb512`.
+- deb SHA-256: `752571fb00f281792b8cbd31c8edecb036b645b4a85959000bf551b2bd5a039b`.
+- The delivery contains both installers, `regression-provenance-linux.json`, and `SHA256SUMS-linux.txt`.
+- Verification evidence: `.cache/release-publish/v0.1.4/linux-9a08bb77/`. Older packages in root `dist/` are not this candidate.
 
-When ready to switch after current tasks finish, start the executable directly or open it in the file manager:
+The build used `.cache/appimage-20261118` with separate dependencies and output, the owned Codex package, Cline sidecar, and native modules rebuilt with GCC 11 on the Ubuntu 20.04 baseline. Packaging reused the installed Electron 31.7.7 distribution. Resource, ABI, launcher, startup and provenance audits passed for both installer formats; no compatibility check was bypassed.
 
-```bash
-./dist/aiopsterm-0.1.4-linux-x86_64.AppImage
-```
+Validation passed 33 package unit cases, 8 packaged E2E cases, and 95 release regression cases. Six conditional cases were not executed: four Windows-only cases and two opt-in live voice cases. The custom-font fix additionally passed 41 focused unit cases and 8 real-application font checks, including both terminal backends after source-font removal and restart. See [CI Build And Local Release Signing](../usage/local-release-signing.md) for the FUSE-free AppImage test mode required in CI containers.
 
-This build used the detached worktree `.cache/appimage-20261118` with its own dependency and output directories. It ran icon generation, owned Codex package validation, Cline sidecar compilation, and the full application build. SQLite and PTY modules were then rebuilt with GCC 11 in the existing `aiopsterm-linux20-builder:gcc11` Ubuntu 20.04 image, followed by `electron-builder --linux AppImage --config electron-builder.yml`. No compatibility audit was bypassed. Future rebuilds must retain the documented Linux baseline; rebuilding native modules on a newer host can reintroduce an incompatible runtime dependency.
-
-Final verification passed: 33 focused cases in `tests/package-config.test.ts` and `tests/packaged-pty-files.test.ts`; `npm run package:verify -- linux-appimage` (resource, native ABI/runtime baseline, startup/help/background smoke and AppImage launcher audits); and all 8 cases from `xvfb-run -a npm run test:e2e:packaged`. E2E coverage includes actual AppImage launches, control-command capability branches, local/Codex terminal startup, files, notification requests, scrollback and background-terminal capture with wrong-session rejection. Existing relevant cases were sufficient and were not changed.
-
-These checks used isolated application data. The running application and terminals were not restarted, and all 42 files in their existing `out/` directory retained their pre-build hashes. The new IM fixes are packaged but have not been loaded or tested against the user's running Feishu connection in this packaging pass.
+Tests used isolated application data. The user's running application and terminals were not restarted, and all 42 existing `out/` files retained their pre-build hashes. The packaged IM changes were not loaded into the running Feishu connection. Start the new executable only after current tasks finish; switching executables does not roll back user data.
 
 ## Terminal Recovery Verification
 

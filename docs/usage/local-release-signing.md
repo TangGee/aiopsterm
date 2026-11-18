@@ -22,6 +22,8 @@ gh run list --repo TangGee/aiopsterm --workflow build-installers.yml
 
 待签名输入保留 14 天，CI 安装包保留 7 天。工作流和本地脚本均不自动发布 GitHub Release。
 
+Linux CI 容器没有 FUSE 设备。AppImage 控制命令回归通过 `APPIMAGE_EXTRACT_AND_RUN=1` 选择其解包运行模式，仍执行真实 AppImage、内部启动器和控制命令，并保留原有断言；不依赖挂载权限，也不跳过这些用例。
+
 ## 下载并校验输入
 
 在包含这些脚本的项目 checkout 中安装依赖。使用当次构建提交对应的源码和 lockfile；安装依赖不需要重新编译应用源码。下载机器需要 Node.js、GitHub CLI 和 tar，并通过 `gh auth login` 获得仓库访问权限。

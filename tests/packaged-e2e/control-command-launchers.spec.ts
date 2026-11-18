@@ -53,8 +53,15 @@ for (const format of ['unpacked', 'AppImage']) {
         app = await electron.launch({
           executablePath,
           args: ['--no-sandbox'],
-          env: { ...await isolatedEnvironment(root), NODE_ENV: 'test', AIOPSTERM_USER_DATA_DIR: join(root, 'data') }
+          env: {
+            ...await isolatedEnvironment(root),
+            // Playwright prepends debugger arguments, so select the runtime's
+            // FUSE-free extraction mode through its environment switch.
+            ...(format === 'AppImage' ? { APPIMAGE_EXTRACT_AND_RUN: '1' } : {}),
+            NODE_ENV: 'test', AIOPSTERM_USER_DATA_DIR: join(root, 'data')
+          }
         })
+        if (format === 'AppImage') expect(await app.evaluate(() => process.env.APPIMAGE)).toBe(executablePath)
         const page = await app.firstWindow()
         await page.waitForLoadState('domcontentloaded')
         const session = await page.evaluate(() => window.aiops.createTerminal({ kind: 'local', shell: '/bin/bash' }))
