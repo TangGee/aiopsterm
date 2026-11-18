@@ -379,22 +379,24 @@ The packaged E2E launches the unpacked packaged app with an isolated user-data d
 
 ## Current Local Linux Test Package
 
-The local x86_64 AppImage was rebuilt on 2026-11-16, retaining version `0.1.4`. It contains compiled source revision `4677c7a93dac032b7a91cb1c098d6821c45e7179`, including the recording-session fixes for voice input and Codex terminal output without a trailing newline. This is a local test package, not a published release or evidence of Windows/macOS validation.
+The local x86_64 AppImage was rebuilt on 2026-11-18, retaining version `0.1.4`. It contains compiled source revision `25c193a2fb728f6e95f4a33213dad0190e59392a`, including the IM terminal reply ordering fix, forwarding of non-built-in slash commands such as `/model`, and reorganized key help. Earlier voice-input and Codex terminal-output fixes remain included. This is a local test package, not a published release or evidence of Windows/macOS validation.
 
-- Package: `dist/aiopsterm-0.1.4-linux-x86_64.AppImage` (314,198,247 bytes).
-- SHA-256: `bc38d3cb2dc6b0d41a99f30fa1512ddf039c6e8c2b2badfb3804f6558b2760d5`; the adjacent `.sha256` file supports checksum verification from `dist/`.
-- Previous November 9 package: `dist/backups/20261109/aiopsterm-0.1.4-linux-x86_64.AppImage`. Switching executables does not roll back user data; preserve a separate user-data backup before testing migrations.
-- Build and verification evidence: `dist/verification/20261116/`. The packaged compiled-output manifest matches all 41 output files and records a clean source tree at the revision above.
+- Package: `dist/aiopsterm-0.1.4-linux-x86_64.AppImage` (314,202,145 bytes).
+- SHA-256: `fe6512b770ef20c0b4ef770cba7b4c5d1ad30802d94f371751f0c1df7cc2c47d`; the adjacent `.sha256` file supports checksum verification from `dist/`.
+- Previous November 16 package: `dist/backups/20261116/aiopsterm-0.1.4-linux-x86_64.AppImage`. Switching executables does not roll back user data; preserve a separate user-data backup before testing migrations.
+- Build and verification evidence: `dist/verification/20261118/`, including stage logs, the build driver, packaged E2E results, and compiled-output provenance. The packaged manifest matches all 41 output files and records a clean source tree at the revision above.
 
-Start the executable directly or open it in the file manager:
+When ready to switch after current tasks finish, start the executable directly or open it in the file manager:
 
 ```bash
 ./dist/aiopsterm-0.1.4-linux-x86_64.AppImage
 ```
 
-The full `build:linux:appimage` build passed, but its host-built native modules exceeded the Ubuntu 20.04 runtime baseline. The final package uses SQLite and PTY modules rebuilt with GCC 11 in the existing `aiopsterm-linux20-builder:gcc11` Ubuntu 20.04 image, followed by `electron-builder --linux AppImage --config electron-builder.yml`. No compatibility audit was bypassed. Future rebuilds must retain the documented Linux baseline; rebuilding native modules on a newer host can reintroduce this dependency.
+This build used the detached worktree `.cache/appimage-20261118` with its own dependency and output directories. It ran icon generation, owned Codex package validation, Cline sidecar compilation, and the full application build. SQLite and PTY modules were then rebuilt with GCC 11 in the existing `aiopsterm-linux20-builder:gcc11` Ubuntu 20.04 image, followed by `electron-builder --linux AppImage --config electron-builder.yml`. No compatibility audit was bypassed. Future rebuilds must retain the documented Linux baseline; rebuilding native modules on a newer host can reintroduce an incompatible runtime dependency.
 
-Final verification passed: 33 focused cases in `tests/package-config.test.ts` and `tests/packaged-pty-files.test.ts`; `npm run package:verify -- linux-appimage` (resource, native ABI/runtime baseline, startup/help/background smoke and AppImage launcher audits); and all 8 cases from `xvfb-run -a npm run test:e2e:packaged`. E2E coverage includes actual AppImage launches, control-command capability branches, local/Codex terminal startup, files, notification requests, scrollback and background-terminal capture with wrong-session rejection. These checks used isolated application data and did not replace the user's running application. Existing relevant cases were sufficient and were not changed.
+Final verification passed: 33 focused cases in `tests/package-config.test.ts` and `tests/packaged-pty-files.test.ts`; `npm run package:verify -- linux-appimage` (resource, native ABI/runtime baseline, startup/help/background smoke and AppImage launcher audits); and all 8 cases from `xvfb-run -a npm run test:e2e:packaged`. E2E coverage includes actual AppImage launches, control-command capability branches, local/Codex terminal startup, files, notification requests, scrollback and background-terminal capture with wrong-session rejection. Existing relevant cases were sufficient and were not changed.
+
+These checks used isolated application data. The running application and terminals were not restarted, and all 42 files in their existing `out/` directory retained their pre-build hashes. The new IM fixes are packaged but have not been loaded or tested against the user's running Feishu connection in this packaging pass.
 
 ## Terminal Recovery Verification
 
