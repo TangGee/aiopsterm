@@ -15,6 +15,7 @@ for (const theme of themes) {
     await desktop.page.reload()
     await expect(desktop.page.locator('html')).toHaveAttribute('data-theme-id', theme)
     await desktop.page.locator('[data-module-key="settings"]').click()
+    await expect(desktop.page.locator('[data-settings-key="imGateway"]')).toBeVisible()
     // Pin the viewport and fonts; screenshots are separated by operating system.
     await freeze()
     const shell = desktop.page.locator('.app-shell')
@@ -38,6 +39,7 @@ for (const theme of themes) {
     expect(restored.terminal).toMatchObject({ fontSize: 18, fontFamily: 'monospace' })
     await expect(desktop.page.locator('html')).toHaveAttribute('data-theme-id', theme)
     await desktop.page.locator('[data-module-key="settings"]').click()
+    await expect(desktop.page.locator('[data-settings-key="imGateway"]')).toBeVisible()
     await freeze()
     const after = await desktop.page.locator('.app-shell').screenshot({ animations: 'disabled' })
     await info.attach(`${theme}-after`, { body: after, contentType: 'image/png' })

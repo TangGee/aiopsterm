@@ -24,3 +24,5 @@ Telegram 和百度如流的协议已有自动化覆盖，但尚无本轮真实�
 本地发布准备记录位于 `.cache/release-publish/v0.1.4/`。只有通过签名后验证的产物才可标记为正式候选；既有 0.1.4 AppImage 测试包不代表三平台发布验收完成。运行中的应用和终端保持不动，待当前任务结束后再切换安装包。
 
 回归应覆盖 IM 权限和绑定、未知 slash 透传、按键和回车、消息排序与持续输出，以及实际打包应用的终端、Codex、文件和通知。相关自动化用例包括 `tests/im-gateway-*.test.ts`、`tests/package-config.test.ts`、`tests/packaged-pty-files.test.ts`、`tests/regression/local-signing.test.ts`、`tests/regression/release-gate.test.ts` 及 `tests/packaged-e2e/`；签名后的应用另执行项目发布回归。真实远程服务及平台联调的结果应单独记录。
+
+Linux 的 27 个主题设置页基线已同步新增的 IM 网关入口，重启前后均断言入口可见。逐图核对表明变化仅位于设置导航区域；截图阈值和重启布局一致性断言保持不变。该项维护不代表其他发布回归或跨平台签名已完成。
